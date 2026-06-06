@@ -1,0 +1,67 @@
+from app.dialog.prompts import PROMPTS
+from app.dialog.states import DialogueState
+from app.drivers.models import Driver
+
+
+def build_system_prompt() -> str:
+    return (
+        "Ты AI-менеджер таксопарка в WhatsApp. "
+        "Ты помогаешь водителю пройти регистрацию в таксопарк. "
+        "Общайся только на русском языке, кратко и по делу. "
+        "Нельзя придумывать данные. "
+        "Нужно строго вернуть JSON по заданной схеме. "
+        "State machine обязательна: нельзя перепрыгивать шаги без причины. "
+        "Если пользователь задает вопрос из базы знаний, ответь по базе знаний и не меняй шаг. "
+        "Если сообщение непонятно или данных не хватает, попроси уточнение и оставь текущий шаг. "
+        "Если пользователь подтверждает собранные данные, intent должен быть confirmation. "
+        "Если пользователь пишет исправления, intent должен быть correction, "
+        "а next_state должен указывать на шаг, который нужно переспросить. "
+        "Поля extracted_fields заполняй только тем, что явно удалось извлечь из сообщения. "
+        "Даты возвращай в формате YYYY-MM-DD. "
+        "Телефон возвращай в международном формате с плюсом."
+    )
+
+
+def build_user_prompt(
+    state: str,
+    message: str,
+    driver: Driver,
+    knowledge_base: dict[str, str],
+    allowed_states: list[str],
+) -> str:
+    kb_text = "\n\n".join(f"[{name}]\n{content}" for name, content in knowledge_base.items())
+    vehicle = driver.vehicle
+    current_prompt = PROMPTS.get(DialogueState(state), "")
+    return (
+        f"Текущее состояние: {state}\n"
+        f"Допустимые next_state: {', '.join(allowed_states)}\n"
+        f"Текущий обязательный вопрос: {current_prompt}\n"
+        "Уже собранные данные:\n"
+        f"- full_name: {driver.full_name or ''}\n"
+        f"- last_name: {driver.last_name or ''}\n"
+        f"- first_name: {driver.first_name or ''}\n"
+        f"- middle_name: {driver.middle_name or ''}\n"
+        f"- phone: {driver.phone or ''}\n"
+        f"- city: {driver.city or ''}\n"
+        f"- address: {driver.address or ''}\n"
+        f"- iin: {driver.iin or ''}\n"
+        f"- birth_date: {driver.birth_date or ''}\n"
+        f"- driving_experience_since: {driver.driving_experience_since or ''}\n"
+        f"- driver_license_number: {driver.driver_license_number or ''}\n"
+        f"- driver_license_issue_date: {driver.driver_license_issue_date or ''}\n"
+        f"- driver_license_expires_at: {driver.driver_license_expires_at or ''}\n"
+        f"- employment_type: {driver.employment_type or ''}\n"
+        f"- hired_at: {driver.hired_at or ''}\n"
+        f"- is_hearing_impaired: {driver.is_hearing_impaired or ''}\n"
+        f"- brand: {vehicle.brand if vehicle else ''}\n"
+        f"- model: {vehicle.model if vehicle else ''}\n"
+        f"- year: {vehicle.year if vehicle else ''}\n"
+        f"- plate_number: {vehicle.plate_number if vehicle else ''}\n"
+        f"- color: {vehicle.color if vehicle else ''}\n"
+        f"- vin: {vehicle.vin if vehicle else ''}\n\n"
+        f"Сообщение водителя:\n{message}\n\n"
+        "База знаний таксопарка:\n"
+        f"{kb_text}\n\n"
+        "Если сообщение относится к текущему шагу регистрации, извлеки поле и переведи на следующий шаг. "
+        "Если это FAQ, ответь по базе знаний и оставь next_state равным текущему state."
+    )

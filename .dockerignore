@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+debug_test.db
+debug_test_2.db
+debug_test_3.db
+postgres_data

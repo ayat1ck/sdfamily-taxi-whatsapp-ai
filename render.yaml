@@ -1,0 +1,94 @@
+services:
+  - type: web
+    name: sdfamily-taxi-app
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_HOST
+        sync: false
+      - key: STRICT_CONFIG
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sdfamily-taxi-db
+          property: connectionString
+      - key: AI_PROVIDER
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_API_BASE_URL
+        value: https://graph.facebook.com/v20.0
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
+        sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        sync: false
+      - key: GOOGLE_SHEETS_ID
+        sync: false
+      - key: GOOGLE_SHEETS_WORKSHEET_NAME
+        value: Applications
+      - key: GOOGLE_SHEETS_DELETION_WORKSHEET_NAME
+        value: DeletionRequests
+      - key: YANDEX_PARK_ID
+        sync: false
+      - key: YANDEX_CLIENT_ID
+        sync: false
+      - key: YANDEX_API_KEY
+        sync: false
+      - key: YANDEX_API_BASE_URL
+        value: https://fleet-api.taxi.yandex.net
+      - key: YANDEX_API_TIMEOUT_SECONDS
+        value: "30"
+      - key: YANDEX_DRIVER_PROFILE_WORK_RULE_ID
+        sync: false
+      - key: YANDEX_DRIVER_PROFILE_CATEGORY
+        value: B
+      - key: YANDEX_DRIVER_PROFILE_LICENSE_COUNTRY
+        value: kaz
+      - key: YANDEX_CAR_BRAND
+        sync: false
+      - key: YANDEX_CAR_MODEL
+        sync: false
+      - key: YANDEX_CAR_COLOR
+        sync: false
+      - key: YANDEX_CAR_YEAR
+        sync: false
+      - key: YANDEX_CAR_VIN
+        sync: false
+      - key: YANDEX_CAR_BODY_NUMBER
+        sync: false
+      - key: YANDEX_CAR_STS_NUMBER
+        sync: false
+      - key: YANDEX_CAR_LICENSE_PLATE
+        sync: false
+      - key: YANDEX_CAR_REAR_LICENSE_PLATE
+        sync: false
+      - key: YANDEX_CAR_REGISTRATION_CERTIFICATE
+        sync: false
+
+databases:
+  - name: sdfamily-taxi-db
+    plan: basic-256mb
+    region: frankfurt
+    databaseName: taxi_ai_manager
+    user: taxi_ai_manager
