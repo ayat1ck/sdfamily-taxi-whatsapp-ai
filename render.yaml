@@ -18,6 +18,8 @@ services:
       - key: PUBLIC_SITE_SUPPORT_EMAIL
         value: sdfamily@list.ru
       - key: PUBLIC_SITE_SUPPORT_PHONE
+        value: "+77071870107"
+      - key: PUBLIC_SITE_WHATSAPP_PHONE
         value: "+77766170666"
       - key: PUBLIC_SITE_ADDRESS
         value: Астана, Алматинский район, Балкантау 117
