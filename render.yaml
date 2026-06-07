@@ -14,13 +14,13 @@ services:
       - key: PUBLIC_SITE_BRAND_NAME
         value: SD Family Taxi
       - key: PUBLIC_SITE_LEGAL_NAME
-        sync: false
+        value: SD FAMILY, IP
       - key: PUBLIC_SITE_SUPPORT_EMAIL
-        sync: false
+        value: sdfamily@list.ru
       - key: PUBLIC_SITE_SUPPORT_PHONE
-        sync: false
+        value: "+77766170666"
       - key: PUBLIC_SITE_ADDRESS
-        sync: false
+        value: Астана, Алматинский район, Балкантау 117
       - key: PUBLIC_SITE_OKED
         value: 49320 Деятельность такси
       - key: PUBLIC_SITE_DESCRIPTION

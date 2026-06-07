@@ -2,8 +2,7 @@ import base64
 import json
 from functools import lru_cache
 
-from pydantic import Field
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,15 +13,14 @@ class Settings(BaseSettings):
     app_host: str = "http://localhost:8000"
     strict_config: bool = False
     database_url: str = Field(default="sqlite:///./taxi_ai_manager.db", alias="DATABASE_URL")
+
     public_site_brand_name: str = "SD Family Taxi"
     public_site_legal_name: str = "SD FAMILY, IP"
     public_site_support_email: str = "sdfamily@list.ru"
-    public_site_support_phone: str = "+77071870107"
-    public_site_address: str = "Astana, Kazakhstan"
+    public_site_support_phone: str = "+77766170666"
+    public_site_address: str = "Астана, Алматинский район, Балкантау 117"
     public_site_oked: str = "49320 Деятельность такси"
-    public_site_description: str = (
-        "Подключение водителей к таксопарку и регистрация через WhatsApp."
-    )
+    public_site_description: str = "Подключение водителей к таксопарку и регистрация через WhatsApp."
 
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
