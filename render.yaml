@@ -21,8 +21,10 @@ services:
         sync: false
       - key: PUBLIC_SITE_ADDRESS
         sync: false
+      - key: PUBLIC_SITE_OKED
+        value: 49320 Деятельность такси
       - key: PUBLIC_SITE_DESCRIPTION
-        value: Taxi driver onboarding and support platform with WhatsApp-based registration.
+        value: Подключение водителей к таксопарку и регистрация через WhatsApp.
       - key: STRICT_CONFIG
         value: "true"
       - key: DATABASE_URL

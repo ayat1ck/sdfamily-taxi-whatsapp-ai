@@ -16,11 +16,12 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///./taxi_ai_manager.db", alias="DATABASE_URL")
     public_site_brand_name: str = "SD Family Taxi"
     public_site_legal_name: str = "SD FAMILY, IP"
-    public_site_support_email: str = "support@example.com"
+    public_site_support_email: str = "sdfamily@list.ru"
     public_site_support_phone: str = "+77071870107"
     public_site_address: str = "Astana, Kazakhstan"
+    public_site_oked: str = "49320 Деятельность такси"
     public_site_description: str = (
-        "Taxi driver onboarding and support platform with WhatsApp-based registration."
+        "Подключение водителей к таксопарку и регистрация через WhatsApp."
     )
 
     openai_api_key: str | None = None
