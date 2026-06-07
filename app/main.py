@@ -10,6 +10,7 @@ from app.documents.models import Document
 from app.debug.router import router as debug_router
 from app.drivers.models import Driver
 from app.messages.models import Message
+from app.public_site import router as public_site_router
 from app.vehicles.models import Vehicle
 from app.utils.logger import get_logger
 from app.whatsapp.webhook import router as whatsapp_router
@@ -100,3 +101,4 @@ def get_application(application_id: int, db: Session = Depends(get_db)) -> dict[
 
 app.include_router(whatsapp_router)
 app.include_router(debug_router)
+app.include_router(public_site_router)

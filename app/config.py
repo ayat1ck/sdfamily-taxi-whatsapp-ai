@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     app_host: str = "http://localhost:8000"
     strict_config: bool = False
     database_url: str = Field(default="sqlite:///./taxi_ai_manager.db", alias="DATABASE_URL")
+    public_site_brand_name: str = "SD Family Taxi"
+    public_site_legal_name: str = "SD FAMILY, IP"
+    public_site_support_email: str = "support@example.com"
+    public_site_support_phone: str = "+7 700 000 00 00"
+    public_site_address: str = "Astana, Kazakhstan"
+    public_site_description: str = (
+        "Taxi driver onboarding and support platform with WhatsApp-based registration."
+    )
 
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
