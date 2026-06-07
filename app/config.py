@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     public_site_brand_name: str = "SD Family Taxi"
     public_site_legal_name: str = "SD FAMILY, IP"
     public_site_support_email: str = "support@example.com"
-    public_site_support_phone: str = "+7 700 000 00 00"
+    public_site_support_phone: str = "+77071870107"
     public_site_address: str = "Astana, Kazakhstan"
     public_site_description: str = (
         "Taxi driver onboarding and support platform with WhatsApp-based registration."
