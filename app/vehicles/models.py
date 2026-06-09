@@ -17,6 +17,7 @@ class Vehicle(Base):
     plate_number: Mapped[str | None] = mapped_column(String(32))
     color: Mapped[str | None] = mapped_column(String(64))
     vin: Mapped[str | None] = mapped_column(String(64))
+    service_class: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

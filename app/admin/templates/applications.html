@@ -85,6 +85,9 @@
             <label>Год
               <input id="vehicle-year" value="{{ vehicle.year if vehicle else '' }}">
             </label>
+            <label>Класс
+              <input id="vehicle-service-class" value="{{ vehicle.service_class if vehicle and vehicle.service_class else '' }}">
+            </label>
           </div>
           <label>Ошибка / комментарий
             <textarea id="application-error">{{ selected_application.yandex_error or "" }}</textarea>
@@ -96,6 +99,23 @@
           <div class="notice">
             Чат: <a href="/admin/chats/{{ driver.id if driver else 0 }}">{{ driver.whatsapp_phone if driver else "-" }}</a>
           </div>
+          <section>
+            <h4 class="section-title">Yandex payload preview</h4>
+            {% if yandex_preview %}
+              {% if yandex_preview.error %}
+                <div class="notice">{{ yandex_preview.error }}</div>
+              {% else %}
+                <div class="stack">
+                  <div><strong>Warnings</strong><pre>{{ yandex_preview.validation.warnings | tojson(indent=2) if yandex_preview.validation else "[]" }}</pre></div>
+                  <div><strong>Errors</strong><pre>{{ yandex_preview.validation.errors | tojson(indent=2) if yandex_preview.validation else "[]" }}</pre></div>
+                  <div><strong>Document refs</strong><pre>{{ yandex_preview.document_refs | tojson(indent=2) }}</pre></div>
+                  <div><strong>Driver payload</strong><pre>{{ yandex_preview.driver_payload | tojson(indent=2) }}</pre></div>
+                </div>
+              {% endif %}
+            {% else %}
+              <div class="muted">Preview недоступен.</div>
+            {% endif %}
+          </section>
         </div>
       {% else %}
         <div class="notice">Выберите заявку слева.</div>
@@ -122,7 +142,8 @@
           plate_number: document.getElementById("vehicle-plate").value,
           brand: document.getElementById("vehicle-brand").value,
           model: document.getElementById("vehicle-model").value,
-          year: document.getElementById("vehicle-year").value
+          year: document.getElementById("vehicle-year").value,
+          service_class: document.getElementById("vehicle-service-class").value
         }
       };
       await adminPost(`/admin/api/applications/${id}`, "PATCH", payload);

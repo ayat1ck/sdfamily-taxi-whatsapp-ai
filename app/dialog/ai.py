@@ -1,6 +1,9 @@
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 import json
+import re
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -17,6 +20,7 @@ from app.utils.validators import (
     looks_like_phone,
     normalize_employment_type,
     normalize_phone,
+    normalize_plate_number,
     normalize_text_token,
     parse_confirmation,
     parse_date,
@@ -40,14 +44,29 @@ class AIResult:
     extracted_fields: dict[str, str] = field(default_factory=dict)
     next_state: str | None = None
     confidence: float = 0.6
+    provider: str = "deterministic"
+    target_field: str | None = None
+    new_value_raw: str | None = None
+    normalized_fields: dict[str, str] = field(default_factory=dict)
+    reasoning_summary: str | None = None
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+    validation_errors: list[str] = field(default_factory=list)
+    suggested_next_action: str | None = None
+    raw_decision: dict[str, object] = field(default_factory=dict)
 
 
 class AIModelResponse(BaseModel):
-    reply: str
-    intent: str
+    reply: str = ""
+    intent: str = "clarification"
     extracted_fields: dict[str, str] = Field(default_factory=dict)
     next_state: str
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    target_field: str | None = None
+    new_value_raw: str | None = None
+    normalized_fields: dict[str, str] = Field(default_factory=dict)
+    reasoning_summary: str | None = None
+    suggested_next_action: str | None = None
 
 
 class AIService:
@@ -64,9 +83,21 @@ class AIService:
         try:
             current_state = DialogueState(state)
             llm_result = self.llm.respond(state, message, driver, self.knowledge_base)
-            return _normalize_llm_result(llm_result, current_state, fallback)
+            normalized = _normalize_llm_result(llm_result, current_state, fallback)
+            if normalized.fallback_used:
+                logger.warning(
+                    "AI normalization fallback for state=%s reason=%s raw=%s",
+                    state,
+                    normalized.fallback_reason,
+                    normalized.raw_decision,
+                )
+            return normalized
         except Exception as exc:
             logger.exception("AI provider failed for state %s: %s", state, exc)
+            fallback.fallback_used = True
+            fallback.fallback_reason = "provider_exception"
+            fallback.reasoning_summary = "fallback:provider_exception"
+            fallback.validation_errors.append(str(exc))
             return fallback
 
     def _build_llm_provider(self) -> "OpenAIProvider | GeminiProvider | None":
@@ -114,7 +145,7 @@ class OpenAIProvider:
         parsed = response.output_parsed
         if parsed is None:
             raise RuntimeError("OpenAI returned no parsed structured output")
-        return AIResult(parsed.reply, parsed.intent, dict(parsed.extracted_fields), parsed.next_state, parsed.confidence)
+        return _result_from_model(parsed, provider="openai")
 
 
 class GeminiProvider:
@@ -141,18 +172,18 @@ class GeminiProvider:
         )
         parsed = getattr(response, "parsed", None)
         if isinstance(parsed, AIModelResponse):
-            model = parsed
-        elif isinstance(parsed, dict):
-            model = _coerce_model_response(parsed, state)
-        else:
-            raw_text = getattr(response, "text", "") or ""
-            if not raw_text:
-                raise RuntimeError("Gemini returned no structured output")
-            try:
-                model = _coerce_model_response(json.loads(raw_text), state)
-            except json.JSONDecodeError:
-                model = AIModelResponse.model_validate_json(raw_text)
-        return AIResult(model.reply, model.intent, dict(model.extracted_fields), model.next_state, model.confidence)
+            return _result_from_model(parsed, provider="gemini")
+        if isinstance(parsed, dict):
+            return _result_from_model(_coerce_model_response(parsed, state), provider="gemini")
+
+        raw_text = getattr(response, "text", "") or ""
+        if not raw_text:
+            raise RuntimeError("Gemini returned no structured output")
+        try:
+            payload = json.loads(raw_text)
+            return _result_from_model(_coerce_model_response(payload, state), provider="gemini")
+        except json.JSONDecodeError:
+            return _result_from_model(AIModelResponse.model_validate_json(raw_text), provider="gemini")
 
 
 class DeterministicAIProvider:
@@ -162,13 +193,33 @@ class DeterministicAIProvider:
     def respond(self, state: str, message: str) -> AIResult:
         faq_answer = _match_faq(message, self.knowledge_base)
         if faq_answer:
-            return AIResult(faq_answer, "faq", {}, state, 0.9)
+            return AIResult(
+                faq_answer,
+                "faq",
+                {},
+                state,
+                0.9,
+                reasoning_summary="matched_kb:faq",
+                suggested_next_action=state,
+            )
 
         current_state = DialogueState(state)
         text = message.strip()
 
         if not text:
-            return AIResult(_clarification_reply(current_state), "clarification", {}, state, 0.4)
+            return AIResult(
+                _clarification_reply(current_state),
+                "clarification",
+                {},
+                state,
+                0.4,
+                reasoning_summary="clarification:empty_message",
+                suggested_next_action=state,
+            )
+
+        field_edit = _parse_confirm_field_edit(current_state, text)
+        if field_edit:
+            return field_edit
 
         if current_state == DialogueState.NEW:
             if _looks_like_full_name(text):
@@ -186,6 +237,8 @@ class DeterministicAIProvider:
                     extracted,
                     DialogueState.ASK_PHONE.value,
                     0.95,
+                    reasoning_summary="registration_extract:full_name",
+                    suggested_next_action=DialogueState.ASK_PHONE.value,
                 )
             if _looks_like_onboarding_intent(text):
                 return AIResult(
@@ -194,6 +247,8 @@ class DeterministicAIProvider:
                     {},
                     DialogueState.ASK_FULL_NAME.value,
                     0.75,
+                    reasoning_summary="onboarding_intent:new",
+                    suggested_next_action=DialogueState.ASK_FULL_NAME.value,
                 )
             return AIResult(
                 "Здравствуйте. Я могу рассказать об условиях парка и помочь пройти регистрацию. Если хотите начать, напишите ваше ФИО полностью.",
@@ -201,6 +256,8 @@ class DeterministicAIProvider:
                 {},
                 DialogueState.NEW.value,
                 0.55,
+                reasoning_summary="new_state:greeting",
+                suggested_next_action=DialogueState.ASK_FULL_NAME.value,
             )
 
         correction_state = _detect_correction_state(current_state, text)
@@ -211,6 +268,8 @@ class DeterministicAIProvider:
                 {},
                 correction_state.value,
                 0.85,
+                reasoning_summary=f"correction:{correction_state.value}",
+                suggested_next_action=correction_state.value,
             )
 
         if current_state == DialogueState.ASK_FULL_NAME:
@@ -223,17 +282,59 @@ class DeterministicAIProvider:
                     extracted["first_name"] = first_name
                 if middle_name:
                     extracted["middle_name"] = middle_name
-                return AIResult("", "registration", extracted, DialogueState.ASK_PHONE.value, 0.9)
-            return AIResult(_clarification_reply(current_state), "clarification", {}, state, 0.45)
+                return AIResult(
+                    "",
+                    "registration",
+                    extracted,
+                    DialogueState.ASK_PHONE.value,
+                    0.9,
+                    reasoning_summary="registration_extract:full_name",
+                    suggested_next_action=DialogueState.ASK_PHONE.value,
+                )
+            return AIResult(
+                _clarification_reply(current_state),
+                "clarification",
+                {},
+                state,
+                0.45,
+                reasoning_summary="clarification:full_name",
+                suggested_next_action=state,
+            )
 
         if current_state == DialogueState.ASK_PHONE and looks_like_phone(text):
-            return AIResult("", "registration", {"phone": normalize_phone(text)}, DialogueState.ASK_CITY.value, 0.95)
+            return AIResult(
+                "",
+                "registration",
+                {"phone": normalize_phone(text)},
+                DialogueState.ASK_CITY.value,
+                0.95,
+                normalized_fields={"phone": normalize_phone(text)},
+                reasoning_summary="registration_extract:phone",
+                suggested_next_action=DialogueState.ASK_CITY.value,
+            )
         if current_state == DialogueState.ASK_IIN and looks_like_iin(text):
-            return AIResult("", "registration", {"iin": text}, DialogueState.ASK_BIRTH_DATE.value, 0.95)
+            return AIResult(
+                "",
+                "registration",
+                {"iin": re.sub(r"\D+", "", text)},
+                DialogueState.ASK_BIRTH_DATE.value,
+                0.95,
+                reasoning_summary="registration_extract:iin",
+                suggested_next_action=DialogueState.ASK_BIRTH_DATE.value,
+            )
         if current_state == DialogueState.ASK_CAR_YEAR:
             year = parse_year(text)
             if year:
-                return AIResult("", "registration", {"year": str(year)}, DialogueState.ASK_CAR_PLATE.value, 0.9)
+                return AIResult(
+                    "",
+                    "registration",
+                    {"year": str(year)},
+                    DialogueState.ASK_CAR_PLATE.value,
+                    0.9,
+                    normalized_fields={"year": str(year)},
+                    reasoning_summary="registration_extract:year",
+                    suggested_next_action=DialogueState.ASK_CAR_PLATE.value,
+                )
 
         date_steps = {
             DialogueState.ASK_BIRTH_DATE: ("birth_date", DialogueState.ASK_DRIVING_EXPERIENCE_SINCE.value),
@@ -252,41 +353,140 @@ class DeterministicAIProvider:
             parsed_date = parse_date(text)
             if parsed_date:
                 field_name, next_state = date_steps[current_state]
-                return AIResult("", "registration", {field_name: parsed_date}, next_state, 0.9)
+                return AIResult(
+                    "",
+                    "registration",
+                    {field_name: parsed_date},
+                    next_state,
+                    0.9,
+                    normalized_fields={field_name: parsed_date},
+                    reasoning_summary=f"registration_extract:{field_name}",
+                    suggested_next_action=next_state,
+                )
 
         if current_state == DialogueState.ASK_HEARING_IMPAIRED:
             parsed = parse_yes_no(text)
             if parsed is not None:
+                value = str(parsed).lower()
                 return AIResult(
                     "",
                     "registration",
-                    {"is_hearing_impaired": str(parsed).lower()},
+                    {"is_hearing_impaired": value},
                     DialogueState.ASK_DRIVER_LICENSE_FRONT.value,
                     0.9,
+                    normalized_fields={"is_hearing_impaired": value},
+                    reasoning_summary="registration_extract:is_hearing_impaired",
+                    suggested_next_action=DialogueState.ASK_DRIVER_LICENSE_FRONT.value,
                 )
 
         if current_state == DialogueState.CONFIRM_DATA and parse_confirmation(text):
-            return AIResult("", "confirmation", {}, DialogueState.READY_TO_SEND_YANDEX.value, 0.99)
+            return AIResult(
+                "",
+                "confirmation",
+                {},
+                DialogueState.READY_TO_SEND_YANDEX.value,
+                0.99,
+                reasoning_summary="confirmation:confirm_data",
+                suggested_next_action=DialogueState.READY_TO_SEND_YANDEX.value,
+            )
 
         extracted = _extract_safe_field_answer(current_state, text)
         if extracted:
-            return AIResult("", "registration", extracted, _default_next_state(current_state).value, 0.8)
+            next_state = _default_next_state(current_state).value
+            return AIResult(
+                "",
+                "registration",
+                extracted,
+                next_state,
+                0.8,
+                normalized_fields=extracted.copy(),
+                reasoning_summary=f"registration_extract:{','.join(sorted(extracted))}",
+                suggested_next_action=next_state,
+            )
 
-        return AIResult(_clarification_reply(current_state), "clarification", {}, state, 0.4)
+        return AIResult(
+            _clarification_reply(current_state),
+            "clarification",
+            {},
+            state,
+            0.4,
+            reasoning_summary="clarification:unrecognized_message",
+            suggested_next_action=state,
+        )
+
+
+def _result_from_model(model: AIModelResponse, *, provider: str) -> AIResult:
+    return AIResult(
+        reply=model.reply,
+        intent=model.intent,
+        extracted_fields=dict(model.extracted_fields),
+        next_state=model.next_state,
+        confidence=model.confidence,
+        provider=provider,
+        target_field=model.target_field,
+        new_value_raw=model.new_value_raw,
+        normalized_fields=dict(model.normalized_fields),
+        reasoning_summary=model.reasoning_summary,
+        suggested_next_action=model.suggested_next_action,
+        raw_decision=model.model_dump(),
+    )
 
 
 def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallback: AIResult) -> AIResult:
+    normalized = AIResult(**asdict(result))
+    normalized.reply = _cleanup_text(normalized.reply)
+    normalized.new_value_raw = _cleanup_text(normalized.new_value_raw)
+    normalized.reasoning_summary = normalized.reasoning_summary or f"llm:{normalized.intent}"
+    normalized.suggested_next_action = normalized.suggested_next_action or normalized.next_state or current_state.value
+
+    if normalized.intent not in {"registration", "confirmation", "correction", "faq", "help", "smalltalk", "clarification", "field_edit"}:
+        return _fallback_from(fallback, result, "unknown_intent")
+
     try:
-        next_state = DialogueState(result.next_state or current_state.value)
+        next_state = DialogueState(normalized.next_state or current_state.value)
     except ValueError:
-        return fallback
+        return _fallback_from(fallback, result, "invalid_next_state")
+
     if next_state.value not in set(_allowed_next_states(current_state)):
-        return fallback
-    if not result.reply and result.intent not in {"registration", "confirmation", "correction"}:
-        return fallback
-    if result.intent == "registration" and not _is_safe_registration_result(result, current_state):
-        return fallback
-    return result
+        return _fallback_from(fallback, result, "disallowed_next_state")
+
+    normalized.next_state = next_state.value
+    normalized.normalized_fields = _normalize_fields_map(normalized.normalized_fields or normalized.extracted_fields)
+    normalized.extracted_fields = _normalize_fields_map(normalized.extracted_fields)
+
+    if normalized.intent not in {"registration", "confirmation", "correction", "field_edit"} and not normalized.reply:
+        return _fallback_from(fallback, result, "missing_reply")
+
+    if normalized.intent == "registration" and not _is_safe_registration_result(normalized, current_state):
+        return _fallback_from(fallback, result, "unsafe_registration_fields")
+
+    if normalized.intent == "field_edit":
+        if current_state != DialogueState.CONFIRM_DATA:
+            return _fallback_from(fallback, result, "field_edit_outside_confirm")
+        if not normalized.target_field:
+            return _fallback_from(fallback, result, "field_edit_missing_target")
+        normalized_edit, errors = _normalize_field_edit(normalized.target_field, normalized.new_value_raw or "")
+        if errors:
+            return _fallback_from(fallback, result, "field_edit_invalid_value", errors)
+        normalized.normalized_fields = normalized_edit
+        normalized.extracted_fields = normalized_edit
+        normalized.reply = normalized.reply or "Хорошо, данные обновил. Проверьте сводку еще раз."
+        normalized.reasoning_summary = normalized.reasoning_summary or f"field_edit:{normalized.target_field}"
+        normalized.suggested_next_action = "confirm_data"
+        normalized.next_state = DialogueState.CONFIRM_DATA.value
+
+    return normalized
+
+
+def _fallback_from(fallback: AIResult, raw_result: AIResult, reason: str, errors: list[str] | None = None) -> AIResult:
+    resolved = AIResult(**asdict(fallback))
+    resolved.fallback_used = True
+    resolved.fallback_reason = reason
+    resolved.reasoning_summary = f"fallback:{reason}"
+    resolved.validation_errors = list(errors or [])
+    resolved.raw_decision = raw_result.raw_decision or _trace_payload(raw_result)
+    resolved.provider = raw_result.provider or resolved.provider
+    return resolved
 
 
 def _allowed_next_states(current_state: DialogueState) -> list[str]:
@@ -359,9 +559,7 @@ def _looks_like_full_name(value: str) -> bool:
         return False
     if any(part.isdigit() for part in parts):
         return False
-    if len(parts[0]) < 2 or len(parts[1]) < 2:
-        return False
-    return True
+    return len(parts[0]) >= 2 and len(parts[1]) >= 2
 
 
 def _looks_like_onboarding_intent(value: str) -> bool:
@@ -439,14 +637,14 @@ def _extract_safe_field_answer(current_state: DialogueState, text: str) -> dict[
     if current_state == DialogueState.ASK_CAR_MODEL and _looks_like_short_entity_answer(text):
         return {"model": text.strip()}
     if current_state == DialogueState.ASK_CAR_PLATE and _looks_like_plate_answer(text):
-        return {"plate_number": text.strip()}
+        return {"plate_number": normalize_plate_number(text)}
     if current_state == DialogueState.ASK_CAR_COLOR and _looks_like_short_entity_answer(text):
         return {"color": text.strip()}
     if current_state == DialogueState.ASK_DRIVER_LICENSE_NUMBER and _looks_like_license_number(text):
         return {"driver_license_number": text.strip()}
     if current_state == DialogueState.ASK_EMPLOYMENT_TYPE:
         normalized = normalize_employment_type(text)
-        if normalized in {"штатный", "самозанятый"} or normalized != text.strip():
+        if normalized in {"штатный", "самозанятый", "ип"} or normalized != text.strip():
             return {"employment_type": normalized}
     return {}
 
@@ -468,9 +666,10 @@ def _clarification_reply(current_state: DialogueState) -> str:
         DialogueState.ASK_DRIVER_LICENSE_NUMBER: "Напишите серию и номер водительского удостоверения.",
         DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_EMPLOYMENT_TYPE: "Укажите условие работы: штатный или самозанятый.",
+        DialogueState.ASK_EMPLOYMENT_TYPE: "Укажите условие работы: штатный, самозанятый или ИП.",
         DialogueState.ASK_HIRED_AT: "Укажите дату принятия в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_HEARING_IMPAIRED: "Ответьте коротко: да или нет.",
+        DialogueState.CONFIRM_DATA: "Напишите, какое поле исправить и на какое значение. Например: исправь город на Алматы.",
     }
     return custom.get(current_state, PROMPTS.get(current_state, "Пожалуйста, ответьте на текущий вопрос."))
 
@@ -514,9 +713,7 @@ def _looks_like_address_answer(text: str) -> bool:
 def _looks_like_short_entity_answer(text: str) -> bool:
     normalized = normalize_text_token(text)
     parts = [part for part in normalized.split() if part]
-    if not (1 <= len(parts) <= 4):
-        return False
-    return len(normalized) <= 32
+    return 1 <= len(parts) <= 4 and len(normalized) <= 32
 
 
 def _looks_like_plate_answer(text: str) -> bool:
@@ -530,13 +727,37 @@ def _looks_like_license_number(text: str) -> bool:
 
 
 def _coerce_model_response(payload: dict[str, object], current_state: str) -> AIModelResponse:
-    normalized = dict(payload)
-    normalized.setdefault("reply", "")
-    normalized.setdefault("intent", "clarification")
-    normalized.setdefault("extracted_fields", {})
-    normalized.setdefault("next_state", current_state)
-    normalized.setdefault("confidence", 0.6)
+    normalized = {str(key): value for key, value in dict(payload).items()}
+    normalized["reply"] = _cleanup_text(str(normalized.get("reply", "")))
+    normalized["intent"] = str(normalized.get("intent", "clarification")).strip() or "clarification"
+    normalized["extracted_fields"] = _coerce_dict_str(normalized.get("extracted_fields"))
+    normalized["normalized_fields"] = _coerce_dict_str(normalized.get("normalized_fields"))
+    normalized["next_state"] = str(normalized.get("next_state", current_state)).strip() or current_state
+    normalized["confidence"] = _coerce_confidence(normalized.get("confidence"))
+    normalized["target_field"] = _cleanup_text(str(normalized["target_field"])) if normalized.get("target_field") is not None else None
+    normalized["new_value_raw"] = _cleanup_text(str(normalized["new_value_raw"])) if normalized.get("new_value_raw") is not None else None
+    normalized["reasoning_summary"] = _cleanup_text(str(normalized["reasoning_summary"])) if normalized.get("reasoning_summary") is not None else None
+    normalized["suggested_next_action"] = _cleanup_text(str(normalized["suggested_next_action"])) if normalized.get("suggested_next_action") is not None else None
     return AIModelResponse.model_validate(normalized)
+
+
+def _coerce_confidence(value: object) -> float:
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, resolved))
+
+
+def _coerce_dict_str(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    resolved: dict[str, str] = {}
+    for key, item in value.items():
+        if key is None or item is None:
+            continue
+        resolved[str(key)] = _cleanup_text(str(item))
+    return resolved
 
 
 def _detect_correction_state(current_state: DialogueState, text: str) -> DialogueState | None:
@@ -572,6 +793,393 @@ def _detect_correction_state(current_state: DialogueState, text: str) -> Dialogu
     if current_state == DialogueState.CONFIRM_DATA:
         return DialogueState.ASK_FULL_NAME
     return None
+
+
+def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResult | None:
+    if current_state != DialogueState.CONFIRM_DATA:
+        return None
+    normalized = normalize_text_token(text)
+    if not any(marker in normalized for marker in ("исправ", "измени", "поменяй", "замени")):
+        return None
+
+    marker_match = re.match(r"^(исправь|исправить|измени|измени|поменяй|замени)\s+(.*)$", normalized)
+    if not marker_match:
+        return None
+    tail = marker_match.group(2).strip()
+    raw_tail = text.strip()[len(text.strip().split(maxsplit=1)[0]) :].strip()
+
+    target_field = None
+    field_phrase = ""
+    raw_value = ""
+    if " на " in tail:
+        field_phrase, _, value_part = tail.partition(" на ")
+        target_field = _resolve_field_name(field_phrase)
+        raw_value = _extract_raw_value(raw_tail)
+    else:
+        target_field = _resolve_field_name(tail)
+
+    if not target_field:
+        return AIResult(
+            "Напишите, какое именно поле исправить. Например: исправь город на Алматы.",
+            "clarification",
+            {},
+            DialogueState.CONFIRM_DATA.value,
+            0.6,
+            reasoning_summary="clarification:unknown_edit_field",
+            suggested_next_action="confirm_data",
+        )
+
+    if not raw_value:
+        return AIResult(
+            f"Понял. Напишите новое значение для поля «{_human_field_label(target_field)}».",
+            "field_edit",
+            {},
+            DialogueState.CONFIRM_DATA.value,
+            0.82,
+            target_field=target_field,
+            reasoning_summary=f"field_edit:{target_field}",
+            validation_errors=["missing_new_value"],
+            suggested_next_action="confirm_data",
+        )
+
+    normalized_fields, errors = _normalize_field_edit(target_field, raw_value)
+    if errors:
+        return AIResult(
+            _field_edit_error_reply(target_field),
+            "field_edit",
+            {},
+            DialogueState.CONFIRM_DATA.value,
+            0.82,
+            target_field=target_field,
+            new_value_raw=raw_value,
+            reasoning_summary=f"field_edit:{target_field}",
+            validation_errors=errors,
+            suggested_next_action="confirm_data",
+        )
+
+    return AIResult(
+        "Хорошо, сразу обновляю это поле.",
+        "field_edit",
+        normalized_fields.copy(),
+        DialogueState.CONFIRM_DATA.value,
+        0.93,
+        target_field=target_field,
+        new_value_raw=raw_value,
+        normalized_fields=normalized_fields,
+        reasoning_summary=f"field_edit:{target_field}",
+        suggested_next_action="confirm_data",
+    )
+
+
+def _extract_raw_value(raw_tail: str) -> str:
+    separators = (" на ", " : ", ": ")
+    lowered = raw_tail.lower()
+    for separator in separators:
+        index = lowered.find(separator)
+        if index != -1:
+            return raw_tail[index + len(separator) :].strip().strip("\"' ")
+    return ""
+
+
+def _resolve_field_name(value: str) -> str | None:
+    normalized = normalize_text_token(value)
+    mapping: list[tuple[tuple[str, ...], str]] = [
+        (("фио", "полное имя"), "full_name"),
+        (("фамилия",), "last_name"),
+        (("имя",), "first_name"),
+        (("отчество",), "middle_name"),
+        (("телефон", "контактный номер", "номер телефона"), "phone"),
+        (("город",), "city"),
+        (("адрес",), "address"),
+        (("иин",), "iin"),
+        (("дата рождения", "рождение"), "birth_date"),
+        (("стаж", "водительский стаж", "опыт"), "driving_experience_since"),
+        (("номер прав", "права", "ву", "водительское удостоверение"), "driver_license_number"),
+        (("дата выдачи", "выдано"), "driver_license_issue_date"),
+        (("срок действия", "действует до"), "driver_license_expires_at"),
+        (("условие работы", "тип занятости"), "employment_type"),
+        (("дата принятия",), "hired_at"),
+        (("слабослышащий",), "is_hearing_impaired"),
+        (("марка", "бренд"), "brand"),
+        (("модель",), "model"),
+        (("год", "год выпуска"), "year"),
+        (("госномер", "номер машины", "номер авто", "номер автомобиля"), "plate_number"),
+        (("цвет",), "color"),
+        (("vin", "вин"), "vin"),
+        (("класс", "класс авто", "тариф"), "service_class"),
+    ]
+    for markers, field_name in mapping:
+        if any(marker in normalized for marker in markers):
+            return field_name
+    return None
+
+
+def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResult | None:
+    if current_state != DialogueState.CONFIRM_DATA:
+        return None
+    normalized = normalize_text_token(text)
+    if not any(marker in normalized for marker in ("исправ", "измени", "поменяй", "замени")):
+        return None
+
+    marker_match = re.match(r"^(исправь|исправить|измени|поменяй|замени)\s+(.*)$", normalized)
+    if not marker_match:
+        return None
+
+    tail = marker_match.group(2).strip()
+    raw_tail = text.strip()[len(text.strip().split(maxsplit=1)[0]) :].strip()
+
+    if " на " in tail:
+        field_phrase, _, _ = tail.partition(" на ")
+        target_field = _resolve_field_name(field_phrase)
+        raw_value = _extract_raw_value(raw_tail)
+    else:
+        target_field = _resolve_field_name(tail)
+        raw_value = ""
+
+    if not target_field:
+        return AIResult(
+            "Напишите, какое именно поле исправить. Например: исправь город на Алматы.",
+            "clarification",
+            {},
+            DialogueState.CONFIRM_DATA.value,
+            0.6,
+            reasoning_summary="clarification:unknown_edit_field",
+            suggested_next_action="confirm_data",
+        )
+
+    if not raw_value:
+        return AIResult(
+            f"Понял. Напишите новое значение для поля «{_human_field_label(target_field)}».",
+            "field_edit",
+            {},
+            DialogueState.CONFIRM_DATA.value,
+            0.82,
+            target_field=target_field,
+            reasoning_summary=f"field_edit:{target_field}",
+            validation_errors=["missing_new_value"],
+            suggested_next_action="confirm_data",
+        )
+
+    normalized_fields, errors = _normalize_field_edit(target_field, raw_value)
+    if errors:
+        return AIResult(
+            _field_edit_error_reply(target_field),
+            "field_edit",
+            {},
+            DialogueState.CONFIRM_DATA.value,
+            0.82,
+            target_field=target_field,
+            new_value_raw=raw_value,
+            reasoning_summary=f"field_edit:{target_field}",
+            validation_errors=errors,
+            suggested_next_action="confirm_data",
+        )
+
+    return AIResult(
+        "Хорошо, сразу обновляю это поле.",
+        "field_edit",
+        normalized_fields.copy(),
+        DialogueState.CONFIRM_DATA.value,
+        0.93,
+        target_field=target_field,
+        new_value_raw=raw_value,
+        normalized_fields=normalized_fields,
+        reasoning_summary=f"field_edit:{target_field}",
+        suggested_next_action="confirm_data",
+    )
+
+
+def _extract_raw_value(raw_tail: str) -> str:
+    lowered = raw_tail.lower()
+    for separator in (" на ", " : ", ": "):
+        index = lowered.find(separator)
+        if index != -1:
+            return raw_tail[index + len(separator) :].strip().strip("\"' ")
+    return ""
+
+
+def _resolve_field_name(value: str) -> str | None:
+    normalized = normalize_text_token(value)
+    mapping: list[tuple[tuple[str, ...], str]] = [
+        (("фио", "полное имя"), "full_name"),
+        (("фамилия",), "last_name"),
+        (("имя",), "first_name"),
+        (("отчество",), "middle_name"),
+        (("телефон", "контактный номер", "номер телефона"), "phone"),
+        (("город",), "city"),
+        (("адрес",), "address"),
+        (("иин",), "iin"),
+        (("дата рождения", "рождение"), "birth_date"),
+        (("стаж", "водительский стаж", "опыт"), "driving_experience_since"),
+        (("номер прав", "права", "ву", "водительское удостоверение"), "driver_license_number"),
+        (("дата выдачи", "выдано"), "driver_license_issue_date"),
+        (("срок действия", "действует до"), "driver_license_expires_at"),
+        (("условие работы", "тип занятости"), "employment_type"),
+        (("дата принятия",), "hired_at"),
+        (("слабослышащий",), "is_hearing_impaired"),
+        (("марка", "бренд"), "brand"),
+        (("модель",), "model"),
+        (("год", "год выпуска"), "year"),
+        (("госномер", "номер машины", "номер авто", "номер автомобиля"), "plate_number"),
+        (("цвет",), "color"),
+        (("vin", "вин"), "vin"),
+        (("класс", "класс авто", "тариф"), "service_class"),
+    ]
+    for markers, field_name in mapping:
+        if any(marker in normalized for marker in markers):
+            return field_name
+    return None
+
+
+def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, str], list[str]]:
+    value = raw_value.strip().strip("\"'")
+    if not value:
+        return {}, ["empty_value"]
+
+    if target_field == "full_name":
+        if not _looks_like_full_name(value):
+            return {}, ["invalid_full_name"]
+        last_name, first_name, middle_name = split_full_name(value)
+        payload = {"full_name": value}
+        if last_name:
+            payload["last_name"] = last_name
+        if first_name:
+            payload["first_name"] = first_name
+        if middle_name:
+            payload["middle_name"] = middle_name
+        return payload, []
+    if target_field in {"last_name", "first_name", "middle_name", "city", "address", "brand", "model", "color", "vin"}:
+        return {target_field: value}, []
+    if target_field == "phone":
+        if not looks_like_phone(value):
+            return {}, ["invalid_phone"]
+        return {"phone": normalize_phone(value)}, []
+    if target_field == "iin":
+        digits = re.sub(r"\D+", "", value)
+        if len(digits) != 12:
+            return {}, ["invalid_iin"]
+        return {"iin": digits}, []
+    if target_field in {"birth_date", "driving_experience_since", "driver_license_issue_date", "driver_license_expires_at", "hired_at"}:
+        parsed = parse_date(value)
+        if not parsed:
+            return {}, ["invalid_date"]
+        return {target_field: parsed}, []
+    if target_field == "year":
+        year = parse_year(value)
+        if not year:
+            return {}, ["invalid_year"]
+        return {"year": str(year)}, []
+    if target_field == "plate_number":
+        if not _looks_like_plate_answer(value):
+            return {}, ["invalid_plate"]
+        return {"plate_number": normalize_plate_number(value)}, []
+    if target_field == "driver_license_number":
+        if not _looks_like_license_number(value):
+            return {}, ["invalid_license_number"]
+        return {"driver_license_number": value.replace(" ", "")}, []
+    if target_field == "employment_type":
+        normalized = normalize_employment_type(value)
+        if normalized.lower() not in {"штатный", "самозанятый", "ип"} and normalized == value:
+            return {}, ["invalid_employment_type"]
+        return {"employment_type": normalized}, []
+    if target_field == "is_hearing_impaired":
+        parsed = parse_yes_no(value)
+        if parsed is None:
+            return {}, ["invalid_yes_no"]
+        return {"is_hearing_impaired": str(parsed).lower()}, []
+    if target_field == "service_class":
+        return {"service_class": normalize_text_token(value)}, []
+    return {}, ["unsupported_field"]
+
+
+def _field_edit_error_reply(target_field: str) -> str:
+    examples = {
+        "phone": "Например: исправь телефон на +77071234567.",
+        "city": "Например: измени город на Алматы.",
+        "address": "Например: исправь адрес на Балкантау 117.",
+        "iin": "Например: исправь ИИН на 070404550345.",
+        "birth_date": "Например: исправь дату рождения на 04.04.2007.",
+        "driver_license_issue_date": "Например: измени дату выдачи на 17.03.2015.",
+        "driver_license_expires_at": "Например: измени срок действия на 17.03.2030.",
+        "plate_number": "Например: исправь госномер на 004YAT03.",
+    }
+    return f"Не удалось обновить поле «{_human_field_label(target_field)}». Проверьте формат. {examples.get(target_field, '')}".strip()
+
+
+def _human_field_label(target_field: str) -> str:
+    return {
+        "full_name": "ФИО",
+        "last_name": "фамилия",
+        "first_name": "имя",
+        "middle_name": "отчество",
+        "phone": "телефон",
+        "city": "город",
+        "address": "адрес",
+        "iin": "ИИН",
+        "birth_date": "дата рождения",
+        "driving_experience_since": "водительский стаж",
+        "driver_license_number": "номер ВУ",
+        "driver_license_issue_date": "дата выдачи ВУ",
+        "driver_license_expires_at": "срок действия ВУ",
+        "employment_type": "условие работы",
+        "hired_at": "дата принятия",
+        "is_hearing_impaired": "слабослышащий водитель",
+        "brand": "марка авто",
+        "model": "модель авто",
+        "year": "год выпуска",
+        "plate_number": "госномер",
+        "color": "цвет авто",
+        "vin": "VIN",
+        "service_class": "класс авто",
+    }.get(target_field, target_field)
+
+
+def _normalize_fields_map(fields: dict[str, str]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for key, value in fields.items():
+        if value is None:
+            continue
+        cleaned = _cleanup_text(str(value))
+        if key == "phone":
+            cleaned = normalize_phone(cleaned)
+        elif key in {"iin"}:
+            cleaned = re.sub(r"\D+", "", cleaned)
+        elif key in {"birth_date", "driving_experience_since", "driver_license_issue_date", "driver_license_expires_at", "hired_at"}:
+            cleaned = parse_date(cleaned) or cleaned
+        elif key == "year":
+            parsed_year = parse_year(cleaned)
+            cleaned = str(parsed_year) if parsed_year else cleaned
+        elif key == "plate_number":
+            cleaned = normalize_plate_number(cleaned)
+        elif key == "employment_type":
+            cleaned = normalize_employment_type(cleaned)
+        elif key == "is_hearing_impaired":
+            parsed = parse_yes_no(cleaned)
+            if parsed is not None:
+                cleaned = str(parsed).lower()
+        normalized[key] = cleaned
+    return normalized
+
+
+def _cleanup_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return re.sub(r"\s+", " ", value.replace("\u00a0", " ")).strip()
+
+
+def _trace_payload(result: AIResult) -> dict[str, object]:
+    return {
+        "intent": result.intent,
+        "next_state": result.next_state,
+        "confidence": result.confidence,
+        "reply": result.reply,
+        "target_field": result.target_field,
+        "new_value_raw": result.new_value_raw,
+        "extracted_fields": result.extracted_fields,
+        "normalized_fields": result.normalized_fields,
+        "reasoning_summary": result.reasoning_summary,
+        "suggested_next_action": result.suggested_next_action,
+    }
 
 
 @lru_cache

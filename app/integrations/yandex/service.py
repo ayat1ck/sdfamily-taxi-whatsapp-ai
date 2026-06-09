@@ -14,6 +14,11 @@ class YandexSubmissionService:
 
     def submit(self, db: Session, driver: Driver, application: Application) -> Application:
         payload = map_driver_to_yandex(driver)
+        validation = self.validate_payload(payload)
+        if validation["errors"]:
+            raise ValueError(
+                "Yandex payload validation failed: " + "; ".join(str(item) for item in validation["errors"])
+            )
         try:
             result = self.client.submit_driver(payload)
         except YandexPartialSubmissionError as exc:
@@ -39,4 +44,56 @@ class YandexSubmissionService:
 
     def preview(self, driver: Driver) -> dict[str, object]:
         payload = map_driver_to_yandex(driver)
-        return self.client.build_submission_preview(payload)
+        validation = self.validate_payload(payload)
+        preview = self.client.build_submission_preview(payload)
+        preview["validation"] = validation
+        preview["document_refs"] = payload.document_refs or []
+        return preview
+
+    def validate_payload(self, payload) -> dict[str, list[str]]:
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        required_driver_fields = {
+            "last_name": payload.last_name,
+            "first_name": payload.first_name,
+            "phone": payload.phone,
+            "address": payload.address,
+            "iin": payload.iin,
+            "birth_date": payload.birth_date,
+            "driving_experience_since": payload.driving_experience_since,
+            "driver_license_number": payload.driver_license_number,
+            "driver_license_issue_date": payload.driver_license_issue_date,
+            "driver_license_expires_at": payload.driver_license_expires_at,
+            "employment_type": payload.employment_type,
+            "hired_at": payload.hired_at,
+        }
+        required_vehicle_fields = {
+            "car_brand": payload.car_brand,
+            "car_model": payload.car_model,
+            "car_year": payload.car_year,
+            "plate_number": payload.plate_number,
+            "color": payload.color,
+        }
+
+        for field_name, value in required_driver_fields.items():
+            if not value:
+                errors.append(f"missing:{field_name}")
+        for field_name, value in required_vehicle_fields.items():
+            if not value:
+                errors.append(f"missing:{field_name}")
+
+        if payload.driver_license_issue_date and payload.driver_license_expires_at:
+            if payload.driver_license_expires_at <= payload.driver_license_issue_date:
+                errors.append("invalid:driver_license_expires_at_before_issue_date")
+        if payload.birth_date and payload.driving_experience_since and payload.driving_experience_since < payload.birth_date:
+            errors.append("invalid:driving_experience_before_birth_date")
+        if payload.document_refs:
+            warnings.append(f"documents_as_refs:{len(payload.document_refs)}")
+        else:
+            warnings.append("documents_missing")
+
+        if payload.employment_type and payload.employment_type not in {"штатный", "самозанятый"}:
+            warnings.append("employment_type_unrecognized")
+
+        return {"errors": errors, "warnings": warnings}

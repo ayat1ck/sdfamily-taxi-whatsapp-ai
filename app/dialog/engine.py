@@ -2,10 +2,12 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.ai_traces.service import upsert_message_ai_trace
 from app.applications.service import get_or_create_application, set_application_status
+from app.audit.service import create_audit_log
 from app.config import get_settings
 from app.conversation_events.service import create_conversation_event
-from app.dialog.ai import get_ai_service
+from app.dialog.ai import AIResult, get_ai_service
 from app.dialog.prompts import (
     DOCUMENT_STATE_MAP,
     PROMPTS,
@@ -51,6 +53,49 @@ YANDEX_PRO_SUCCESS_KEYWORDS = {
     "зашёл",
 }
 
+SUPPORT_FLOWS = {
+    "yandex_login": {
+        "intro": "Помогу со входом в Яндекс Про. Пройдем шаги по порядку.",
+        "reply": "Сейчас разберем вход в Яндекс Про пошагово.",
+        "completed": "Отлично. Если вход выполнен и приложение открылось, можете выходить на линию. Если что-то еще мешает, напишите, что именно.",
+        "steps": [
+            "Откройте Яндекс Про и проверьте, что входите по тому же номеру телефона, который указывали в анкете.",
+            "Если приложение просит код, дождитесь SMS и введите код подтверждения без ошибок.",
+            "После входа проверьте, открывается ли главный экран водителя и видны ли рабочие разделы.",
+        ],
+    },
+    "yandex_sms": {
+        "intro": "Помогу, если не приходит SMS от Яндекс Про.",
+        "reply": "Проверим по шагам, почему не приходит SMS.",
+        "completed": "Если код пришел и вы вошли, напишите, если нужна помощь со следующим шагом.",
+        "steps": [
+            "Проверьте, что номер телефона введен без ошибки и совпадает с номером, который вы указали при регистрации.",
+            "Подождите 1-2 минуты и запросите код еще раз. Иногда SMS приходит не сразу.",
+            "Проверьте связь, перезапустите телефон или отключите режим полета, затем снова запросите код.",
+        ],
+    },
+    "account_inactive": {
+        "intro": "Помогу проверить, почему аккаунт в Яндекс Про не активен.",
+        "reply": "Разберем статус аккаунта по шагам.",
+        "completed": "Если статус аккаунта обновился и можно продолжать, напишите, если нужна помощь дальше.",
+        "steps": [
+            "Закройте и заново откройте Яндекс Про, затем проверьте, изменился ли статус аккаунта.",
+            "Убедитесь, что регистрация в парке уже завершена и вы входите по правильному номеру.",
+            "Если статус не меняется, подготовьте короткое описание ошибки или текст на экране для менеджера.",
+        ],
+    },
+    "go_online": {
+        "intro": "Помогу выйти на линию в Яндекс Про.",
+        "reply": "Идем по шагам, чтобы выйти на линию.",
+        "completed": "Готово. Если линия открылась, можете начинать работу. Если что-то мешает принять заказ, напишите, что именно.",
+        "steps": [
+            "Откройте Яндекс Про и убедитесь, что вход выполнен под вашим рабочим номером.",
+            "Проверьте, что в приложении заполнены обязательные шаги и нет блокирующих предупреждений.",
+            "Нажмите кнопку выхода на линию и дождитесь, пока приложение покажет активный рабочий статус.",
+        ],
+    },
+}
+
 
 class DialogueEngine:
     def __init__(self) -> None:
@@ -89,16 +134,27 @@ class DialogueEngine:
         state = DialogueState(driver.state or DialogueState.NEW.value)
         command_reply = self._handle_special_commands(db, driver, application, incoming.text or "")
         if command_reply:
+            self._record_system_trace(
+                db,
+                incoming_message.id,
+                driver,
+                state.value,
+                incoming.text or "",
+                intent="special_command",
+                reply=command_reply,
+                reasoning_summary="special_command",
+            )
             return self._respond(db, driver, application, command_reply)
 
         if state == DialogueState.COMPLETED:
-            return self._handle_registered_driver_support(db, driver, application, incoming.text or "")
+            return self._handle_registered_driver_support(db, driver, application, incoming.text or "", incoming_message.id)
 
         if self._is_yandex_pro_followup_state(state):
-            return self._handle_yandex_pro_followup(db, driver, application, state, incoming.text or "")
+            return self._handle_yandex_pro_followup(db, driver, application, state, incoming.text or "", incoming_message.id)
 
         if state == DialogueState.NEW:
             ai_result = self.ai.respond(state.value, incoming.text or "", driver)
+            self._record_ai_trace(db, incoming_message.id, driver, state.value, incoming.text or "", ai_result)
             if ai_result.intent in {"faq", "help", "smalltalk"}:
                 return self._respond(db, driver, application, self._format_new_state_assistant_reply(ai_result.reply))
 
@@ -128,10 +184,13 @@ class DialogueEngine:
             return self._respond(db, driver, application, application.yandex_error or DUPLICATE_REJECTED_REPLY)
 
         ai_result = self.ai.respond(state.value, incoming.text or "", driver)
+        self._record_ai_trace(db, incoming_message.id, driver, state.value, incoming.text or "", ai_result)
         if ai_result.intent in {"faq", "help", "smalltalk"}:
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
         if ai_result.intent == "clarification":
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
+        if ai_result.intent == "field_edit":
+            return self._handle_field_edit(db, driver, application, state, ai_result)
         if ai_result.intent == "correction":
             correction_state = DialogueState(ai_result.next_state or state.value)
             update_driver_state(db, driver, correction_state.value)
@@ -368,6 +427,174 @@ class DialogueEngine:
 
         return None
 
+    def _handle_field_edit(self, db: Session, driver: Driver, application, state: DialogueState, ai_result: AIResult) -> str:
+        if state != DialogueState.CONFIRM_DATA:
+            return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply or PROMPTS[state]))
+
+        if ai_result.validation_errors or not ai_result.normalized_fields:
+            if ai_result.fallback_used:
+                driver.fallback_count = (driver.fallback_count or 0) + 1
+                db.add(driver)
+            return self._respond(db, driver, application, ai_result.reply or "Не понял, что именно нужно изменить.")
+
+        duplicate_state = state
+        if "iin" in ai_result.normalized_fields:
+            duplicate_state = DialogueState.ASK_IIN
+        elif "plate_number" in ai_result.normalized_fields:
+            duplicate_state = DialogueState.ASK_CAR_PLATE
+        duplicate_reply = self._check_duplicate_constraints(db, driver, application, duplicate_state, ai_result.normalized_fields)
+        if duplicate_reply:
+            return self._respond(db, driver, application, duplicate_reply)
+
+        changed_fields = self._apply_extracted_fields(driver, ai_result.normalized_fields, db, application=application, audit_action="field_corrected_by_user", actor_type="driver")
+        create_conversation_event(
+            db,
+            driver,
+            "field_corrected_by_user",
+            {
+                "target_field": ai_result.target_field,
+                "changed_fields": changed_fields,
+                "message": ai_result.new_value_raw,
+            },
+        )
+        update_driver_state(db, driver, DialogueState.CONFIRM_DATA.value)
+        set_application_status(db, application, "confirming_data")
+        return self._respond(
+            db,
+            driver,
+            application,
+            f"Готово, обновил поле «{self._field_label(ai_result.target_field)}». Проверьте данные еще раз.\n\n{self._build_confirmation(driver)}",
+        )
+
+    def _record_ai_trace(
+        self,
+        db: Session,
+        message_id: int,
+        driver: Driver,
+        state_before: str,
+        input_text: str,
+        ai_result: AIResult,
+    ) -> None:
+        incoming_message = next((message for message in driver.messages if message.id == message_id), None)
+        if incoming_message is None:
+            return
+        if ai_result.fallback_used:
+            driver.fallback_count = (driver.fallback_count or 0) + 1
+            db.add(driver)
+        upsert_message_ai_trace(
+            db,
+            message=incoming_message,
+            driver_id=driver.id,
+            state_before=state_before,
+            input_text=input_text,
+            provider=ai_result.provider,
+            intent=ai_result.intent,
+            confidence=ai_result.confidence,
+            next_state=ai_result.next_state,
+            reply_preview=ai_result.reply,
+            extracted_fields_json=ai_result.extracted_fields or None,
+            normalized_fields_json=ai_result.normalized_fields or ai_result.extracted_fields or None,
+            reasoning_summary=ai_result.reasoning_summary,
+            fallback_used=ai_result.fallback_used,
+            fallback_reason=ai_result.fallback_reason,
+            validation_errors_json=ai_result.validation_errors or None,
+            suggested_next_action=ai_result.suggested_next_action,
+            raw_decision_json=ai_result.raw_decision or None,
+            final_decision_json=self._trace_payload(ai_result),
+        )
+
+    def _record_system_trace(
+        self,
+        db: Session,
+        message_id: int,
+        driver: Driver,
+        state_before: str,
+        input_text: str,
+        *,
+        intent: str,
+        reply: str,
+        reasoning_summary: str,
+    ) -> None:
+        incoming_message = next((message for message in driver.messages if message.id == message_id), None)
+        if incoming_message is None:
+            return
+        upsert_message_ai_trace(
+            db,
+            message=incoming_message,
+            driver_id=driver.id,
+            state_before=state_before,
+            input_text=input_text,
+            provider="system",
+            intent=intent,
+            confidence=1.0,
+            next_state=state_before,
+            reply_preview=reply,
+            extracted_fields_json=None,
+            normalized_fields_json=None,
+            reasoning_summary=reasoning_summary,
+            fallback_used=False,
+            fallback_reason=None,
+            validation_errors_json=None,
+            suggested_next_action=state_before,
+            raw_decision_json={"intent": intent, "reply": reply},
+            final_decision_json={"intent": intent, "reply": reply},
+        )
+
+    def _handle_support_flow(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        message_text: str,
+        *,
+        source_state: str,
+    ) -> str | None:
+        normalized = normalize_text_token(message_text)
+        topic = _detect_support_topic(normalized, driver.active_support_topic)
+        if not topic:
+            return None
+
+        flow = SUPPORT_FLOWS[topic]
+        progress_words = {"сделал", "дальше", "готово", "получилось", "ок", "ok"}
+        problem_words = {"не получается", "не вышло", "не работает", "ошибка", "не приходит", "не активен", "неактивен"}
+
+        if driver.active_support_topic != topic:
+            driver.active_support_topic = topic
+            driver.active_support_step = "0"
+            driver.support_context_json = {"source_state": source_state}
+            db.add(driver)
+            create_conversation_event(db, driver, "support_flow_started", {"topic": topic})
+            return flow["intro"] + "\n\n" + self._support_step_text(topic, 0)
+
+        current_step = int(driver.active_support_step or "0")
+        if any(word in normalized for word in problem_words):
+            driver.requires_attention = True
+            driver.active_support_step = str(current_step)
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_needs_help")
+            create_conversation_event(db, driver, "support_escalated_to_manager", {"topic": topic, "message": message_text})
+            return "Понял. Передаю вопрос менеджеру. Пока менеджер проверяет, опишите коротко, на каком именно шаге возникла проблема."
+
+        if any(word in normalized for word in progress_words):
+            next_step = current_step + 1
+            if next_step >= len(flow["steps"]):
+                driver.active_support_topic = None
+                driver.active_support_step = None
+                driver.support_context_json = None
+                db.add(driver)
+                create_conversation_event(db, driver, "support_flow_completed", {"topic": topic})
+                return flow["completed"]
+            driver.active_support_step = str(next_step)
+            db.add(driver)
+            return self._support_step_text(topic, next_step)
+
+        return flow["reply"] + "\n\n" + self._support_step_text(topic, current_step)
+
+    def _support_step_text(self, topic: str, step_index: int) -> str:
+        flow = SUPPORT_FLOWS[topic]
+        step = flow["steps"][step_index]
+        return f"Шаг {step_index + 1}: {step}\n\nКогда сделаете, напишите: сделал. Если не получается, напишите, что именно не выходит."
+
     def _is_yandex_pro_followup_state(self, state: DialogueState) -> bool:
         return state in {
             DialogueState.ASK_YANDEX_PRO_LOGIN,
@@ -381,13 +608,22 @@ class DialogueEngine:
         application,
         state: DialogueState,
         message_text: str,
+        incoming_message_id: int,
     ) -> str:
         normalized = normalize_text_token(message_text)
         ai_result = self.ai.respond(state.value, message_text, driver)
+        self._record_ai_trace(db, incoming_message_id, driver, state.value, message_text, ai_result)
+
+        support_reply = self._handle_support_flow(db, driver, application, message_text, source_state=state.value)
+        if support_reply:
+            return self._respond(db, driver, application, support_reply)
 
         if _looks_like_yandex_pro_success(normalized):
             update_driver_state(db, driver, DialogueState.COMPLETED.value)
             driver.requires_attention = False
+            driver.active_support_topic = None
+            driver.active_support_step = None
+            driver.support_context_json = None
             db.add(driver)
             set_application_status(db, application, "completed", yandex_status="driver_login_confirmed")
             create_conversation_event(db, driver, "yandex_pro_login_confirmed")
@@ -436,8 +672,25 @@ class DialogueEngine:
 
         return self._respond(db, driver, application, self._build_yandex_pro_start_reply(driver))
 
-    def _handle_registered_driver_support(self, db: Session, driver: Driver, application, message_text: str) -> str:
+    def _handle_registered_driver_support(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        message_text: str,
+        incoming_message_id: int,
+    ) -> str:
         ai_result = self.ai.respond(DialogueState.COMPLETED.value, message_text, driver)
+        self._record_ai_trace(db, incoming_message_id, driver, DialogueState.COMPLETED.value, message_text, ai_result)
+        support_reply = self._handle_support_flow(
+            db,
+            driver,
+            application,
+            message_text,
+            source_state=DialogueState.COMPLETED.value,
+        )
+        if support_reply:
+            return self._respond(db, driver, application, support_reply)
         if ai_result.reply:
             return self._respond(db, driver, application, self._format_registered_driver_reply(ai_result.reply))
         return self._respond(
@@ -521,6 +774,9 @@ class DialogueEngine:
         driver.deletion_requested_at = None
         driver.paused_at = None
         driver.closed_at = None
+        driver.active_support_topic = None
+        driver.active_support_step = None
+        driver.support_context_json = None
         update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
 
         if driver.vehicle:
@@ -566,18 +822,57 @@ class DialogueEngine:
         index = order.index(state)
         return order[min(index + 1, len(order) - 1)]
 
-    def _apply_extracted_fields(self, driver: Driver, fields: dict[str, str], db: Session) -> None:
+    def _apply_extracted_fields(
+        self,
+        driver: Driver,
+        fields: dict[str, str],
+        db: Session,
+        *,
+        application=None,
+        audit_action: str | None = None,
+        actor_type: str = "shared_admin",
+    ) -> list[str]:
         vehicle = get_or_create_vehicle(db, driver)
+        changed_fields: list[str] = []
         for key, value in fields.items():
             if key == "plate_number":
                 value = normalize_plate_number(value)
             if hasattr(driver, key):
+                old_value = getattr(driver, key)
                 setattr(driver, key, value)
+                if old_value != value:
+                    changed_fields.append(key)
+                    if audit_action:
+                        create_audit_log(
+                            db,
+                            driver=driver,
+                            application=application,
+                            field_name=key,
+                            old_value=str(old_value) if old_value is not None else None,
+                            new_value=str(value) if value is not None else None,
+                            action_type=audit_action,
+                            actor_type=actor_type,
+                        )
             elif hasattr(vehicle, key):
+                old_value = getattr(vehicle, key)
                 setattr(vehicle, key, value)
+                if old_value != value:
+                    changed_fields.append(key)
+                    if audit_action:
+                        create_audit_log(
+                            db,
+                            driver=driver,
+                            application=application,
+                            field_name=f"vehicle.{key}",
+                            old_value=str(old_value) if old_value is not None else None,
+                            new_value=str(value) if value is not None else None,
+                            action_type=audit_action,
+                            actor_type=actor_type,
+                        )
         db.add(driver)
         db.add(vehicle)
         db.flush()
+        return changed_fields
 
     def _build_confirmation(self, driver: Driver) -> str:
         vehicle = driver.vehicle
@@ -659,6 +954,52 @@ class DialogueEngine:
         if tail in base_reply:
             return base_reply
         return f"{base_reply}\n\n{tail}"
+
+    def _field_label(self, field_name: str | None) -> str:
+        labels = {
+            "full_name": "ФИО",
+            "last_name": "фамилия",
+            "first_name": "имя",
+            "middle_name": "отчество",
+            "phone": "телефон",
+            "city": "город",
+            "address": "адрес",
+            "iin": "ИИН",
+            "birth_date": "дата рождения",
+            "driving_experience_since": "водительский стаж",
+            "driver_license_number": "номер ВУ",
+            "driver_license_issue_date": "дата выдачи ВУ",
+            "driver_license_expires_at": "срок действия ВУ",
+            "employment_type": "условие работы",
+            "hired_at": "дата принятия",
+            "is_hearing_impaired": "слабослышащий водитель",
+            "brand": "марка авто",
+            "model": "модель авто",
+            "year": "год авто",
+            "plate_number": "госномер",
+            "color": "цвет авто",
+            "vin": "VIN",
+            "service_class": "класс авто",
+        }
+        return labels.get(field_name or "", field_name or "поле")
+
+    def _trace_payload(self, ai_result: AIResult) -> dict[str, object]:
+        return {
+            "reply": ai_result.reply,
+            "intent": ai_result.intent,
+            "next_state": ai_result.next_state,
+            "confidence": ai_result.confidence,
+            "target_field": ai_result.target_field,
+            "new_value_raw": ai_result.new_value_raw,
+            "extracted_fields": ai_result.extracted_fields,
+            "normalized_fields": ai_result.normalized_fields,
+            "reasoning_summary": ai_result.reasoning_summary,
+            "fallback_used": ai_result.fallback_used,
+            "fallback_reason": ai_result.fallback_reason,
+            "validation_errors": ai_result.validation_errors,
+            "suggested_next_action": ai_result.suggested_next_action,
+            "provider": ai_result.provider,
+        }
 
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
         create_message(
@@ -785,6 +1126,27 @@ def _looks_like_yandex_pro_issue(normalized: str) -> bool:
 
 def _looks_like_yandex_pro_success(normalized: str) -> bool:
     return normalized in YANDEX_PRO_SUCCESS_KEYWORDS
+
+
+def _detect_support_topic(normalized: str, active_topic: str | None) -> str | None:
+    if active_topic and normalized in {"сделал", "дальше", "готово", "получилось", "ок", "ok"}:
+        return active_topic
+    if active_topic and any(
+        token in normalized
+        for token in {"не получается", "не вышло", "не работает", "ошибка", "не приходит", "не активен", "неактивен"}
+    ):
+        return active_topic
+
+    topic_keywords = {
+        "yandex_login": {"не могу войти", "не могу зайти", "войти в яндекс", "логин", "вход", "авторизация"},
+        "yandex_sms": {"смс", "sms", "код не приходит", "не приходит код", "не пришел код", "не пришла смс"},
+        "account_inactive": {"не активен", "неактивен", "аккаунт не активен", "профиль не активен"},
+        "go_online": {"выйти на линию", "как выйти на линию", "на линию", "включить линию", "как начать работать"},
+    }
+    for topic, keywords in topic_keywords.items():
+        if any(keyword in normalized for keyword in keywords):
+            return topic
+    return active_topic if active_topic and normalized in {"сделал", "дальше", "готово", "получилось"} else None
 
 
 def _application_status_from_state(state: DialogueState) -> str:

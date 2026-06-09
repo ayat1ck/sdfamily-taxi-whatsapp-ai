@@ -26,3 +26,4 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     driver = relationship("Driver", back_populates="messages")
+    ai_trace = relationship("MessageAITrace", back_populates="message", uselist=False, cascade="all, delete-orphan")

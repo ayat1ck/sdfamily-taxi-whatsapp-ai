@@ -1,6 +1,7 @@
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
+from app.ai_traces.models import MessageAITrace
 from app.admin.models import AdminAccount
 from app.applications.models import Application
 from app.audit.models import ApplicationAuditLog
@@ -24,6 +25,13 @@ TABLE_COLUMN_DEFS: dict[str, dict[str, str]] = {
         "deletion_requested_at": "{datetime_type}",
         "paused_at": "{datetime_type}",
         "closed_at": "{datetime_type}",
+        "active_support_topic": "VARCHAR(64)",
+        "active_support_step": "VARCHAR(64)",
+        "support_context_json": "{json_type}",
+        "fallback_count": "INTEGER DEFAULT 0 NOT NULL",
+    },
+    "vehicles": {
+        "service_class": "VARCHAR(64)",
     },
     "messages": {
         "sender_type": "VARCHAR(32) DEFAULT 'customer' NOT NULL",
@@ -48,12 +56,14 @@ TABLE_COLUMN_DEFS: dict[str, dict[str, str]] = {
 def ensure_runtime_schema(engine: Engine) -> None:
     with engine.begin() as conn:
         datetime_type = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+        json_type = "JSONB" if engine.dialect.name == "postgresql" else "TEXT"
         for table in [
             Driver.__table__,
             Vehicle.__table__,
             Document.__table__,
             Application.__table__,
             Message.__table__,
+            MessageAITrace.__table__,
             AdminAccount.__table__,
             ConversationEvent.__table__,
             ApplicationAuditLog.__table__,
@@ -67,5 +77,5 @@ def ensure_runtime_schema(engine: Engine) -> None:
             for column_name, column_def in column_defs.items():
                 if column_name in existing:
                     continue
-                resolved_def = column_def.format(datetime_type=datetime_type)
+                resolved_def = column_def.format(datetime_type=datetime_type, json_type=json_type)
                 conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {resolved_def}"))

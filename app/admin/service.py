@@ -66,6 +66,7 @@ VEHICLE_FIELDS = {
     "plate_number",
     "color",
     "vin",
+    "service_class",
 }
 
 
@@ -109,7 +110,7 @@ def get_driver_or_404(db: Session, driver_id: int) -> Driver:
         Driver,
         driver_id,
         options=[
-            selectinload(Driver.messages),
+            selectinload(Driver.messages).selectinload(Message.ai_trace),
             selectinload(Driver.documents),
             selectinload(Driver.vehicle),
             selectinload(Driver.applications),
@@ -133,7 +134,7 @@ def driver_query(filters: ChatFilters) -> Select[tuple[Driver]]:
     query = (
         select(Driver)
         .options(
-            selectinload(Driver.messages),
+            selectinload(Driver.messages).selectinload(Message.ai_trace),
             selectinload(Driver.documents),
             selectinload(Driver.vehicle),
             selectinload(Driver.applications),
@@ -141,6 +142,7 @@ def driver_query(filters: ChatFilters) -> Select[tuple[Driver]]:
         )
         .outerjoin(Application, Application.driver_id == Driver.id)
         .outerjoin(Vehicle, Vehicle.driver_id == Driver.id)
+        .outerjoin(Message, Message.driver_id == Driver.id)
     )
     if filters.search:
         pattern = f"%{filters.search.strip()}%"
@@ -154,6 +156,7 @@ def driver_query(filters: ChatFilters) -> Select[tuple[Driver]]:
                 Vehicle.plate_number.ilike(pattern),
                 Vehicle.brand.ilike(pattern),
                 Vehicle.model.ilike(pattern),
+                Message.text.ilike(pattern),
             )
         )
     if filters.status:
@@ -213,6 +216,7 @@ def dashboard_stats(db: Session) -> dict[str, Any]:
 
 
 def serialize_message(message: Message) -> dict[str, Any]:
+    trace = message.ai_trace
     return {
         "id": message.id,
         "direction": message.direction,
@@ -226,6 +230,27 @@ def serialize_message(message: Message) -> dict[str, Any]:
         "error_text": message.error_text,
         "created_at": message.created_at.isoformat() if message.created_at else None,
         "is_read_by_admin": message.is_read_by_admin,
+        "ai_trace": {
+            "provider": trace.provider,
+            "state_before": trace.state_before,
+            "input_text": trace.input_text,
+            "intent": trace.intent,
+            "confidence": trace.confidence,
+            "next_state": trace.next_state,
+            "reply_preview": trace.reply_preview,
+            "extracted_fields_json": trace.extracted_fields_json,
+            "normalized_fields_json": trace.normalized_fields_json,
+            "reasoning_summary": trace.reasoning_summary,
+            "fallback_used": trace.fallback_used,
+            "fallback_reason": trace.fallback_reason,
+            "validation_errors_json": trace.validation_errors_json,
+            "suggested_next_action": trace.suggested_next_action,
+            "raw_decision_json": trace.raw_decision_json,
+            "final_decision_json": trace.final_decision_json,
+            "created_at": trace.created_at.isoformat() if trace.created_at else None,
+        }
+        if trace
+        else None,
     }
 
 
@@ -246,6 +271,9 @@ def serialize_driver_summary(driver: Driver) -> dict[str, Any]:
         "requires_attention": driver.requires_attention,
         "duplicate_flag": driver.duplicate_flag,
         "assigned_manager_name": driver.assigned_manager_name,
+        "active_support_topic": driver.active_support_topic,
+        "active_support_step": driver.active_support_step,
+        "fallback_count": driver.fallback_count,
     }
 
 

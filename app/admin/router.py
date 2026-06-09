@@ -55,6 +55,7 @@ from app.database.session import get_db
 from app.documents.models import Document
 from app.drivers.models import Driver
 from app.integration_jobs.models import IntegrationJob
+from app.integrations.yandex.service import YandexSubmissionService
 from app.whatsapp.media import WhatsAppMediaClient
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -107,6 +108,12 @@ def _chat_page_context(db: Session, request: Request, selected_driver: Driver | 
     filters = _chat_filters_from_request(request)
     drivers = list_drivers(db, filters)
     selected_application = get_driver_application(selected_driver) if selected_driver else None
+    yandex_preview = None
+    if selected_driver:
+        try:
+            yandex_preview = YandexSubmissionService().preview(selected_driver)
+        except Exception as exc:
+            yandex_preview = {"error": str(exc)}
     statuses = distinct_values(
         app.status for driver in drivers for app in driver.applications
     )
@@ -121,6 +128,7 @@ def _chat_page_context(db: Session, request: Request, selected_driver: Driver | 
         drivers=drivers,
         selected_driver=selected_driver,
         selected_application=selected_application,
+        yandex_preview=yandex_preview,
         statuses=statuses,
         states=states,
         yandex_statuses=yandex_statuses,
@@ -131,6 +139,12 @@ def _application_page_context(db: Session, request: Request, selected_applicatio
     status_filter = request.query_params.get("status", "")
     applications = list_applications(db, status_filter=status_filter)
     statuses = distinct_values(application.status for application in applications)
+    yandex_preview = None
+    if selected_application and selected_application.driver:
+        try:
+            yandex_preview = YandexSubmissionService().preview(selected_application.driver)
+        except Exception as exc:
+            yandex_preview = {"error": str(exc)}
     return admin_template_context(
         request,
         nav="applications",
@@ -138,6 +152,7 @@ def _application_page_context(db: Session, request: Request, selected_applicatio
         selected_application=selected_application,
         status_filter=status_filter,
         statuses=statuses,
+        yandex_preview=yandex_preview,
     )
 
 
