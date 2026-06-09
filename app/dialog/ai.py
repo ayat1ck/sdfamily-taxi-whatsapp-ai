@@ -86,7 +86,7 @@ class AIService:
         self.llm = self._build_llm_provider()
 
     def respond(self, state: str, message: str, driver: Driver) -> AIResult:
-        fallback = self.deterministic.respond(state, message)
+        fallback = self.deterministic.respond(state, message, driver)
         if self.llm is None:
             return fallback
         try:
@@ -199,7 +199,7 @@ class DeterministicAIProvider:
     def __init__(self, knowledge_base: dict[str, str]) -> None:
         self.knowledge_base = knowledge_base
 
-    def respond(self, state: str, message: str) -> AIResult:
+    def respond(self, state: str, message: str, driver: Driver) -> AIResult:
         faq_answer = _match_faq(message, self.knowledge_base)
         if faq_answer:
             return AIResult(
