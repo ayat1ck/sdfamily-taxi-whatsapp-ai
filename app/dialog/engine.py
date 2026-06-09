@@ -96,12 +96,8 @@ class DialogueEngine:
 
         if state == DialogueState.NEW:
             ai_result = self.ai.respond(state.value, incoming.text or "", driver)
-            if ai_result.intent == "faq":
-                reply = (
-                    f"{ai_result.reply}\n\n"
-                    "Если захотите сразу начать регистрацию, напишите ваше ФИО полностью."
-                )
-                return self._respond(db, driver, application, reply)
+            if ai_result.intent in {"faq", "help", "smalltalk"}:
+                return self._respond(db, driver, application, self._format_new_state_assistant_reply(ai_result.reply))
 
             create_conversation_event(db, driver, "started_onboarding")
             set_application_status(db, application, "collecting_data")
@@ -129,10 +125,10 @@ class DialogueEngine:
             return self._respond(db, driver, application, application.yandex_error or DUPLICATE_REJECTED_REPLY)
 
         ai_result = self.ai.respond(state.value, incoming.text or "", driver)
-        if ai_result.intent == "faq":
-            return self._respond(db, driver, application, ai_result.reply)
+        if ai_result.intent in {"faq", "help", "smalltalk"}:
+            return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
         if ai_result.intent == "clarification":
-            return self._respond(db, driver, application, ai_result.reply)
+            return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
 
         duplicate_reply = self._check_duplicate_constraints(db, driver, application, state, ai_result.extracted_fields)
         if duplicate_reply:
@@ -597,6 +593,20 @@ class DialogueEngine:
     def _build_yandex_pro_install_reply(self, driver: Driver) -> str:
         contact_phone = driver.phone or driver.whatsapp_phone
         return YANDEX_PRO_INSTALL_TEMPLATE.format(phone=contact_phone)
+
+    def _format_new_state_assistant_reply(self, base_reply: str) -> str:
+        return (
+            f"{base_reply}\n\n"
+            "Если захотите сразу начать регистрацию, напишите ваше ФИО полностью."
+        )
+
+    def _format_in_flow_assistant_reply(self, state: DialogueState, base_reply: str) -> str:
+        reminder = PROMPTS.get(state, "")
+        if not reminder:
+            return base_reply
+        if base_reply.strip() == reminder.strip():
+            return base_reply
+        return f"{base_reply}\n\nТекущий шаг регистрации: {reminder}"
 
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
         create_message(
