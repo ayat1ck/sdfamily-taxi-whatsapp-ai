@@ -330,7 +330,11 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Отлично. Зафиксировал, что вы вошли в Яндекс Про. Если дальше появится вопрос по работе или приложению, напишите сюда.",
+                (
+                    "Отлично, вход в Яндекс Про зафиксировал. Вы уже можете выходить на линию.\n"
+                    "Если нужен совет по работе, заявке или приложению, пишите сюда. Мы на связи.\n"
+                    f"Адрес офиса: {self.settings.public_site_address}"
+                ),
             )
 
         if _looks_like_yandex_pro_install_request(normalized):
@@ -522,7 +526,19 @@ class DialogueEngine:
 
     def _build_yandex_pro_start_reply(self, driver: Driver) -> str:
         contact_phone = driver.phone or driver.whatsapp_phone
-        return YANDEX_PRO_START_TEMPLATE.format(phone=contact_phone)
+        office_address = self.settings.public_site_address
+        greeting_name = driver.first_name or driver.full_name or "водитель"
+        return (
+            f"{greeting_name}, спасибо, заявка уже отправлена в парк.\n\n"
+            f"{YANDEX_PRO_START_TEMPLATE.format(phone=contact_phone)}\n\n"
+            "Когда закончите вход, напишите: Вошел.\n"
+            "Если приложение не скачалось, напишите: Не скачал.\n"
+            "Если что-то не получается, просто опишите проблему - мы поможем дальше.\n\n"
+            "После успешной регистрации приглашаем вас в офис. За регистрацию вы получите подарочный бокс: зарядку 3 в 1, держатель для телефона и салфетку.\n"
+            "Если вы работаете в бизнес-классе, раз в неделю вам полагается блок воды.\n"
+            "Наши постоянные водители могут бесплатно пользоваться сухим туманом.\n"
+            f"Адрес офиса: {office_address}"
+        )
 
     def _build_yandex_pro_install_reply(self, driver: Driver) -> str:
         contact_phone = driver.phone or driver.whatsapp_phone
