@@ -34,6 +34,8 @@ class DialogueState(StrEnum):
     READY_TO_SEND_YANDEX = "ready_to_send_yandex"
     SENDING_TO_YANDEX = "sending_to_yandex"
     SENT_TO_YANDEX = "sent_to_yandex"
+    ASK_YANDEX_PRO_LOGIN = "ask_yandex_pro_login"
+    ASK_YANDEX_PRO_PROBLEM_DETAILS = "ask_yandex_pro_problem_details"
     YANDEX_ERROR = "yandex_error"
     DUPLICATE_REJECTED = "duplicate_rejected"
     COMPLETED = "completed"

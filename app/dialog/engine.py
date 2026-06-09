@@ -6,7 +6,15 @@ from app.applications.service import get_or_create_application, set_application_
 from app.config import get_settings
 from app.conversation_events.service import create_conversation_event
 from app.dialog.ai import get_ai_service
-from app.dialog.prompts import DOCUMENT_STATE_MAP, PROMPTS
+from app.dialog.prompts import (
+    DOCUMENT_STATE_MAP,
+    PROMPTS,
+    STATUS_COLLECTING_DATA_TEMPLATE,
+    STATUS_FALLBACK_TEMPLATE,
+    STATUS_REPLIES,
+    YANDEX_PRO_INSTALL_TEMPLATE,
+    YANDEX_PRO_START_TEMPLATE,
+)
 from app.dialog.states import DialogueState
 from app.documents.service import upsert_document
 from app.drivers.models import Driver
@@ -27,6 +35,20 @@ DUPLICATE_REJECTED_REPLY = (
     "Похоже, такая регистрация уже существует в системе. "
     "Повторная регистрация остановлена. Напишите менеджеру парка для проверки."
 )
+
+YANDEX_PRO_SUCCESS_KEYWORDS = {
+    "вошел",
+    "вошёл",
+    "voshyol",
+    "voshel",
+    "voshol",
+    "gotovo",
+    "готово",
+    "получилось",
+    "авторизовался",
+    "зашел",
+    "зашёл",
+}
 
 
 class DialogueEngine:
@@ -68,6 +90,9 @@ class DialogueEngine:
         if command_reply:
             return self._respond(db, driver, application, command_reply)
 
+        if self._is_yandex_pro_followup_state(state):
+            return self._handle_yandex_pro_followup(db, driver, application, state, incoming.text or "")
+
         if state == DialogueState.NEW:
             create_conversation_event(db, driver, "started_onboarding")
             update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
@@ -101,10 +126,11 @@ class DialogueEngine:
             self._respond(db, driver, application, PROMPTS[DialogueState.READY_TO_SEND_YANDEX])
             try:
                 self.yandex.submit(db, driver, application)
-                update_driver_state(db, driver, DialogueState.COMPLETED.value)
-                set_application_status(db, application, "completed", yandex_status="sent_to_yandex")
+                update_driver_state(db, driver, DialogueState.ASK_YANDEX_PRO_LOGIN.value)
+                set_application_status(db, application, "sent_to_yandex", yandex_status="sent_to_yandex")
                 create_conversation_event(db, driver, "submitted_to_yandex")
-                reply = PROMPTS[DialogueState.SENT_TO_YANDEX]
+                create_conversation_event(db, driver, "yandex_pro_guidance_started")
+                reply = self._build_yandex_pro_start_reply(driver)
             except Exception as exc:
                 update_driver_state(db, driver, DialogueState.YANDEX_ERROR.value)
                 set_application_status(db, application, "yandex_error", yandex_status="error", yandex_error=str(exc))
@@ -188,6 +214,27 @@ class DialogueEngine:
         incoming_message_id: int | None = None,
     ) -> str:
         state = DialogueState(driver.state or DialogueState.NEW.value)
+        if self._is_yandex_pro_followup_state(state):
+            driver.requires_attention = True
+            db.add(driver)
+            create_conversation_event(
+                db,
+                driver,
+                "yandex_pro_screenshot_received",
+                {
+                    "message_type": incoming.message_type,
+                    "mime_type": incoming.mime_type,
+                    "filename": incoming.filename,
+                },
+            )
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_needs_help")
+            return self._respond(
+                db,
+                driver,
+                application,
+                "Скрин получил. Менеджер увидит его в чате и поможет. Если уже получится войти в Яндекс Про, напишите: Вошел.",
+            )
+
         if state not in DOCUMENT_STATE_MAP:
             return self._respond(
                 db,
@@ -257,6 +304,66 @@ class DialogueEngine:
 
         return None
 
+    def _is_yandex_pro_followup_state(self, state: DialogueState) -> bool:
+        return state in {
+            DialogueState.ASK_YANDEX_PRO_LOGIN,
+            DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS,
+        }
+
+    def _handle_yandex_pro_followup(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+    ) -> str:
+        normalized = normalize_text_token(message_text)
+
+        if _looks_like_yandex_pro_success(normalized):
+            update_driver_state(db, driver, DialogueState.COMPLETED.value)
+            driver.requires_attention = False
+            db.add(driver)
+            set_application_status(db, application, "completed", yandex_status="driver_login_confirmed")
+            create_conversation_event(db, driver, "yandex_pro_login_confirmed")
+            return self._respond(
+                db,
+                driver,
+                application,
+                "Отлично. Зафиксировал, что вы вошли в Яндекс Про. Если дальше появится вопрос по работе или приложению, напишите сюда.",
+            )
+
+        if _looks_like_yandex_pro_install_request(normalized):
+            create_conversation_event(db, driver, "yandex_pro_install_help_sent")
+            return self._respond(db, driver, application, self._build_yandex_pro_install_reply(driver))
+
+        if _looks_like_yandex_pro_issue(normalized):
+            update_driver_state(db, driver, DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS.value)
+            driver.requires_attention = True
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_needs_help")
+            create_conversation_event(db, driver, "yandex_pro_help_requested", {"message": message_text})
+            return self._respond(
+                db,
+                driver,
+                application,
+                "Понял. Напишите, что именно не получается при входе в Яндекс Про, или сразу пришлите скриншот ошибки. Менеджер увидит это в чате.",
+            )
+
+        if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS and message_text.strip():
+            driver.requires_attention = True
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_needs_help")
+            create_conversation_event(db, driver, "yandex_pro_problem_reported", {"message": message_text})
+            return self._respond(
+                db,
+                driver,
+                application,
+                "Принял описание проблемы. Если есть скриншот, отправьте его сюда. После успешного входа напишите: Вошел.",
+            )
+
+        return self._respond(db, driver, application, self._build_yandex_pro_start_reply(driver))
+
     def _handle_special_commands(self, db: Session, driver: Driver, application, message_text: str) -> str | None:
         normalized = normalize_text_token(message_text)
         if _looks_like_status_request(normalized):
@@ -297,26 +404,12 @@ class DialogueEngine:
         status = application.status or "collecting_data"
         if status == "collecting_data":
             current_step = driver.state or DialogueState.NEW.value
-            return f"Заявка еще заполняется. Текущий шаг: {current_step}."
-        if status == "waiting_documents":
-            return "Заявка ждет документы. Отправьте следующий запрошенный документ."
-        if status == "confirming_data":
-            return "Заявка собрана и ждет вашего подтверждения."
-        if status == "ready_to_send_yandex":
-            return "Заявка готова к отправке в парк."
-        if status == "sending_to_yandex":
-            return "Заявка сейчас отправляется в систему парка."
-        if status == "sent_to_yandex":
-            return "Заявка отправлена в парк и ожидает обработки."
-        if status == "completed":
-            return "Регистрация завершена."
+            return STATUS_COLLECTING_DATA_TEMPLATE.format(state=current_step)
         if status == "duplicate_rejected":
-            return application.yandex_error or "Повторная регистрация остановлена, так как заявка уже существует."
-        if status == "deletion_requested":
-            return "Запрос на удаление аккаунта уже зафиксирован и ожидает ручной обработки менеджером."
+            return application.yandex_error or STATUS_REPLIES["duplicate_rejected"]
         if status == "yandex_error":
-            return application.yandex_error or "При отправке заявки возникла ошибка. Менеджер должен проверить заявку."
-        return f"Текущий статус заявки: {status}."
+            return application.yandex_error or STATUS_REPLIES["yandex_error"]
+        return STATUS_REPLIES.get(status, STATUS_FALLBACK_TEMPLATE.format(status=status))
 
     def _reset_registration(self, db: Session, driver: Driver, application) -> None:
         driver.full_name = None
@@ -427,6 +520,14 @@ class DialogueEngine:
             'Если все верно, напишите "Подтверждаю". Если нужно исправить, напишите, что изменить.'
         )
 
+    def _build_yandex_pro_start_reply(self, driver: Driver) -> str:
+        contact_phone = driver.phone or driver.whatsapp_phone
+        return YANDEX_PRO_START_TEMPLATE.format(phone=contact_phone)
+
+    def _build_yandex_pro_install_reply(self, driver: Driver) -> str:
+        contact_phone = driver.phone or driver.whatsapp_phone
+        return YANDEX_PRO_INSTALL_TEMPLATE.format(phone=contact_phone)
+
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
         create_message(
             db,
@@ -519,6 +620,41 @@ def _looks_like_delete_request(normalized: str) -> bool:
     return normalized in exact or any(token in normalized for token in contains)
 
 
+def _looks_like_yandex_pro_install_request(normalized: str) -> bool:
+    contains = [
+        "не скачал",
+        "не установил",
+        "как скачать",
+        "где скачать",
+        "скачать",
+        "установить",
+        "install",
+        "download",
+    ]
+    return normalized in {"не скачал", "скачать"} or any(token in normalized for token in contains)
+
+
+def _looks_like_yandex_pro_issue(normalized: str) -> bool:
+    contains = [
+        "ошиб",
+        "не получается",
+        "не могу войти",
+        "не входит",
+        "не заходит",
+        "помощ",
+        "help",
+        "support",
+        "смс не приходит",
+        "код не приходит",
+        "не приходит код",
+    ]
+    return normalized in {"ошибка", "помощь", "help"} or any(token in normalized for token in contains)
+
+
+def _looks_like_yandex_pro_success(normalized: str) -> bool:
+    return normalized in YANDEX_PRO_SUCCESS_KEYWORDS
+
+
 def _application_status_from_state(state: DialogueState) -> str:
     if state in {
         DialogueState.ASK_DRIVER_LICENSE_FRONT,
@@ -534,7 +670,11 @@ def _application_status_from_state(state: DialogueState) -> str:
         return "ready_to_send_yandex"
     if state == DialogueState.SENDING_TO_YANDEX:
         return "sending_to_yandex"
-    if state == DialogueState.SENT_TO_YANDEX:
+    if state in {
+        DialogueState.SENT_TO_YANDEX,
+        DialogueState.ASK_YANDEX_PRO_LOGIN,
+        DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS,
+    }:
         return "sent_to_yandex"
     if state == DialogueState.YANDEX_ERROR:
         return "yandex_error"
