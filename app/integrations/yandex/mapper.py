@@ -1,9 +1,23 @@
+from app.config import get_settings
 from app.drivers.models import Driver
 from app.integrations.yandex.schemas import YandexDriverPayload
 
 
 def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
+    settings = get_settings()
     vehicle = driver.vehicle
+    document_refs: list[dict[str, str]] = []
+    for document in driver.documents:
+        ref = document.file_url
+        if not ref and settings.app_host:
+            ref = f"{settings.app_host}/admin/api/documents/{document.id}"
+        if ref:
+            document_refs.append(
+                {
+                    "document_type": document.document_type,
+                    "url": ref,
+                }
+            )
     return YandexDriverPayload(
         full_name=driver.full_name,
         last_name=driver.last_name,
@@ -30,4 +44,5 @@ def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
         plate_number=vehicle.plate_number if vehicle else None,
         color=vehicle.color if vehicle else None,
         vin=vehicle.vin if vehicle else None,
+        document_refs=document_refs or None,
     )

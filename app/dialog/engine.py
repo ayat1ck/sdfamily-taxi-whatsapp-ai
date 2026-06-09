@@ -220,7 +220,7 @@ class DialogueEngine:
             create_conversation_event(
                 db,
                 driver,
-                "yandex_pro_screenshot_received",
+                "yandex_pro_attachment_received",
                 {
                     "message_type": incoming.message_type,
                     "mime_type": incoming.mime_type,
@@ -232,7 +232,7 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Скрин получил. Менеджер увидит его в чате и поможет. Если уже получится войти в Яндекс Про, напишите: Вошел.",
+                "Файл получил. Менеджер увидит его в чате и поможет дальше. Если вы уже вошли в Яндекс Про, напишите: Вошел.",
             )
 
         if state not in DOCUMENT_STATE_MAP:
@@ -347,7 +347,7 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Понял. Напишите, что именно не получается при входе в Яндекс Про, или сразу пришлите скриншот ошибки. Менеджер увидит это в чате.",
+                "Понял. Напишите, что именно не получается при входе в Яндекс Про, и я передам это менеджеру. Если вы уже вошли, напишите: Вошел.",
             )
 
         if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS and message_text.strip():
@@ -359,7 +359,7 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Принял описание проблемы. Если есть скриншот, отправьте его сюда. После успешного входа напишите: Вошел.",
+                "Принял описание проблемы. После успешного входа напишите: Вошел.",
             )
 
         return self._respond(db, driver, application, self._build_yandex_pro_start_reply(driver))

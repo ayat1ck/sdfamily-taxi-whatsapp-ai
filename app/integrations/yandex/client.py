@@ -279,6 +279,14 @@ class YandexFleetClient:
             parts.append(f"city={payload.city}")
         if payload.is_hearing_impaired is not None:
             parts.append(f"is_hearing_impaired={payload.is_hearing_impaired}")
+        if payload.document_refs:
+            docs = "; ".join(
+                f"{document.get('document_type')}={document.get('url')}"
+                for document in payload.document_refs
+                if document.get("document_type") and document.get("url")
+            )
+            if docs:
+                parts.append(f"documents={docs}")
         return "; ".join(parts)
 
     @staticmethod
