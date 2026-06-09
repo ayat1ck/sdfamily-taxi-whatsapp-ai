@@ -7,6 +7,21 @@ from app.integrations.yandex.schemas import YandexDriverPayload
 from app.utils.validators import normalize_work_rule_id
 
 
+class YandexPartialSubmissionError(Exception):
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str,
+        yandex_driver_id: str = "",
+        yandex_vehicle_id: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.yandex_driver_id = yandex_driver_id
+        self.yandex_vehicle_id = yandex_vehicle_id
+
+
 class YandexFleetClient:
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -17,36 +32,54 @@ class YandexFleetClient:
         self._validate_config()
 
         headers = self._build_headers()
+        driver_json: dict[str, object] = {}
+        vehicle_json: dict[str, object] = {}
+        driver_id = ""
+        vehicle_id = ""
 
-        with httpx.Client(base_url=self.settings.yandex_api_base_url, timeout=self.settings.yandex_api_timeout_seconds) as client:
-            driver_response = client.post(
-                "/v2/parks/contractors/driver-profile",
-                headers=headers,
-                json=self._build_driver_payload(payload),
-            )
-            self._raise_for_status(driver_response)
-            driver_json = driver_response.json()
-
-            vehicle_response = client.post(
-                "/v2/parks/vehicles/car",
-                headers=headers,
-                json=self._build_vehicle_payload(payload),
-            )
-            self._raise_for_status(vehicle_response)
-            vehicle_json = vehicle_response.json()
-
-            vehicle_id = self._extract_vehicle_id(vehicle_json)
-            if vehicle_id:
-                bind_response = client.put(
-                    "/v1/parks/driver-profiles/car-bindings",
+        try:
+            with httpx.Client(base_url=self.settings.yandex_api_base_url, timeout=self.settings.yandex_api_timeout_seconds) as client:
+                driver_response = client.post(
+                    "/v2/parks/contractors/driver-profile",
                     headers=headers,
-                    params=self._build_binding_params(driver_json, vehicle_id),
+                    json=self._build_driver_payload(payload),
                 )
-                self._raise_for_status(bind_response)
+                self._raise_for_status(driver_response)
+                driver_json = driver_response.json()
+                driver_id = self._extract_driver_id(driver_json)
+
+                vehicle_response = client.post(
+                    "/v2/parks/vehicles/car",
+                    headers=headers,
+                    json=self._build_vehicle_payload(payload),
+                )
+                self._raise_for_status(vehicle_response)
+                vehicle_json = vehicle_response.json()
+                vehicle_id = self._extract_vehicle_id(vehicle_json)
+
+                if vehicle_id:
+                    bind_response = client.put(
+                        "/v1/parks/driver-profiles/car-bindings",
+                        headers=headers,
+                        params=self._build_binding_params(driver_json, vehicle_id),
+                    )
+                    self._raise_for_status(bind_response)
+        except Exception as exc:
+            if driver_id or vehicle_id:
+                stage = "driver_created"
+                if driver_id and vehicle_id:
+                    stage = "bind_failed"
+                raise YandexPartialSubmissionError(
+                    str(exc),
+                    stage=stage,
+                    yandex_driver_id=driver_id,
+                    yandex_vehicle_id=vehicle_id,
+                ) from exc
+            raise
 
         return {
             "status": "sent_to_yandex",
-            "yandex_driver_id": self._extract_driver_id(driver_json),
+            "yandex_driver_id": driver_id,
             "yandex_vehicle_id": vehicle_id,
         }
 

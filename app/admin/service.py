@@ -20,6 +20,7 @@ from app.integration_jobs.models import IntegrationJob
 from app.integration_jobs.service import create_integration_job, finish_integration_job
 from app.integrations.google_drive import GoogleDriveClient
 from app.integrations.google_sheets import GoogleSheetsClient
+from app.integrations.yandex.client import YandexPartialSubmissionError
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.models import Message
 from app.messages.service import create_message
@@ -521,6 +522,34 @@ def submit_to_yandex(db: Session, application: Application) -> Application:
         db.flush()
         create_conversation_event(db, driver, "submitted_to_yandex")
         return result
+    except YandexPartialSubmissionError as exc:
+        finish_integration_job(
+            db,
+            job,
+            "partial_success",
+            response_payload={
+                "status": application.yandex_status,
+                "driver_id": application.yandex_driver_id,
+                "vehicle_id": application.yandex_vehicle_id,
+                "stage": exc.stage,
+            },
+            error_text=str(exc),
+        )
+        driver.requires_attention = True
+        db.add(driver)
+        db.flush()
+        create_conversation_event(
+            db,
+            driver,
+            "yandex_partial_success",
+            {
+                "error": str(exc),
+                "stage": exc.stage,
+                "driver_id": application.yandex_driver_id,
+                "vehicle_id": application.yandex_vehicle_id,
+            },
+        )
+        return application
     except Exception as exc:
         finish_integration_job(db, job, "error", error_text=str(exc))
         driver.requires_attention = True

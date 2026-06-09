@@ -21,6 +21,7 @@ from app.drivers.models import Driver
 from app.drivers.service import find_other_driver_by_iin, update_driver_state
 from app.integrations.google_drive import GoogleDriveClient
 from app.integrations.google_sheets import GoogleSheetsClient
+from app.integrations.yandex.client import YandexPartialSubmissionError
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.service import create_message
 from app.utils.logger import get_logger
@@ -131,6 +132,39 @@ class DialogueEngine:
                 create_conversation_event(db, driver, "submitted_to_yandex")
                 create_conversation_event(db, driver, "yandex_pro_guidance_started")
                 reply = self._build_yandex_pro_start_reply(driver)
+            except YandexPartialSubmissionError as exc:
+                update_driver_state(db, driver, DialogueState.ASK_YANDEX_PRO_LOGIN.value)
+                set_application_status(db, application, "sent_to_yandex", yandex_status="partial_success", yandex_error=str(exc))
+                driver.requires_attention = True
+                db.add(driver)
+                create_conversation_event(
+                    db,
+                    driver,
+                    "submitted_to_yandex",
+                    {
+                        "status": "partial_success",
+                        "stage": exc.stage,
+                        "driver_id": exc.yandex_driver_id,
+                        "vehicle_id": exc.yandex_vehicle_id,
+                    },
+                )
+                create_conversation_event(
+                    db,
+                    driver,
+                    "yandex_partial_success",
+                    {
+                        "error": str(exc),
+                        "stage": exc.stage,
+                        "driver_id": exc.yandex_driver_id,
+                        "vehicle_id": exc.yandex_vehicle_id,
+                    },
+                )
+                create_conversation_event(db, driver, "yandex_pro_guidance_started")
+                reply = (
+                    "Заявка уже зарегистрирована в системе парка, но один из технических шагов завершился с ошибкой. "
+                    "Продолжайте вход в Яндекс Про по вашему номеру. Если приложение не пускает или показывает ошибку, "
+                    "напишите сюда слово Ошибка."
+                )
             except Exception as exc:
                 update_driver_state(db, driver, DialogueState.YANDEX_ERROR.value)
                 set_application_status(db, application, "yandex_error", yandex_status="error", yandex_error=str(exc))
