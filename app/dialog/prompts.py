@@ -2,7 +2,7 @@ from app.dialog.states import DialogueState
 
 
 PROMPTS: dict[DialogueState, str] = {
-    DialogueState.NEW: "Здравствуйте. Я помогу зарегистрироваться в таксопарке. Напишите ваше ФИО.",
+    DialogueState.NEW: "Здравствуйте. Я помогу подключиться к таксопарку SD Family Taxi и пройти регистрацию. Если готовы начать, напишите ваше ФИО полностью.",
     DialogueState.ASK_FULL_NAME: "Напишите ваше ФИО полностью.",
     DialogueState.ASK_EXECUTOR_TYPE: "Переходим к анкете. Укажите ваш контактный номер телефона.",
     DialogueState.ASK_PHONE: "Укажите ваш контактный номер телефона.",

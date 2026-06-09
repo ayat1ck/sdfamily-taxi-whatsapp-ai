@@ -95,10 +95,30 @@ class DialogueEngine:
             return self._handle_yandex_pro_followup(db, driver, application, state, incoming.text or "")
 
         if state == DialogueState.NEW:
+            ai_result = self.ai.respond(state.value, incoming.text or "", driver)
+            if ai_result.intent == "faq":
+                reply = (
+                    f"{ai_result.reply}\n\n"
+                    "Если захотите сразу начать регистрацию, напишите ваше ФИО полностью."
+                )
+                return self._respond(db, driver, application, reply)
+
             create_conversation_event(db, driver, "started_onboarding")
-            update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
             set_application_status(db, application, "collecting_data")
-            return self._respond(db, driver, application, PROMPTS[DialogueState.ASK_FULL_NAME])
+
+            if ai_result.intent == "registration" and ai_result.extracted_fields:
+                self._apply_extracted_fields(driver, ai_result.extracted_fields, db)
+                next_state = DialogueState(ai_result.next_state or DialogueState.ASK_PHONE.value)
+                update_driver_state(db, driver, next_state.value)
+                set_application_status(db, application, _application_status_from_state(next_state))
+                reply = "Здравствуйте. Начинаем регистрацию.\n\n" + PROMPTS[next_state]
+                return self._respond(db, driver, application, reply)
+
+            if ai_result.next_state == DialogueState.ASK_FULL_NAME.value:
+                update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
+                return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
+
+            return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
 
         if state == DialogueState.ASK_EXECUTOR_TYPE:
             update_driver_state(db, driver, DialogueState.ASK_PHONE.value)

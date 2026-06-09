@@ -178,6 +178,39 @@ class DeterministicAIProvider:
                 0.4,
             )
 
+        if current_state == DialogueState.NEW:
+            if _looks_like_full_name(text):
+                last_name, first_name, middle_name = split_full_name(text)
+                extracted = {"full_name": text}
+                if last_name:
+                    extracted["last_name"] = last_name
+                if first_name:
+                    extracted["first_name"] = first_name
+                if middle_name:
+                    extracted["middle_name"] = middle_name
+                return AIResult(
+                    "Здравствуйте. Начинаем регистрацию.",
+                    "registration",
+                    extracted,
+                    DialogueState.ASK_PHONE.value,
+                    0.95,
+                )
+            if _looks_like_onboarding_intent(text):
+                return AIResult(
+                    PROMPTS[DialogueState.NEW],
+                    "clarification",
+                    {},
+                    DialogueState.ASK_FULL_NAME.value,
+                    0.7,
+                )
+            return AIResult(
+                "Здравствуйте. Я могу рассказать об условиях парка и помочь пройти регистрацию. Если хотите начать, напишите ваше ФИО полностью.",
+                "clarification",
+                {},
+                DialogueState.NEW.value,
+                0.55,
+            )
+
         if current_state == DialogueState.ASK_FULL_NAME:
             if _looks_like_full_name(text):
                 last_name, first_name, middle_name = split_full_name(text)
@@ -277,6 +310,12 @@ def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallba
 
 
 def _allowed_next_states(current_state: DialogueState) -> list[str]:
+    if current_state == DialogueState.NEW:
+        return [
+            DialogueState.NEW.value,
+            DialogueState.ASK_FULL_NAME.value,
+            DialogueState.ASK_PHONE.value,
+        ]
     if current_state == DialogueState.CONFIRM_DATA:
         return [
             DialogueState.CONFIRM_DATA.value,
@@ -343,6 +382,29 @@ def _looks_like_full_name(value: str) -> bool:
     if len(parts[0]) < 2 or len(parts[1]) < 2:
         return False
     return True
+
+
+def _looks_like_onboarding_intent(value: str) -> bool:
+    normalized = normalize_text_token(value)
+    triggers = (
+        "привет",
+        "здравствуйте",
+        "добрый день",
+        "салам",
+        "хочу подключиться",
+        "хочу работать",
+        "хочу в парк",
+        "хочу зарегистрироваться",
+        "хочу регистрацию",
+        "как подключиться",
+        "как устроиться",
+        "интересует работа",
+        "нужна работа",
+        "подключение",
+        "регистрация",
+        "подключиться",
+    )
+    return any(trigger in normalized for trigger in triggers)
 
 
 def _match_faq(message: str, knowledge_base: dict[str, str]) -> str | None:
