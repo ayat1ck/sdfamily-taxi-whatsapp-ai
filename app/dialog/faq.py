@@ -1,7 +1,52 @@
 from pathlib import Path
 
+from app.utils.validators import normalize_text_token
+
 
 KB_DIR = Path(__file__).resolve().parents[2] / "knowledge_base"
+
+
+FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
+    "documents": (
+        "какие документы",
+        "документы",
+        "что нужно из документов",
+        "что отправить",
+        "что нужно отправить",
+    ),
+    "yandex_pro": (
+        "яндекс про",
+        "yandex pro",
+        "yandexpro",
+        "как войти",
+        "зайти в яндекс про",
+        "скачать яндекс про",
+        "выход на линию",
+        "на линию",
+        "линия",
+        "онлайн",
+        "статус в про",
+        "запуск про",
+    ),
+    "car_requirements": (
+        "без своего авто",
+        "без авто",
+        "какие авто",
+        "какая машина",
+        "требования к авто",
+    ),
+    "registration": (
+        "статус заявки",
+        "статус",
+        "сколько занимает",
+        "сколько времени",
+        "как подключиться",
+        "как регистрироваться",
+        "как проходит регистрация",
+        "повторная регистрация",
+        "перезапуск",
+    ),
+}
 
 
 def load_knowledge_base() -> dict[str, str]:
@@ -14,19 +59,20 @@ def load_knowledge_base() -> dict[str, str]:
 
 
 def find_faq_answer(message: str, kb: dict[str, str]) -> str | None:
-    lowered = message.lower()
+    lowered = normalize_text_token(message)
+
     for _, content in kb.items():
         for line in content.splitlines():
-            if line.startswith("Q:") and line[2:].strip().lower() in lowered:
+            if not line.startswith("Q:"):
+                continue
+            question = normalize_text_token(line[2:].strip())
+            if question and (question == lowered or question in lowered or lowered in question):
                 return content
-    keyword_map = {
-        "какие документы": "documents",
-        "яндекс про": "yandex_pro",
-        "без своего авто": "registration",
-        "какие авто": "car_requirements",
-        "статус заявки": "registration",
-    }
-    for keyword, doc_name in keyword_map.items():
-        if keyword in lowered and doc_name in kb:
+
+    for doc_name, triggers in FAQ_TRIGGERS.items():
+        if doc_name not in kb:
+            continue
+        if any(trigger in lowered for trigger in triggers):
             return kb[doc_name]
+
     return None

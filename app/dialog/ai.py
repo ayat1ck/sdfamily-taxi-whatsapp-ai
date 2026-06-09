@@ -5,7 +5,7 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.dialog.faq import load_knowledge_base
+from app.dialog.faq import find_faq_answer, load_knowledge_base
 from app.dialog.prompts import PROMPTS
 from app.dialog.llm_prompt import build_system_prompt, build_user_prompt
 from app.dialog.states import DialogueState
@@ -340,27 +340,7 @@ def _looks_like_full_name(value: str) -> bool:
 
 
 def _match_faq(message: str, knowledge_base: dict[str, str]) -> str | None:
-    lowered = normalize_text_token(message)
-    keyword_map = {
-        "какие документы": "documents",
-        "kakie dokumenty": "documents",
-        "яндекс про": "yandex_pro",
-        "yandex pro": "yandex_pro",
-        "без своего авто": "car_requirements",
-        "bez svoego avto": "car_requirements",
-        "какие авто": "car_requirements",
-        "kakie avto": "car_requirements",
-        "статус заявки": "registration",
-        "status zayavki": "registration",
-        "сколько занимает": "registration",
-        "skolko zanimaet": "registration",
-        "как подключиться": "registration",
-        "kak podklyuchitsya": "registration",
-    }
-    for keyword, doc_name in keyword_map.items():
-        if keyword in lowered and doc_name in knowledge_base:
-            return knowledge_base[doc_name]
-    return None
+    return find_faq_answer(message, knowledge_base)
 
 
 @lru_cache
