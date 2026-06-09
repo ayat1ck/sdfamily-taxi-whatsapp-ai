@@ -10,6 +10,10 @@ from app.applications.models import Application
 from app.config import get_settings
 from app.drivers.models import Driver
 from app.integrations.google_common import get_google_credentials
+from app.utils.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class GoogleDriveClient:
@@ -25,18 +29,27 @@ class GoogleDriveClient:
 
         media = MediaIoBaseUpload(BytesIO(content), mimetype="application/octet-stream", resumable=False)
         metadata = {"name": safe_name, "parents": [parent_id]}
-        created = service.files().create(
-            body=metadata,
-            media_body=media,
-            fields="id,webViewLink,name",
-            supportsAllDrives=True,
-        ).execute()
-        return {
-            "folder_path": folder_path,
-            "file_id": created["id"],
-            "file_url": created.get("webViewLink", f"https://drive.google.com/file/d/{created['id']}/view"),
-            "filename": created.get("name", safe_name),
-        }
+        try:
+            created = service.files().create(
+                body=metadata,
+                media_body=media,
+                fields="id,webViewLink,name",
+                supportsAllDrives=True,
+            ).execute()
+            return {
+                "folder_path": folder_path,
+                "file_id": created["id"],
+                "file_url": created.get("webViewLink", f"https://drive.google.com/file/d/{created['id']}/view"),
+                "filename": created.get("name", safe_name),
+            }
+        except Exception as exc:
+            logger.exception("Drive upload fallback for %s (%s): %s", driver.whatsapp_phone, document_type, exc)
+            return {
+                "folder_path": folder_path,
+                "file_id": "",
+                "file_url": "",
+                "filename": safe_name,
+            }
 
     def upload_application_snapshot(self, driver: Driver, application: Application) -> dict[str, str]:
         now = datetime.utcnow()
