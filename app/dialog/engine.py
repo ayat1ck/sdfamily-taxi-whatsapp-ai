@@ -460,7 +460,7 @@ class DialogueEngine:
         return None
 
     def _handle_field_edit(self, db: Session, driver: Driver, application, state: DialogueState, ai_result: AIResult) -> str:
-        if state != DialogueState.CONFIRM_DATA:
+        if state not in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply or PROMPTS[state]))
 
         if ai_result.validation_errors or not ai_result.normalized_fields:
@@ -490,7 +490,9 @@ class DialogueEngine:
             },
         )
         update_driver_state(db, driver, DialogueState.CONFIRM_DATA.value)
-        set_application_status(db, application, "confirming_data")
+        set_application_status(db, application, "confirming_data", yandex_status="needs_resubmit")
+        application.yandex_error = None
+        db.add(application)
         return self._respond(
             db,
             driver,

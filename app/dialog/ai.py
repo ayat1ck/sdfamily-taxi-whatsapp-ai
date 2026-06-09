@@ -587,6 +587,29 @@ def _allowed_next_states(current_state: DialogueState) -> list[str]:
             DialogueState.ASK_HIRED_AT.value,
             DialogueState.ASK_HEARING_IMPAIRED.value,
         ]
+    if current_state == DialogueState.YANDEX_ERROR:
+        return [
+            DialogueState.YANDEX_ERROR.value,
+            DialogueState.CONFIRM_DATA.value,
+            DialogueState.ASK_FULL_NAME.value,
+            DialogueState.ASK_PHONE.value,
+            DialogueState.ASK_CITY.value,
+            DialogueState.ASK_ADDRESS.value,
+            DialogueState.ASK_IIN.value,
+            DialogueState.ASK_BIRTH_DATE.value,
+            DialogueState.ASK_DRIVING_EXPERIENCE_SINCE.value,
+            DialogueState.ASK_CAR_BRAND.value,
+            DialogueState.ASK_CAR_MODEL.value,
+            DialogueState.ASK_CAR_YEAR.value,
+            DialogueState.ASK_CAR_PLATE.value,
+            DialogueState.ASK_CAR_COLOR.value,
+            DialogueState.ASK_DRIVER_LICENSE_NUMBER.value,
+            DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE.value,
+            DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT.value,
+            DialogueState.ASK_EMPLOYMENT_TYPE.value,
+            DialogueState.ASK_HIRED_AT.value,
+            DialogueState.ASK_HEARING_IMPAIRED.value,
+        ]
     return [current_state.value, _default_next_state(current_state).value]
 
 
