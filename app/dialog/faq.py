@@ -47,6 +47,12 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "перезапуск",
     ),
     "park_info": (
+        "кто вы",
+        "кто вы такие",
+        "что за парк",
+        "что за компания",
+        "о вас",
+        "какие условия",
         "условия парка",
         "комиссия",
         "выплаты",
@@ -75,17 +81,25 @@ def find_faq_answer(message: str, kb: dict[str, str]) -> str | None:
     lowered = normalize_text_token(message)
 
     for _, content in kb.items():
-        for line in content.splitlines():
+        lines = content.splitlines()
+        for index, line in enumerate(lines):
             if not line.startswith("Q:"):
                 continue
             question = normalize_text_token(line[2:].strip())
             if question and (question == lowered or question in lowered or lowered in question):
+                for answer_line in lines[index + 1 :]:
+                    if answer_line.startswith("A:"):
+                        return answer_line[2:].strip()
                 return content
 
     for doc_name, triggers in FAQ_TRIGGERS.items():
         if doc_name not in kb:
             continue
         if any(trigger in lowered for trigger in triggers):
+            lines = kb[doc_name].splitlines()
+            for line in lines:
+                if line.startswith("A:"):
+                    return line[2:].strip()
             return kb[doc_name]
 
     return None

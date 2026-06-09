@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from functools import lru_cache
+import json
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -58,6 +59,8 @@ class AIService:
 
     def respond(self, state: str, message: str, driver: Driver) -> AIResult:
         fallback = self.deterministic.respond(state, message)
+        if fallback.intent == "faq":
+            return fallback
         if self.llm is None:
             return fallback
         try:
@@ -142,12 +145,15 @@ class GeminiProvider:
         if isinstance(parsed, AIModelResponse):
             model = parsed
         elif isinstance(parsed, dict):
-            model = AIModelResponse.model_validate(parsed)
+            model = _coerce_model_response(parsed, state)
         else:
             raw_text = getattr(response, "text", "") or ""
             if not raw_text:
                 raise RuntimeError("Gemini returned no structured output")
-            model = AIModelResponse.model_validate_json(raw_text)
+            try:
+                model = _coerce_model_response(json.loads(raw_text), state)
+            except json.JSONDecodeError:
+                model = AIModelResponse.model_validate_json(raw_text)
         return AIResult(model.reply, model.intent, dict(model.extracted_fields), model.next_state, model.confidence)
 
 
@@ -341,6 +347,16 @@ def _looks_like_full_name(value: str) -> bool:
 
 def _match_faq(message: str, knowledge_base: dict[str, str]) -> str | None:
     return find_faq_answer(message, knowledge_base)
+
+
+def _coerce_model_response(payload: dict[str, object], current_state: str) -> AIModelResponse:
+    normalized = dict(payload)
+    normalized.setdefault("reply", "")
+    normalized.setdefault("intent", "clarification")
+    normalized.setdefault("extracted_fields", {})
+    normalized.setdefault("next_state", current_state)
+    normalized.setdefault("confidence", 0.6)
+    return AIModelResponse.model_validate(normalized)
 
 
 @lru_cache
