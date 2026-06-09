@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     yandex_car_year: str | None = None
     yandex_car_transmission: str = "automatic"
     yandex_car_fuel_type: str = "petrol"
-    yandex_car_category: str | None = None
+    yandex_car_category: str | None = "econom"
     yandex_car_vin: str | None = None
     yandex_car_body_number: str | None = None
     yandex_car_sts_number: str | None = None
