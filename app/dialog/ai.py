@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.dialog.faq import find_faq_answer, load_knowledge_base
-from app.dialog.prompts import PROMPTS
 from app.dialog.llm_prompt import build_system_prompt, build_user_prompt
+from app.dialog.prompts import PROMPTS
 from app.dialog.states import DialogueState
 from app.drivers.models import Driver
 from app.utils.logger import get_logger
@@ -59,8 +59,6 @@ class AIService:
 
     def respond(self, state: str, message: str, driver: Driver) -> AIResult:
         fallback = self.deterministic.respond(state, message)
-        if fallback.intent == "faq":
-            return fallback
         if self.llm is None:
             return fallback
         try:
@@ -170,13 +168,7 @@ class DeterministicAIProvider:
         text = message.strip()
 
         if not text:
-            return AIResult(
-                PROMPTS.get(current_state, "Пожалуйста, ответьте на текущий вопрос."),
-                "clarification",
-                {},
-                state,
-                0.4,
-            )
+            return AIResult(_clarification_reply(current_state), "clarification", {}, state, 0.4)
 
         if current_state == DialogueState.NEW:
             if _looks_like_full_name(text):
@@ -201,7 +193,7 @@ class DeterministicAIProvider:
                     "clarification",
                     {},
                     DialogueState.ASK_FULL_NAME.value,
-                    0.7,
+                    0.75,
                 )
             return AIResult(
                 "Здравствуйте. Я могу рассказать об условиях парка и помочь пройти регистрацию. Если хотите начать, напишите ваше ФИО полностью.",
@@ -222,13 +214,7 @@ class DeterministicAIProvider:
                 if middle_name:
                     extracted["middle_name"] = middle_name
                 return AIResult("", "registration", extracted, DialogueState.ASK_PHONE.value, 0.9)
-            return AIResult(
-                "Напишите ваше ФИО полностью. Например: Абай Аят Жаныбекулы.",
-                "clarification",
-                {},
-                state,
-                0.45,
-            )
+            return AIResult(_clarification_reply(current_state), "clarification", {}, state, 0.45)
 
         if current_state == DialogueState.ASK_PHONE and looks_like_phone(text):
             return AIResult("", "registration", {"phone": normalize_phone(text)}, DialogueState.ASK_CITY.value, 0.95)
@@ -272,29 +258,11 @@ class DeterministicAIProvider:
         if current_state == DialogueState.CONFIRM_DATA and parse_confirmation(text):
             return AIResult("", "confirmation", {}, DialogueState.READY_TO_SEND_YANDEX.value, 0.99)
 
-        fallback_field_map = {
-            DialogueState.ASK_CITY: "city",
-            DialogueState.ASK_ADDRESS: "address",
-            DialogueState.ASK_CAR_BRAND: "brand",
-            DialogueState.ASK_CAR_MODEL: "model",
-            DialogueState.ASK_CAR_PLATE: "plate_number",
-            DialogueState.ASK_CAR_COLOR: "color",
-            DialogueState.ASK_DRIVER_LICENSE_NUMBER: "driver_license_number",
-            DialogueState.ASK_EMPLOYMENT_TYPE: "employment_type",
-        }
-        if current_state in fallback_field_map and text:
-            extracted = {fallback_field_map[current_state]: text}
-            if current_state == DialogueState.ASK_EMPLOYMENT_TYPE:
-                extracted["employment_type"] = normalize_employment_type(text)
+        extracted = _extract_safe_field_answer(current_state, text)
+        if extracted:
             return AIResult("", "registration", extracted, _default_next_state(current_state).value, 0.8)
 
-        return AIResult(
-            PROMPTS.get(current_state, "Пожалуйста, ответьте на текущий вопрос."),
-            "clarification",
-            {},
-            state,
-            0.4,
-        )
+        return AIResult(_clarification_reply(current_state), "clarification", {}, state, 0.4)
 
 
 def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallback: AIResult) -> AIResult:
@@ -305,6 +273,8 @@ def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallba
     if next_state.value not in set(_allowed_next_states(current_state)):
         return fallback
     if not result.reply and result.intent not in {"registration", "confirmation", "correction"}:
+        return fallback
+    if result.intent == "registration" and not _is_safe_registration_result(result, current_state):
         return fallback
     return result
 
@@ -411,6 +381,144 @@ def _match_faq(message: str, knowledge_base: dict[str, str]) -> str | None:
     return find_faq_answer(message, knowledge_base)
 
 
+def _is_safe_registration_result(result: AIResult, current_state: DialogueState) -> bool:
+    if current_state == DialogueState.NEW:
+        return True
+    if not result.extracted_fields:
+        return False
+    expected_fields = _expected_fields_for_state(current_state)
+    if not expected_fields:
+        return False
+    return any(field in result.extracted_fields for field in expected_fields)
+
+
+def _expected_fields_for_state(state: DialogueState) -> set[str]:
+    mapping = {
+        DialogueState.ASK_FULL_NAME: {"full_name", "last_name", "first_name", "middle_name"},
+        DialogueState.ASK_PHONE: {"phone"},
+        DialogueState.ASK_CITY: {"city"},
+        DialogueState.ASK_ADDRESS: {"address"},
+        DialogueState.ASK_IIN: {"iin"},
+        DialogueState.ASK_BIRTH_DATE: {"birth_date"},
+        DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: {"driving_experience_since"},
+        DialogueState.ASK_CAR_BRAND: {"brand"},
+        DialogueState.ASK_CAR_MODEL: {"model"},
+        DialogueState.ASK_CAR_YEAR: {"year"},
+        DialogueState.ASK_CAR_PLATE: {"plate_number"},
+        DialogueState.ASK_CAR_COLOR: {"color"},
+        DialogueState.ASK_DRIVER_LICENSE_NUMBER: {"driver_license_number"},
+        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: {"driver_license_issue_date"},
+        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: {"driver_license_expires_at"},
+        DialogueState.ASK_EMPLOYMENT_TYPE: {"employment_type"},
+        DialogueState.ASK_HIRED_AT: {"hired_at"},
+        DialogueState.ASK_HEARING_IMPAIRED: {"is_hearing_impaired"},
+    }
+    return mapping.get(state, set())
+
+
+def _extract_safe_field_answer(current_state: DialogueState, text: str) -> dict[str, str]:
+    if _looks_like_non_field_message(text):
+        return {}
+
+    if current_state == DialogueState.ASK_CITY and _looks_like_city_answer(text):
+        return {"city": text.strip()}
+    if current_state == DialogueState.ASK_ADDRESS and _looks_like_address_answer(text):
+        return {"address": text.strip()}
+    if current_state == DialogueState.ASK_CAR_BRAND and _looks_like_short_entity_answer(text):
+        return {"brand": text.strip()}
+    if current_state == DialogueState.ASK_CAR_MODEL and _looks_like_short_entity_answer(text):
+        return {"model": text.strip()}
+    if current_state == DialogueState.ASK_CAR_PLATE and _looks_like_plate_answer(text):
+        return {"plate_number": text.strip()}
+    if current_state == DialogueState.ASK_CAR_COLOR and _looks_like_short_entity_answer(text):
+        return {"color": text.strip()}
+    if current_state == DialogueState.ASK_DRIVER_LICENSE_NUMBER and _looks_like_license_number(text):
+        return {"driver_license_number": text.strip()}
+    if current_state == DialogueState.ASK_EMPLOYMENT_TYPE:
+        normalized = normalize_employment_type(text)
+        if normalized in {"штатный", "самозанятый"} or normalized != text.strip():
+            return {"employment_type": normalized}
+    return {}
+
+
+def _clarification_reply(current_state: DialogueState) -> str:
+    custom = {
+        DialogueState.ASK_FULL_NAME: "Напишите ваше ФИО полностью. Например: Абай Аят Жаныбекулы.",
+        DialogueState.ASK_PHONE: "Укажите контактный номер телефона в формате +7XXXXXXXXXX.",
+        DialogueState.ASK_CITY: "Напишите только город, в котором будете работать. Например: Астана.",
+        DialogueState.ASK_ADDRESS: "Укажите адрес проживания или регистрации. Например: Балкантау 117, Астана.",
+        DialogueState.ASK_IIN: "Укажите ИИН из 12 цифр.",
+        DialogueState.ASK_BIRTH_DATE: "Укажите дату рождения в формате ДД.ММ.ГГГГ.",
+        DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "Укажите дату начала водительского стажа в формате ДД.ММ.ГГГГ.",
+        DialogueState.ASK_CAR_BRAND: "Напишите марку автомобиля. Например: Toyota.",
+        DialogueState.ASK_CAR_MODEL: "Напишите модель автомобиля. Например: Camry.",
+        DialogueState.ASK_CAR_YEAR: "Укажите год выпуска автомобиля. Например: 2018.",
+        DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля без лишних пояснений.",
+        DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля. Например: белый.",
+        DialogueState.ASK_DRIVER_LICENSE_NUMBER: "Напишите серию и номер водительского удостоверения.",
+        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
+        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
+        DialogueState.ASK_EMPLOYMENT_TYPE: "Укажите условие работы: штатный или самозанятый.",
+        DialogueState.ASK_HIRED_AT: "Укажите дату принятия в формате ДД.ММ.ГГГГ.",
+        DialogueState.ASK_HEARING_IMPAIRED: "Ответьте коротко: да или нет.",
+    }
+    return custom.get(current_state, PROMPTS.get(current_state, "Пожалуйста, ответьте на текущий вопрос."))
+
+
+def _looks_like_non_field_message(text: str) -> bool:
+    normalized = normalize_text_token(text)
+    if "?" in text:
+        return True
+    if len(normalized.split()) >= 5 and not looks_like_phone(text) and not looks_like_iin(text) and parse_date(text) is None:
+        return True
+    question_markers = (
+        "кто",
+        "что",
+        "какие условия",
+        "сколько",
+        "как",
+        "почему",
+        "где",
+        "можно ли",
+        "помоги",
+        "объясни",
+    )
+    return any(marker in normalized for marker in question_markers)
+
+
+def _looks_like_city_answer(text: str) -> bool:
+    normalized = normalize_text_token(text)
+    parts = [part for part in normalized.split() if part]
+    if not (1 <= len(parts) <= 3):
+        return False
+    return all(part.replace("-", "").isalpha() for part in parts)
+
+
+def _looks_like_address_answer(text: str) -> bool:
+    normalized = normalize_text_token(text)
+    has_digit = any(char.isdigit() for char in normalized)
+    address_markers = ("ул", "улица", "пр", "проспект", "дом", "мкр", "микрорайон", "кв", "район")
+    return len(normalized) >= 5 and (has_digit or any(marker in normalized for marker in address_markers) or len(normalized.split()) >= 2)
+
+
+def _looks_like_short_entity_answer(text: str) -> bool:
+    normalized = normalize_text_token(text)
+    parts = [part for part in normalized.split() if part]
+    if not (1 <= len(parts) <= 4):
+        return False
+    return len(normalized) <= 32
+
+
+def _looks_like_plate_answer(text: str) -> bool:
+    token = text.strip().replace(" ", "").replace("-", "")
+    return 5 <= len(token) <= 10 and token.isalnum()
+
+
+def _looks_like_license_number(text: str) -> bool:
+    token = text.strip().replace(" ", "")
+    return 4 <= len(token) <= 20 and token.isalnum()
+
+
 def _coerce_model_response(payload: dict[str, object], current_state: str) -> AIModelResponse:
     normalized = dict(payload)
     normalized.setdefault("reply", "")
@@ -424,4 +532,3 @@ def _coerce_model_response(payload: dict[str, object], current_state: str) -> AI
 @lru_cache
 def get_ai_service() -> AIService:
     return AIService()
-
