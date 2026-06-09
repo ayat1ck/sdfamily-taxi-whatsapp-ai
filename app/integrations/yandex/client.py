@@ -135,28 +135,45 @@ class YandexFleetClient:
         }
 
     def _build_vehicle_payload(self, payload: YandexDriverPayload) -> dict[str, object]:
+        brand = payload.car_brand or self.settings.yandex_car_brand
+        model = payload.car_model or self.settings.yandex_car_model
+        color = self._normalize_vehicle_color(payload.color or self.settings.yandex_car_color)
+        year = int(payload.car_year or self.settings.yandex_car_year or 0)
+        plate_number = payload.plate_number or self.settings.yandex_car_license_plate
+
+        vehicle_specifications: dict[str, object] = {
+            "brand": brand,
+            "model": model,
+            "color": color,
+            "year": year,
+            "transmission": self.settings.yandex_car_transmission,
+        }
+        if payload.vin or self.settings.yandex_car_vin:
+            vehicle_specifications["vin"] = payload.vin or self.settings.yandex_car_vin
+        if self.settings.yandex_car_body_number:
+            vehicle_specifications["body_number"] = self.settings.yandex_car_body_number
+
+        vehicle_licenses: dict[str, object] = {
+            "licence_plate_number": plate_number,
+        }
+        if self.settings.yandex_car_registration_certificate:
+            vehicle_licenses["registration_certificate"] = self.settings.yandex_car_registration_certificate
+        if self.settings.yandex_car_sts_number:
+            vehicle_licenses["licence_number"] = self.settings.yandex_car_sts_number
+
+        park_profile: dict[str, object] = {
+            "callsign": plate_number,
+            "status": "working",
+            "comment": f"driver_phone={payload.phone}" if payload.phone else "",
+            "fuel_type": self.settings.yandex_car_fuel_type,
+        }
+        if self.settings.yandex_car_category:
+            park_profile["categories"] = [self.settings.yandex_car_category]
+
         return {
-            "vehicle_specifications": {
-                "brand": payload.car_brand or self.settings.yandex_car_brand,
-                "model": payload.car_model or self.settings.yandex_car_model,
-                "color": payload.color or self.settings.yandex_car_color,
-                "year": int(payload.car_year or self.settings.yandex_car_year or 0),
-                "vin": payload.vin or self.settings.yandex_car_vin or "",
-                "body_number": self.settings.yandex_car_body_number or "",
-            },
-            "vehicle_licenses": {
-                "licence_plate_number": payload.plate_number or self.settings.yandex_car_license_plate or "",
-                "registration_certificate": self.settings.yandex_car_registration_certificate or "",
-                "licence_number": self.settings.yandex_car_sts_number or "",
-            },
-            "park_profile": {
-                "callsign": payload.plate_number or self.settings.yandex_car_license_plate or "",
-                "status": "working",
-                "is_park_property": False,
-                "ownership_type": "park",
-                "comment": f"driver_phone={payload.phone}" if payload.phone else "",
-                "fuel_type": "petrol",
-            },
+            "vehicle_specifications": vehicle_specifications,
+            "vehicle_licenses": vehicle_licenses,
+            "park_profile": park_profile,
         }
 
     def _build_binding_params(self, driver_json: dict, vehicle_id: str) -> dict[str, object]:
@@ -176,6 +193,8 @@ class YandexFleetClient:
             if isinstance(payload, dict):
                 code = payload.get("code")
                 detail = payload.get("message") or payload.get("detail")
+                if not detail and isinstance(payload.get("details"), list):
+                    detail = "; ".join(str(item) for item in payload["details"])
                 if code or detail:
                     message = f"Yandex API error {response.status_code}: code={code}, message={detail}"
         except Exception:
@@ -183,6 +202,55 @@ class YandexFleetClient:
         if not message:
             message = f"Yandex API error {response.status_code}: {response.text}"
         raise ValueError(message)
+
+    @staticmethod
+    def _normalize_vehicle_color(value: str | None) -> str | None:
+        normalized = (value or "").strip().lower()
+        if not normalized:
+            return value
+        mapping = {
+            "white": "Белый",
+            "beliy": "Белый",
+            "белый": "Белый",
+            "yellow": "Желтый",
+            "zheltyi": "Желтый",
+            "желтый": "Желтый",
+            "beige": "Бежевый",
+            "beigee": "Бежевый",
+            "бежевый": "Бежевый",
+            "black": "Черный",
+            "chernyi": "Черный",
+            "черный": "Черный",
+            "light blue": "Голубой",
+            "goluboi": "Голубой",
+            "голубой": "Голубой",
+            "gray": "Серый",
+            "grey": "Серый",
+            "seryi": "Серый",
+            "серый": "Серый",
+            "red": "Красный",
+            "krasnyi": "Красный",
+            "красный": "Красный",
+            "orange": "Оранжевый",
+            "oranzhevyi": "Оранжевый",
+            "оранжевый": "Оранжевый",
+            "blue": "Синий",
+            "sinii": "Синий",
+            "синий": "Синий",
+            "green": "Зеленый",
+            "zelenyi": "Зеленый",
+            "зеленый": "Зеленый",
+            "brown": "Коричневый",
+            "korichnevyi": "Коричневый",
+            "коричневый": "Коричневый",
+            "purple": "Фиолетовый",
+            "fioletovyi": "Фиолетовый",
+            "фиолетовый": "Фиолетовый",
+            "pink": "Розовый",
+            "rozovyi": "Розовый",
+            "розовый": "Розовый",
+        }
+        return mapping.get(normalized, value)
 
     @staticmethod
     def _map_employment_type(value: str | None) -> str:
