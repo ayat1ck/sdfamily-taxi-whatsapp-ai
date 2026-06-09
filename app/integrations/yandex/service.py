@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.applications.models import Application
 from app.drivers.models import Driver
 from app.integrations.yandex.client import YandexFleetClient, YandexPartialSubmissionError
+from app.integrations.yandex.catalog import get_yandex_car_catalog
 from app.integrations.yandex.mapper import map_driver_to_yandex
 from app.utils.validators import validate_birth_date, validate_driver_dates, validate_hired_at, validate_kz_iin
 
@@ -75,6 +76,7 @@ class YandexSubmissionService:
             "car_year": payload.car_year,
             "plate_number": payload.plate_number,
             "color": payload.color,
+            "registration_certificate": payload.registration_certificate,
         }
 
         for field_name, value in required_driver_fields.items():
@@ -111,5 +113,14 @@ class YandexSubmissionService:
 
         if payload.employment_type and payload.employment_type not in {"штатный", "самозанятый"}:
             warnings.append("employment_type_unrecognized")
+
+        catalog = get_yandex_car_catalog()
+        catalog_index = catalog.get_index()
+        if catalog_index is not None:
+            warnings.append(f"catalog_loaded:brands={len(catalog_index.brands)}:models={catalog_index.size}")
+            _, _, catalog_errors = catalog.validate_pair(payload.car_brand, payload.car_model)
+            errors.extend(catalog_errors)
+        elif catalog.is_configured:
+            warnings.append("catalog_unavailable:using_local_normalization")
 
         return {"errors": errors, "warnings": warnings}

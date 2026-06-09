@@ -18,6 +18,7 @@ PROMPTS: dict[DialogueState, str] = {
     DialogueState.ASK_CAR_YEAR: "Укажите год выпуска автомобиля.",
     DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля.",
     DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля.",
+    DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Укажите номер техпаспорта (СТС) автомобиля, как в документе.",
     DialogueState.ASK_DRIVER_LICENSE_NUMBER: "Напишите серию и номер водительского удостоверения.",
     DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
     DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
@@ -35,7 +36,7 @@ PROMPTS: dict[DialogueState, str] = {
     DialogueState.SENT_TO_YANDEX: "Готово. Ваша заявка отправлена в систему таксопарка.",
     DialogueState.ASK_YANDEX_PRO_LOGIN: "Теперь нужно завершить вход в Яндекс Про.",
     DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS: "Если у вас ошибка во входе в Яндекс Про, напишите, что именно не получается.",
-    DialogueState.YANDEX_ERROR: "Не удалось автоматически отправить заявку. Данные сохранены, попробуем обработать повторно.",
+    DialogueState.YANDEX_ERROR: "Не удалось автоматически отправить заявку. Данные сохранены. Если ошибка исправлена, напишите «Подтверждаю» для повторной отправки.",
     DialogueState.COMPLETED: "Регистрация завершена. Если нужно что-то уточнить, напишите сюда. Адрес офиса: Балкантау 117.",
 }
 

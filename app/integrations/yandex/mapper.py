@@ -1,7 +1,7 @@
 from app.config import get_settings
 from app.drivers.models import Driver
+from app.integrations.yandex.catalog import get_yandex_car_catalog
 from app.integrations.yandex.schemas import YandexDriverPayload
-from app.utils.validators import normalize_car_brand, normalize_car_model
 
 
 def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
@@ -39,11 +39,28 @@ def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
         existing_vehicle_lookup=None,
         has_personal_car="true",
         is_hearing_impaired=driver.is_hearing_impaired,
-        car_brand=normalize_car_brand(vehicle.brand) if vehicle and vehicle.brand else None,
-        car_model=normalize_car_model(vehicle.model) if vehicle and vehicle.model else None,
+        car_brand=_resolve_catalog_brand(vehicle.brand if vehicle else None),
+        car_model=_resolve_catalog_model(vehicle.brand if vehicle else None, vehicle.model if vehicle else None),
         car_year=vehicle.year if vehicle else None,
         plate_number=vehicle.plate_number if vehicle else None,
         color=vehicle.color if vehicle else None,
+        registration_certificate=vehicle.registration_certificate if vehicle else None,
         vin=vehicle.vin if vehicle else None,
         document_refs=document_refs or None,
     )
+
+
+def _resolve_catalog_brand(value: str | None) -> str | None:
+    if not value:
+        return None
+    catalog = get_yandex_car_catalog()
+    return catalog.resolve_brand(value) or value.strip()
+
+
+def _resolve_catalog_model(brand: str | None, value: str | None) -> str | None:
+    if not value:
+        return None
+    if not brand:
+        return value.strip()
+    catalog = get_yandex_car_catalog()
+    return catalog.resolve_model(brand, value) or value.strip()

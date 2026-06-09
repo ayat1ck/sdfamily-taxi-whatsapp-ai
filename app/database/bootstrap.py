@@ -32,6 +32,7 @@ TABLE_COLUMN_DEFS: dict[str, dict[str, str]] = {
     },
     "vehicles": {
         "service_class": "VARCHAR(64)",
+        "registration_certificate": "VARCHAR(64)",
     },
     "messages": {
         "sender_type": "VARCHAR(32) DEFAULT 'customer' NOT NULL",

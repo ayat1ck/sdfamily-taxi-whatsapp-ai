@@ -18,6 +18,7 @@ class DialogueState(StrEnum):
     ASK_CAR_YEAR = "ask_car_year"
     ASK_CAR_PLATE = "ask_car_plate"
     ASK_CAR_COLOR = "ask_car_color"
+    ASK_CAR_REGISTRATION_CERTIFICATE = "ask_car_registration_certificate"
     ASK_DRIVER_LICENSE_NUMBER = "ask_driver_license_number"
     ASK_DRIVER_LICENSE_ISSUE_DATE = "ask_driver_license_issue_date"
     ASK_DRIVER_LICENSE_EXPIRES_AT = "ask_driver_license_expires_at"

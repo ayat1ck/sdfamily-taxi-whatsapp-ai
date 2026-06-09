@@ -1,4 +1,5 @@
 from uuid import uuid4
+import time
 
 import httpx
 
@@ -48,6 +49,8 @@ class YandexFleetClient:
                 driver_json = driver_response.json()
                 driver_id = self._extract_driver_id(driver_json)
 
+                self._wait_between_requests()
+
                 vehicle_response = client.post(
                     "/v2/parks/vehicles/car",
                     headers=headers,
@@ -58,6 +61,7 @@ class YandexFleetClient:
                 vehicle_id = self._extract_vehicle_id(vehicle_json)
 
                 if vehicle_id:
+                    self._wait_between_requests()
                     bind_response = client.put(
                         "/v1/parks/driver-profiles/car-bindings",
                         headers=headers,
@@ -111,6 +115,17 @@ class YandexFleetClient:
             },
         }
 
+    def fetch_cars_catalog(self) -> object:
+        self._validate_config()
+        headers = self._build_headers()
+        with httpx.Client(
+            base_url=self.settings.yandex_api_base_url,
+            timeout=self.settings.yandex_api_timeout_seconds,
+        ) as client:
+            response = client.get("/v1/parks/cars/catalog", headers=headers)
+            self._raise_for_status(response)
+            return response.json()
+
     def _build_headers(self, preview: bool = False) -> dict[str, str]:
         return {
             "X-Client-ID": self.settings.yandex_client_id or "",
@@ -119,7 +134,13 @@ class YandexFleetClient:
             "X-Idempotency-Token": "<generated-uuid4-hex>" if preview else uuid4().hex,
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "Accept-Language": "ru",
         }
+
+    def _wait_between_requests(self) -> None:
+        delay = max(float(self.settings.yandex_api_request_delay_seconds), 0.0)
+        if delay:
+            time.sleep(delay)
 
     def _validate_config(self) -> None:
         required_config = {
@@ -150,6 +171,7 @@ class YandexFleetClient:
                 },
                 "driver_license": {
                     "birth_date": payload.birth_date,
+                    "category": self.settings.yandex_driver_profile_category,
                     "country": self.settings.yandex_driver_profile_license_country,
                     "expiry_date": payload.driver_license_expires_at,
                     "issue_date": payload.driver_license_issue_date,
@@ -189,10 +211,12 @@ class YandexFleetClient:
         vehicle_licenses: dict[str, object] = {
             "licence_plate_number": plate_number,
         }
-        if self.settings.yandex_car_registration_certificate:
-            vehicle_licenses["registration_certificate"] = self.settings.yandex_car_registration_certificate
-        if self.settings.yandex_car_sts_number:
-            vehicle_licenses["licence_number"] = self.settings.yandex_car_sts_number
+        registration_certificate = payload.registration_certificate or self.settings.yandex_car_registration_certificate
+        sts_number = registration_certificate or self.settings.yandex_car_sts_number
+        if registration_certificate:
+            vehicle_licenses["registration_certificate"] = registration_certificate
+        if sts_number:
+            vehicle_licenses["licence_number"] = sts_number
 
         park_profile: dict[str, object] = {
             "callsign": plate_number,

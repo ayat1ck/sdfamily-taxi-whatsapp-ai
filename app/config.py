@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     yandex_api_key: str | None = None
     yandex_api_base_url: str = "https://fleet-api.taxi.yandex.net"
     yandex_api_timeout_seconds: int = 30
+    yandex_api_request_delay_seconds: float = 1.0
+    yandex_car_catalog_cache_ttl_seconds: int = 86400
     yandex_driver_profile_work_rule_id: str | None = None
     yandex_driver_profile_category: str = "B"
     yandex_driver_profile_license_country: str = "kaz"

@@ -67,6 +67,7 @@ def build_user_prompt(
         f"- year: {vehicle.year if vehicle else ''}\n"
         f"- plate_number: {vehicle.plate_number if vehicle else ''}\n"
         f"- color: {vehicle.color if vehicle else ''}\n"
+        f"- registration_certificate: {vehicle.registration_certificate if vehicle else ''}\n"
         f"- vin: {vehicle.vin if vehicle else ''}\n"
         f"- service_class: {vehicle.service_class if vehicle else ''}\n\n"
         f"Сообщение водителя:\n{message}\n\n"

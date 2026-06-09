@@ -23,11 +23,12 @@ from app.drivers.models import Driver
 from app.drivers.service import find_other_driver_by_iin, update_driver_state
 from app.integrations.google_drive import GoogleDriveClient
 from app.integrations.google_sheets import GoogleSheetsClient
+from app.integrations.yandex.catalog import resolve_brand_input, resolve_model_input
 from app.integrations.yandex.client import YandexPartialSubmissionError
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.service import create_message
 from app.utils.logger import get_logger
-from app.utils.validators import normalize_plate_number, normalize_text_token
+from app.utils.validators import normalize_plate_number, normalize_registration_certificate, normalize_text_token
 from app.utils.validators import normalize_car_brand, normalize_car_model
 from app.vehicles.service import find_vehicle_by_plate_number, get_or_create_vehicle
 from app.whatsapp.media import WhatsAppMediaClient
@@ -243,6 +244,8 @@ class DialogueEngine:
         next_state = DialogueState(ai_result.next_state or state.value)
 
         if next_state == DialogueState.READY_TO_SEND_YANDEX:
+            application.yandex_error = None
+            db.add(application)
             update_driver_state(db, driver, DialogueState.SENDING_TO_YANDEX.value)
             set_application_status(db, application, "sending_to_yandex")
             self._respond(db, driver, application, PROMPTS[DialogueState.READY_TO_SEND_YANDEX])
@@ -937,10 +940,18 @@ class DialogueEngine:
         for key, value in fields.items():
             if key == "plate_number":
                 value = normalize_plate_number(value)
+            if key == "registration_certificate":
+                value = normalize_registration_certificate(value)
             if key == "brand":
-                value = normalize_car_brand(value)
+                resolved, _ = resolve_brand_input(value)
+                value = resolved or normalize_car_brand(value)
             if key == "model":
-                value = normalize_car_model(value)
+                brand = vehicle.brand or fields.get("brand")
+                if brand:
+                    resolved, _ = resolve_model_input(brand, value)
+                    value = resolved or normalize_car_model(value)
+                else:
+                    value = normalize_car_model(value)
             if hasattr(driver, key):
                 old_value = getattr(driver, key)
                 setattr(driver, key, value)
@@ -1000,7 +1011,8 @@ class DialogueEngine:
             f"Авто: {(vehicle.brand + ' ' + vehicle.model) if vehicle and vehicle.brand and vehicle.model else '-'}\n"
             f"Год: {vehicle.year if vehicle else '-'}\n"
             f"Госномер: {vehicle.plate_number if vehicle else '-'}\n"
-            f"Цвет: {vehicle.color if vehicle else '-'}\n\n"
+            f"Цвет: {vehicle.color if vehicle else '-'}\n"
+            f"Номер СТС: {vehicle.registration_certificate if vehicle else '-'}\n\n"
             'Если все верно, напишите "Подтверждаю". Если нужно исправить, напишите, что изменить.'
         )
 
@@ -1097,6 +1109,7 @@ class DialogueEngine:
             DialogueState.ASK_CAR_YEAR: "year",
             DialogueState.ASK_CAR_PLATE: "plate_number",
             DialogueState.ASK_CAR_COLOR: "color",
+            DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "registration_certificate",
             DialogueState.ASK_DRIVER_LICENSE_NUMBER: "driver_license_number",
             DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "driver_license_issue_date",
             DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "driver_license_expires_at",
@@ -1120,6 +1133,7 @@ class DialogueEngine:
             "year": DialogueState.ASK_CAR_YEAR,
             "plate_number": DialogueState.ASK_CAR_PLATE,
             "color": DialogueState.ASK_CAR_COLOR,
+            "registration_certificate": DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE,
             "driver_license_number": DialogueState.ASK_DRIVER_LICENSE_NUMBER,
             "driver_license_issue_date": DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE,
             "driver_license_expires_at": DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT,
@@ -1152,6 +1166,7 @@ class DialogueEngine:
             "year": "год авто",
             "plate_number": "госномер",
             "color": "цвет авто",
+            "registration_certificate": "номер СТС",
             "vin": "VIN",
             "service_class": "класс авто",
         }

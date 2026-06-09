@@ -265,6 +265,18 @@ def normalize_plate_number(value: str) -> str:
     return re.sub(r"[\s-]+", "", value.strip()).upper()
 
 
+REGISTRATION_CERTIFICATE_PATTERN = re.compile(r"^[A-Z0-9А-ЯЁ]{5,20}$", re.IGNORECASE)
+
+
+def normalize_registration_certificate(value: str) -> str:
+    return re.sub(r"[\s-]+", "", value.strip()).upper()
+
+
+def looks_like_registration_certificate(value: str) -> bool:
+    cleaned = normalize_registration_certificate(value)
+    return bool(REGISTRATION_CERTIFICATE_PATTERN.match(cleaned))
+
+
 def looks_like_phone(value: str) -> bool:
     return bool(PHONE_PATTERN.search(value))
 

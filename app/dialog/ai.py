@@ -14,17 +14,25 @@ from app.dialog.llm_prompt import build_system_prompt, build_user_prompt
 from app.dialog.prompts import PROMPTS
 from app.dialog.states import DialogueState
 from app.drivers.models import Driver
+from app.integrations.yandex.catalog import (
+    catalog_validation_error_message,
+    resolve_brand_input,
+    resolve_brand_model_input,
+    resolve_model_input,
+)
 from app.utils.logger import get_logger
 from app.utils.validators import (
     extract_known_car_brand,
     looks_like_iin,
     looks_like_phone,
     looks_like_precise_car_model,
+    looks_like_registration_certificate,
     normalize_car_brand,
     normalize_car_model,
     normalize_employment_type,
     normalize_phone,
     normalize_plate_number,
+    normalize_registration_certificate,
     normalize_text_token,
     parse_confirmation,
     parse_date,
@@ -447,18 +455,80 @@ class DeterministicAIProvider:
                     suggested_next_action=DialogueState.ASK_DRIVER_LICENSE_FRONT.value,
                 )
 
-        if current_state == DialogueState.CONFIRM_DATA and parse_confirmation(text):
+        if current_state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR} and parse_confirmation(text):
             return AIResult(
                 "",
                 "confirmation",
                 {},
                 DialogueState.READY_TO_SEND_YANDEX.value,
                 0.99,
-                reasoning_summary="confirmation:confirm_data",
+                reasoning_summary=f"confirmation:{current_state.value}",
                 suggested_next_action=DialogueState.READY_TO_SEND_YANDEX.value,
             )
 
-        extracted = _extract_safe_field_answer(current_state, text)
+        if current_state == DialogueState.ASK_CAR_BRAND and _looks_like_short_entity_answer(text):
+            brand, errors = resolve_brand_input(text)
+            if brand:
+                return AIResult(
+                    "",
+                    "registration",
+                    {"brand": brand},
+                    DialogueState.ASK_CAR_MODEL.value,
+                    0.9,
+                    normalized_fields={"brand": brand},
+                    reasoning_summary="registration_extract:brand",
+                    suggested_next_action=DialogueState.ASK_CAR_MODEL.value,
+                )
+            if errors:
+                return AIResult(
+                    catalog_validation_error_message(errors),
+                    "clarification",
+                    {},
+                    state,
+                    0.72,
+                    reasoning_summary="validation:car_brand_catalog",
+                    validation_errors=errors,
+                    suggested_next_action=state,
+                )
+
+        if current_state == DialogueState.ASK_CAR_MODEL and _looks_like_short_entity_answer(text):
+            if not looks_like_precise_car_model(text):
+                return AIResult(
+                    _clarification_reply(current_state),
+                    "clarification",
+                    {},
+                    state,
+                    0.45,
+                    reasoning_summary="clarification:car_model",
+                    suggested_next_action=state,
+                )
+            brand = driver.vehicle.brand if driver.vehicle else None
+            if brand:
+                model, errors = resolve_model_input(brand, text)
+                if model:
+                    return AIResult(
+                        "",
+                        "registration",
+                        {"model": model},
+                        DialogueState.ASK_CAR_YEAR.value,
+                        0.9,
+                        normalized_fields={"model": model},
+                        reasoning_summary="registration_extract:model",
+                        suggested_next_action=DialogueState.ASK_CAR_YEAR.value,
+                    )
+                if errors:
+                    return AIResult(
+                        catalog_validation_error_message(errors),
+                        "clarification",
+                        {},
+                        state,
+                        0.72,
+                        reasoning_summary="validation:car_model_catalog",
+                        validation_errors=errors,
+                        suggested_next_action=state,
+                    )
+
+        extracted = _extract_safe_field_answer(current_state, text, driver)
         if extracted:
             next_state = _default_next_state(current_state).value
             return AIResult(
@@ -529,7 +599,7 @@ def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallba
         return _fallback_from(fallback, result, "unsafe_registration_fields")
 
     if normalized.intent == "field_edit":
-        if current_state != DialogueState.CONFIRM_DATA:
+        if current_state not in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
             return _fallback_from(fallback, result, "field_edit_outside_confirm")
         if not normalized.target_field:
             return _fallback_from(fallback, result, "field_edit_missing_target")
@@ -580,6 +650,7 @@ def _allowed_next_states(current_state: DialogueState) -> list[str]:
             DialogueState.ASK_CAR_YEAR.value,
             DialogueState.ASK_CAR_PLATE.value,
             DialogueState.ASK_CAR_COLOR.value,
+            DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE.value,
             DialogueState.ASK_DRIVER_LICENSE_NUMBER.value,
             DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE.value,
             DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT.value,
@@ -591,6 +662,7 @@ def _allowed_next_states(current_state: DialogueState) -> list[str]:
         return [
             DialogueState.YANDEX_ERROR.value,
             DialogueState.CONFIRM_DATA.value,
+            DialogueState.READY_TO_SEND_YANDEX.value,
             DialogueState.ASK_FULL_NAME.value,
             DialogueState.ASK_PHONE.value,
             DialogueState.ASK_CITY.value,
@@ -603,6 +675,7 @@ def _allowed_next_states(current_state: DialogueState) -> list[str]:
             DialogueState.ASK_CAR_YEAR.value,
             DialogueState.ASK_CAR_PLATE.value,
             DialogueState.ASK_CAR_COLOR.value,
+            DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE.value,
             DialogueState.ASK_DRIVER_LICENSE_NUMBER.value,
             DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE.value,
             DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT.value,
@@ -627,6 +700,7 @@ def _default_next_state(state: DialogueState) -> DialogueState:
         DialogueState.ASK_CAR_YEAR,
         DialogueState.ASK_CAR_PLATE,
         DialogueState.ASK_CAR_COLOR,
+        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE,
         DialogueState.ASK_DRIVER_LICENSE_NUMBER,
         DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE,
         DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT,
@@ -705,6 +779,7 @@ def _expected_fields_for_state(state: DialogueState) -> set[str]:
         DialogueState.ASK_CAR_YEAR: {"year"},
         DialogueState.ASK_CAR_PLATE: {"plate_number"},
         DialogueState.ASK_CAR_COLOR: {"color"},
+        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: {"registration_certificate"},
         DialogueState.ASK_DRIVER_LICENSE_NUMBER: {"driver_license_number"},
         DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: {"driver_license_issue_date"},
         DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: {"driver_license_expires_at"},
@@ -715,7 +790,7 @@ def _expected_fields_for_state(state: DialogueState) -> set[str]:
     return mapping.get(state, set())
 
 
-def _extract_safe_field_answer(current_state: DialogueState, text: str) -> dict[str, str]:
+def _extract_safe_field_answer(current_state: DialogueState, text: str, driver: Driver | None = None) -> dict[str, str]:
     if _looks_like_non_field_message(text):
         return {}
 
@@ -724,18 +799,29 @@ def _extract_safe_field_answer(current_state: DialogueState, text: str) -> dict[
     if current_state == DialogueState.ASK_ADDRESS and _looks_like_address_answer(text):
         return {"address": text.strip()}
     if current_state == DialogueState.ASK_CAR_BRAND and _looks_like_short_entity_answer(text):
-        known_brand = extract_known_car_brand(text)
-        if known_brand:
-            return {"brand": known_brand}
+        brand, errors = resolve_brand_input(text)
+        if brand:
+            return {"brand": brand}
+        if errors:
+            return {}
         return {"brand": normalize_car_brand(text)}
     if current_state == DialogueState.ASK_CAR_MODEL and _looks_like_short_entity_answer(text):
         if not looks_like_precise_car_model(text):
             return {}
+        brand = driver.vehicle.brand if driver and driver.vehicle else None
+        if brand:
+            model, errors = resolve_model_input(brand, text)
+            if model:
+                return {"model": model}
+            if errors:
+                return {}
         return {"model": normalize_car_model(text)}
     if current_state == DialogueState.ASK_CAR_PLATE and _looks_like_plate_answer(text):
         return {"plate_number": normalize_plate_number(text)}
     if current_state == DialogueState.ASK_CAR_COLOR and _looks_like_short_entity_answer(text):
         return {"color": text.strip()}
+    if current_state == DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE and looks_like_registration_certificate(text):
+        return {"registration_certificate": normalize_registration_certificate(text)}
     if current_state == DialogueState.ASK_DRIVER_LICENSE_NUMBER and _looks_like_license_number(text):
         return {"driver_license_number": text.strip()}
     if current_state == DialogueState.ASK_EMPLOYMENT_TYPE:
@@ -759,6 +845,7 @@ def _clarification_reply(current_state: DialogueState) -> str:
         DialogueState.ASK_CAR_YEAR: "Укажите год выпуска автомобиля. Например: 2018.",
         DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля без лишних пояснений.",
         DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля. Например: белый.",
+        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Укажите номер техпаспорта (СТС) автомобиля, как в документе. Например: AA12345678.",
         DialogueState.ASK_DRIVER_LICENSE_NUMBER: "Напишите серию и номер водительского удостоверения.",
         DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
@@ -782,6 +869,7 @@ def _clarification_reply(current_state: DialogueState) -> str:
         DialogueState.ASK_CAR_YEAR: "Укажите год выпуска автомобиля. Например: 2018.",
         DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля без лишних пояснений.",
         DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля. Например: белый.",
+        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Укажите номер техпаспорта (СТС) автомобиля, как в документе. Например: AA12345678.",
         DialogueState.ASK_DRIVER_LICENSE_NUMBER: "Напишите серию и номер водительского удостоверения.",
         DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
@@ -995,6 +1083,7 @@ def _detect_correction_state(current_state: DialogueState, text: str) -> Dialogu
         (("год",), DialogueState.ASK_CAR_YEAR),
         (("госномер", "номер машины", "номер авто", "номер автомобиля"), DialogueState.ASK_CAR_PLATE),
         (("цвет",), DialogueState.ASK_CAR_COLOR),
+        (("стс", "техпаспорт", "свидетельство", "registration certificate"), DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE),
         (("права", "ву", "номер прав", "водительское удостоверение"), DialogueState.ASK_DRIVER_LICENSE_NUMBER),
         (("дата выдачи", "выдано"), DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE),
         (("срок действия", "действует до"), DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT),
@@ -1061,7 +1150,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResu
     normalized_fields, errors = _normalize_field_edit(target_field, raw_value)
     if errors:
         return AIResult(
-            _field_edit_error_reply(target_field),
+            _field_edit_error_reply(target_field, errors),
             "field_edit",
             {},
             DialogueState.CONFIRM_DATA.value,
@@ -1121,6 +1210,7 @@ def _resolve_field_name(value: str) -> str | None:
         (("год", "год выпуска"), "year"),
         (("госномер", "номер машины", "номер авто", "номер автомобиля"), "plate_number"),
         (("цвет",), "color"),
+        (("стс", "техпаспорт", "свидетельство"), "registration_certificate"),
         (("vin", "вин"), "vin"),
         (("класс", "класс авто", "тариф"), "service_class"),
     ]
@@ -1196,7 +1286,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResu
     normalized_fields, errors = _normalize_field_edit(target_field, raw_value)
     if errors:
         return AIResult(
-            _field_edit_error_reply(target_field),
+            _field_edit_error_reply(target_field, errors),
             "field_edit",
             {},
             DialogueState.CONFIRM_DATA.value,
@@ -1255,6 +1345,7 @@ def _resolve_field_name(value: str) -> str | None:
         (("год", "год выпуска"), "year"),
         (("госномер", "номер машины", "номер авто", "номер автомобиля"), "plate_number"),
         (("цвет",), "color"),
+        (("стс", "техпаспорт", "свидетельство"), "registration_certificate"),
         (("vin", "вин"), "vin"),
         (("класс", "класс авто", "тариф"), "service_class"),
     ]
@@ -1286,6 +1377,11 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
     if target_field in {"last_name", "first_name", "middle_name", "city", "address", "color", "vin"}:
         return {target_field: value}, []
     if target_field == "brand":
+        brand, errors = resolve_brand_input(value)
+        if brand:
+            return {"brand": brand}, []
+        if errors:
+            return {}, errors
         return {"brand": normalize_car_brand(value)}, []
     if target_field == "model":
         normalized_model = normalize_car_model(value)
@@ -1293,6 +1389,11 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
             return {}, ["invalid_model"]
         return {"model": normalized_model}, []
     if target_field == "vehicle_descriptor":
+        brand, model, errors = resolve_brand_model_input(value)
+        if brand and model:
+            return {"brand": brand, "model": model}, []
+        if errors:
+            return {}, errors
         brand = extract_known_car_brand(value)
         model = normalize_car_model(value)
         if not brand or not looks_like_precise_car_model(model):
@@ -1330,6 +1431,10 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
         if not _looks_like_plate_answer(value):
             return {}, ["invalid_plate"]
         return {"plate_number": normalize_plate_number(value)}, []
+    if target_field == "registration_certificate":
+        if not looks_like_registration_certificate(value):
+            return {}, ["invalid_registration_certificate"]
+        return {"registration_certificate": normalize_registration_certificate(value)}, []
     if target_field == "driver_license_number":
         if not _looks_like_license_number(value):
             return {}, ["invalid_license_number"]
@@ -1349,7 +1454,7 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
     return {}, ["unsupported_field"]
 
 
-def _field_edit_error_reply(target_field: str) -> str:
+def _field_edit_error_reply(target_field: str, errors: list[str] | None = None) -> str:
     examples = {
         "phone": "Например: исправь телефон на +77071234567.",
         "city": "Например: измени город на Алматы.",
@@ -1359,9 +1464,18 @@ def _field_edit_error_reply(target_field: str) -> str:
         "driver_license_issue_date": "Например: измени дату выдачи на 17.03.2015.",
         "driver_license_expires_at": "Например: измени срок действия на 17.03.2030.",
         "plate_number": "Например: исправь госномер на 004YAT03.",
+        "registration_certificate": "Например: исправь номер СТС на AA12345678.",
+        "brand": "Например: исправь марку на Toyota.",
         "model": "Например: измени модель авто на Camry.",
         "vehicle_descriptor": "Например: исправь авто на Mercedes-Benz S-Class.",
     }
+    if target_field in {"brand", "model", "vehicle_descriptor"} and errors and any(
+        error in {"car_brand_not_in_catalog", "car_model_not_in_catalog", "car_brand_model_not_in_catalog"}
+        or error.startswith("invalid:car_brand_not_in_catalog")
+        or error.startswith("invalid:car_model_not_in_catalog")
+        for error in errors
+    ):
+        return catalog_validation_error_message(errors)
     return f"Не удалось обновить поле «{_human_field_label(target_field)}». Проверьте формат. {examples.get(target_field, '')}".strip()
 
 
@@ -1389,6 +1503,7 @@ def _human_field_label(target_field: str) -> str:
         "year": "год выпуска",
         "plate_number": "госномер",
         "color": "цвет авто",
+        "registration_certificate": "номер СТС",
         "vin": "VIN",
         "service_class": "класс авто",
     }.get(target_field, target_field)
@@ -1411,6 +1526,8 @@ def _normalize_fields_map(fields: dict[str, str]) -> dict[str, str]:
             cleaned = str(parsed_year) if parsed_year else cleaned
         elif key == "plate_number":
             cleaned = normalize_plate_number(cleaned)
+        elif key == "registration_certificate":
+            cleaned = normalize_registration_certificate(cleaned)
         elif key == "brand":
             cleaned = normalize_car_brand(cleaned)
         elif key == "model":
