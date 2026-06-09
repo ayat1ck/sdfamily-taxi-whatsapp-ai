@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
@@ -31,11 +31,23 @@ class Driver(Base):
     existing_vehicle_lookup: Mapped[str | None] = mapped_column(String(120))
     is_hearing_impaired: Mapped[str | None] = mapped_column(String(8))
     state: Mapped[str] = mapped_column(String(64), default="new")
+    assigned_manager_name: Mapped[str | None] = mapped_column(String(255))
+    dialog_mode: Mapped[str] = mapped_column(String(32), default="bot_active")
+    unread_count: Mapped[int] = mapped_column(default=0)
+    requires_attention: Mapped[bool] = mapped_column(Boolean, default=False)
+    duplicate_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_notes: Mapped[str | None] = mapped_column(String(2048))
+    admin_tags: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime)
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     vehicle = relationship("Vehicle", back_populates="driver", uselist=False, cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="driver", cascade="all, delete-orphan")
     applications = relationship("Application", back_populates="driver", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="driver", cascade="all, delete-orphan")
+    conversation_events = relationship("ConversationEvent", back_populates="driver", cascade="all, delete-orphan")
+    audit_logs = relationship("ApplicationAuditLog", back_populates="driver", cascade="all, delete-orphan")

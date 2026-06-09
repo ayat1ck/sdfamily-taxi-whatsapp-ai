@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Дашборд{% endblock %}
+{% block content %}
+  <div class="topbar">
+    <h1>Дашборд</h1>
+    <form class="logout-form" method="post" action="/admin/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="secondary" type="submit">Выйти</button>
+    </form>
+  </div>
+
+  <div class="stats">
+    <div class="card"><div class="muted">Новые за 24ч</div><h3>{{ stats.new_today }}</h3></div>
+    <div class="card"><div class="muted">Активные диалоги</div><h3>{{ stats.active }}</h3></div>
+    <div class="card"><div class="muted">Ждут документы</div><h3>{{ stats.waiting_documents }}</h3></div>
+    <div class="card"><div class="muted">Дубли</div><h3>{{ stats.duplicates }}</h3></div>
+    <div class="card"><div class="muted">Требуют внимания</div><h3>{{ stats.errors }}</h3></div>
+    <div class="card"><div class="muted">Удаление</div><h3>{{ stats.deletions }}</h3></div>
+    <div class="card"><div class="muted">Отправлены в Yandex</div><h3>{{ stats.sent_to_yandex }}</h3></div>
+    <div class="card"><div class="muted">Завершены</div><h3>{{ stats.completed }}</h3></div>
+  </div>
+
+  <div class="two-col" style="margin-top:16px;">
+    <section class="card">
+      <h3 class="section-title">Последние активные чаты</h3>
+      <div class="stack">
+        {% for driver in stats.recent_drivers %}
+          {% set application = driver.applications[0] if driver.applications else None %}
+          <a href="/admin/chats/{{ driver.id }}" class="chat-item">
+            <strong>{{ driver.full_name or driver.whatsapp_phone }}</strong><br>
+            <span class="muted">{{ driver.whatsapp_phone }}</span><br>
+            <span class="badge {% if driver.requires_attention %}bad{% else %}good{% endif %}">{{ application.status if application else "без заявки" }}</span>
+          </a>
+        {% else %}
+          <div class="muted">Нет данных.</div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="card">
+      <h3 class="section-title">Последние события</h3>
+      <div class="stack">
+        {% for event in stats.recent_events %}
+          <div>
+            <strong>{{ event.event_type }}</strong><br>
+            <span class="muted">driver_id={{ event.driver_id }} · {{ event.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
+          </div>
+        {% else %}
+          <div class="muted">Событий пока нет.</div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:16px;">
+    <h3 class="section-title">Последние интеграционные операции</h3>
+    <table class="table">
+      <thead>
+        <tr><th>Провайдер</th><th>Действие</th><th>Статус</th><th>Driver</th><th>Время</th><th>Ошибка</th></tr>
+      </thead>
+      <tbody>
+        {% for job in stats.recent_jobs %}
+          <tr>
+            <td>{{ job.provider }}</td>
+            <td>{{ job.action }}</td>
+            <td>{{ job.status }}</td>
+            <td>{{ job.driver_id or "-" }}</td>
+            <td>{{ job.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            <td>{{ job.error_text or "-" }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="muted">Нет операций.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

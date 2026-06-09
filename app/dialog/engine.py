@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.applications.service import get_or_create_application, set_application_status
 from app.config import get_settings
+from app.conversation_events.service import create_conversation_event
 from app.dialog.ai import get_ai_service
 from app.dialog.prompts import DOCUMENT_STATE_MAP, PROMPTS
 from app.dialog.states import DialogueState
@@ -40,20 +41,27 @@ class DialogueEngine:
     def handle_message(self, db: Session, driver: Driver, incoming: ParsedWhatsAppMessage) -> str:
         application = get_or_create_application(db, driver)
         driver.last_message_at = datetime.utcnow()
-        create_message(
+        driver.unread_count = (driver.unread_count or 0) + 1
+        incoming_message = create_message(
             db,
             driver=driver,
             direction="incoming",
+            sender_type="customer",
             message_type=incoming.message_type,
             text=incoming.text,
+            provider_message_id=incoming.provider_message_id,
+            mime_type=incoming.mime_type,
+            delivery_status="received",
             raw_payload=incoming.raw_payload,
         )
+        db.add(driver)
+        db.flush()
 
         if incoming.message_type == "unsupported":
             return self._respond(db, driver, application, "Поддерживаются только текст, изображение и документ.")
 
         if incoming.message_type in {"image", "document"}:
-            return self._handle_document(db, driver, application, incoming)
+            return self._handle_document(db, driver, application, incoming, incoming_message.id)
 
         state = DialogueState(driver.state or DialogueState.NEW.value)
         command_reply = self._handle_special_commands(db, driver, application, incoming.text or "")
@@ -61,6 +69,7 @@ class DialogueEngine:
             return self._respond(db, driver, application, command_reply)
 
         if state == DialogueState.NEW:
+            create_conversation_event(db, driver, "started_onboarding")
             update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
             set_application_status(db, application, "collecting_data")
             return self._respond(db, driver, application, PROMPTS[DialogueState.ASK_FULL_NAME])
@@ -94,10 +103,14 @@ class DialogueEngine:
                 self.yandex.submit(db, driver, application)
                 update_driver_state(db, driver, DialogueState.COMPLETED.value)
                 set_application_status(db, application, "completed", yandex_status="sent_to_yandex")
+                create_conversation_event(db, driver, "submitted_to_yandex")
                 reply = PROMPTS[DialogueState.SENT_TO_YANDEX]
             except Exception as exc:
                 update_driver_state(db, driver, DialogueState.YANDEX_ERROR.value)
                 set_application_status(db, application, "yandex_error", yandex_status="error", yandex_error=str(exc))
+                driver.requires_attention = True
+                db.add(driver)
+                create_conversation_event(db, driver, "yandex_failed", {"error": str(exc)})
                 reply = PROMPTS[DialogueState.YANDEX_ERROR]
             return self._respond(db, driver, application, reply)
 
@@ -118,12 +131,14 @@ class DialogueEngine:
     ) -> dict[str, object]:
         application = get_or_create_application(db, driver)
         state = DialogueState(driver.state or DialogueState.NEW.value)
-        create_message(
+        incoming_message = create_message(
             db,
             driver=driver,
             direction="incoming",
+            sender_type="customer",
             message_type="document",
             text=filename,
+            delivery_status="received",
             raw_payload={"source": "debug", "filename": filename},
         )
         if state not in DOCUMENT_STATE_MAP:
@@ -147,7 +162,12 @@ class DialogueEngine:
             google_drive_file_id=file_id,
             whatsapp_media_id="debug-upload",
             status=status,
+            message_id=incoming_message.id,
+            file_name=filename,
+            storage_provider="google_drive" if upload_to_drive else "debug",
+            storage_path=file_id,
         )
+        create_conversation_event(db, driver, "document_uploaded", {"document_type": document_type, "status": status})
         next_state = self._next_document_state(state, driver)
         update_driver_state(db, driver, next_state.value)
         set_application_status(db, application, _application_status_from_state(next_state))
@@ -159,7 +179,14 @@ class DialogueEngine:
             "reply": self._respond(db, driver, application, reply),
         }
 
-    def _handle_document(self, db: Session, driver: Driver, application, incoming: ParsedWhatsAppMessage) -> str:
+    def _handle_document(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        incoming: ParsedWhatsAppMessage,
+        incoming_message_id: int | None = None,
+    ) -> str:
         state = DialogueState(driver.state or DialogueState.NEW.value)
         if state not in DOCUMENT_STATE_MAP:
             return self._respond(
@@ -189,7 +216,13 @@ class DialogueEngine:
             file_url=upload_result["file_url"],
             google_drive_file_id=upload_result["file_id"],
             whatsapp_media_id=incoming.media_id,
+            message_id=incoming_message_id,
+            file_name=incoming.filename,
+            mime_type=incoming.mime_type,
+            storage_provider="google_drive",
+            storage_path=upload_result["file_id"],
         )
+        create_conversation_event(db, driver, "document_uploaded", {"document_type": document_type, "status": "uploaded"})
         next_state = self._next_document_state(state, driver)
         update_driver_state(db, driver, next_state.value)
         set_application_status(db, application, _application_status_from_state(next_state))
@@ -211,6 +244,7 @@ class DialogueEngine:
                     f"Регистрация по ИИН {fields['iin']} уже найдена в системе для номера "
                     f"{existing_driver.whatsapp_phone}. Повторная регистрация остановлена."
                 )
+                create_conversation_event(db, driver, "duplicate_detected_iin", {"iin": fields["iin"], "existing_phone": existing_driver.whatsapp_phone})
                 self._mark_duplicate_rejected(db, driver, application, reply)
                 return reply
 
@@ -223,6 +257,7 @@ class DialogueEngine:
                     f"Автомобиль с госномером {normalized_plate} уже найден в системе "
                     f"и привязан к {owner}. Повторная регистрация остановлена."
                 )
+                create_conversation_event(db, driver, "duplicate_detected_plate", {"plate_number": normalized_plate, "owner": owner})
                 self._mark_duplicate_rejected(db, driver, application, reply)
                 return reply
 
@@ -235,6 +270,7 @@ class DialogueEngine:
 
         if _looks_like_restart_request(normalized):
             self._reset_registration(db, driver, application)
+            create_conversation_event(db, driver, "registration_restarted")
             return "Текущая анкета сброшена. Начинаем новую регистрацию. Напишите ваше ФИО полностью."
 
         if _looks_like_delete_request(normalized):
@@ -249,6 +285,11 @@ class DialogueEngine:
                 yandex_status="deletion_requested",
                 yandex_error=reply,
             )
+            driver.deletion_requested_at = datetime.utcnow()
+            driver.requires_attention = True
+            db.add(driver)
+            db.flush()
+            create_conversation_event(db, driver, "deletion_requested", {"source": "driver_command"})
             if self.settings.google_sheets_id and self.settings.get_google_service_account_info():
                 try:
                     self.sheets.sync_deletion_request(driver, application)
@@ -301,6 +342,13 @@ class DialogueEngine:
         driver.employment_type = None
         driver.hired_at = None
         driver.is_hearing_impaired = None
+        driver.requires_attention = False
+        driver.duplicate_flag = False
+        driver.dialog_mode = "bot_active"
+        driver.unread_count = 0
+        driver.deletion_requested_at = None
+        driver.paused_at = None
+        driver.closed_at = None
         update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
 
         if driver.vehicle:
@@ -321,6 +369,9 @@ class DialogueEngine:
         db.flush()
 
     def _mark_duplicate_rejected(self, db: Session, driver: Driver, application, reply: str) -> None:
+        driver.duplicate_flag = True
+        driver.requires_attention = True
+        db.add(driver)
         update_driver_state(db, driver, DialogueState.DUPLICATE_REJECTED.value)
         set_application_status(
             db,
@@ -329,6 +380,7 @@ class DialogueEngine:
             yandex_status="duplicate_rejected",
             yandex_error=reply,
         )
+        create_conversation_event(db, driver, "duplicate_rejected", {"reply": reply})
 
     def _next_document_state(self, state: DialogueState, driver: Driver) -> DialogueState:
         order = [
@@ -382,7 +434,15 @@ class DialogueEngine:
         )
 
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
-        create_message(db, driver=driver, direction="outgoing", message_type="text", text=reply)
+        create_message(
+            db,
+            driver=driver,
+            direction="outgoing",
+            sender_type="bot",
+            message_type="text",
+            text=reply,
+            delivery_status="pending",
+        )
         if self.settings.google_sheets_id and self.settings.get_google_service_account_info():
             try:
                 self.sheets.sync_application(driver, application)

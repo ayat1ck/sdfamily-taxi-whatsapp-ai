@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Аудит{% endblock %}
+{% block content %}
+  <div class="topbar"><h1>Аудит</h1></div>
+  <div class="two-col">
+    <section class="card">
+      <h3 class="section-title">Ручные изменения</h3>
+      <table class="table">
+        <thead>
+          <tr><th>Время</th><th>Driver</th><th>Поле</th><th>Старое</th><th>Новое</th><th>Действие</th></tr>
+        </thead>
+        <tbody>
+          {% for log in logs %}
+            <tr>
+              <td>{{ log.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ log.driver_id }}</td>
+              <td>{{ log.field_name }}</td>
+              <td>{{ log.old_value or "-" }}</td>
+              <td>{{ log.new_value or "-" }}</td>
+              <td>{{ log.action_type }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="muted">Нет аудита.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h3 class="section-title">События диалогов</h3>
+      <table class="table">
+        <thead>
+          <tr><th>Время</th><th>Driver</th><th>Событие</th><th>Payload</th></tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+            <tr>
+              <td>{{ event.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ event.driver_id }}</td>
+              <td>{{ event.event_type }}</td>
+              <td>{{ event.event_payload or "-" }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="muted">Нет событий.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+{% endblock %}

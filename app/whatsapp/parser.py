@@ -6,6 +6,7 @@ class ParsedWhatsAppMessage:
     sender_phone: str
     message_type: str
     text: str | None = None
+    provider_message_id: str | None = None
     media_id: str | None = None
     mime_type: str | None = None
     filename: str | None = None
@@ -26,6 +27,7 @@ def parse_whatsapp_payload(payload: dict) -> list[ParsedWhatsAppMessage]:
                             sender_phone=sender,
                             message_type="text",
                             text=message.get("text", {}).get("body"),
+                            provider_message_id=message.get("id"),
                             raw_payload=message,
                         )
                     )
@@ -35,6 +37,7 @@ def parse_whatsapp_payload(payload: dict) -> list[ParsedWhatsAppMessage]:
                         ParsedWhatsAppMessage(
                             sender_phone=sender,
                             message_type=message_type,
+                            provider_message_id=message.get("id"),
                             media_id=media_payload.get("id"),
                             mime_type=media_payload.get("mime_type"),
                             filename=media_payload.get("filename") or f"{message_type}.bin",
@@ -46,6 +49,7 @@ def parse_whatsapp_payload(payload: dict) -> list[ParsedWhatsAppMessage]:
                         ParsedWhatsAppMessage(
                             sender_phone=sender,
                             message_type="unsupported",
+                            provider_message_id=message.get("id"),
                             raw_payload=message,
                         )
                     )

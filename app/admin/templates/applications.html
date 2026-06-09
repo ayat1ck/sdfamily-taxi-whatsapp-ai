@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Заявки{% endblock %}
+{% block content %}
+  <div class="topbar">
+    <h1>Заявки</h1>
+    <div class="muted">Всего: {{ applications|length }}</div>
+  </div>
+
+  <form class="filters" method="get" action="/admin/applications">
+    <select name="status">
+      <option value="">Все статусы</option>
+      {% for status in statuses %}<option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}</option>{% endfor %}
+    </select>
+  </form>
+
+  <div class="two-col">
+    <section class="card">
+      <table class="table">
+        <thead>
+          <tr><th>ID</th><th>Водитель</th><th>Статус</th><th>Yandex</th><th>Обновлено</th></tr>
+        </thead>
+        <tbody>
+          {% for application in applications %}
+            <tr>
+              <td><a href="/admin/applications/{{ application.id }}">{{ application.id }}</a></td>
+              <td>
+                {% if application.driver %}
+                  <a href="/admin/chats/{{ application.driver.id }}">{{ application.driver.full_name or application.driver.whatsapp_phone }}</a>
+                {% else %}-{% endif %}
+              </td>
+              <td>{{ application.status }}</td>
+              <td>{{ application.yandex_status or "-" }}</td>
+              <td>{{ application.updated_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="muted">Нет заявок.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      {% if selected_application %}
+        {% set driver = selected_application.driver %}
+        {% set vehicle = driver.vehicle if driver and driver.vehicle else None %}
+        <h3 class="section-title">Заявка #{{ selected_application.id }}</h3>
+        <div class="stack">
+          <div class="actions">
+            <button class="secondary" onclick="submitYandex({{ selected_application.id }})">Отправить в Yandex</button>
+            <button class="secondary" onclick="syncGoogle({{ selected_application.id }})">Sync Google</button>
+            <button class="secondary" onclick="toggleDuplicate({{ selected_application.id }}, true)">Отметить дубль</button>
+            <button class="danger" onclick="restartApplication({{ selected_application.id }})">Перезапуск</button>
+          </div>
+          <div class="two-col">
+            <label>Статус заявки
+              <input id="application-status" value="{{ selected_application.status }}">
+            </label>
+            <label>Yandex статус
+              <input id="yandex-status" value="{{ selected_application.yandex_status or '' }}">
+            </label>
+            <label>ФИО
+              <input id="driver-full-name" value="{{ driver.full_name if driver else '' }}">
+            </label>
+            <label>ИИН
+              <input id="driver-iin" value="{{ driver.iin if driver else '' }}">
+            </label>
+            <label>Город
+              <input id="driver-city" value="{{ driver.city if driver else '' }}">
+            </label>
+            <label>Адрес
+              <input id="driver-address" value="{{ driver.address if driver else '' }}">
+            </label>
+            <label>Госномер
+              <input id="vehicle-plate" value="{{ vehicle.plate_number if vehicle else '' }}">
+            </label>
+            <label>Марка
+              <input id="vehicle-brand" value="{{ vehicle.brand if vehicle else '' }}">
+            </label>
+            <label>Модель
+              <input id="vehicle-model" value="{{ vehicle.model if vehicle else '' }}">
+            </label>
+            <label>Год
+              <input id="vehicle-year" value="{{ vehicle.year if vehicle else '' }}">
+            </label>
+          </div>
+          <label>Ошибка / комментарий
+            <textarea id="application-error">{{ selected_application.yandex_error or "" }}</textarea>
+          </label>
+          <div class="actions">
+            <button onclick="saveApplication({{ selected_application.id }})">Сохранить</button>
+            <button class="secondary" onclick="requestDeletion({{ selected_application.id }})">Запросить удаление</button>
+          </div>
+          <div class="notice">
+            Чат: <a href="/admin/chats/{{ driver.id if driver else 0 }}">{{ driver.whatsapp_phone if driver else "-" }}</a>
+          </div>
+        </div>
+      {% else %}
+        <div class="notice">Выберите заявку слева.</div>
+      {% endif %}
+    </section>
+  </div>
+
+  {% if selected_application %}
+  <script>
+    async function saveApplication(id) {
+      const payload = {
+        application: {
+          status: document.getElementById("application-status").value,
+          yandex_status: document.getElementById("yandex-status").value,
+          yandex_error: document.getElementById("application-error").value
+        },
+        driver: {
+          full_name: document.getElementById("driver-full-name").value,
+          iin: document.getElementById("driver-iin").value,
+          city: document.getElementById("driver-city").value,
+          address: document.getElementById("driver-address").value
+        },
+        vehicle: {
+          plate_number: document.getElementById("vehicle-plate").value,
+          brand: document.getElementById("vehicle-brand").value,
+          model: document.getElementById("vehicle-model").value,
+          year: document.getElementById("vehicle-year").value
+        }
+      };
+      await adminPost(`/admin/api/applications/${id}`, "PATCH", payload);
+      window.location.reload();
+    }
+    async function submitYandex(id) {
+      await adminPost(`/admin/api/applications/${id}/submit-yandex`);
+      window.location.reload();
+    }
+    async function syncGoogle(id) {
+      await adminPost(`/admin/api/applications/${id}/sync-google`);
+      window.location.reload();
+    }
+    async function toggleDuplicate(id, flag) {
+      const data = new FormData();
+      data.append("flag", String(flag));
+      data.append("csrf_token", "{{ csrf_token }}");
+      await adminPost(`/admin/api/applications/${id}/mark-duplicate`, "POST", data);
+      window.location.reload();
+    }
+    async function restartApplication(id) {
+      if (!confirm("Очистить заявку и начать заново?")) return;
+      await adminPost(`/admin/api/applications/${id}/restart`);
+      window.location.reload();
+    }
+    async function requestDeletion(id) {
+      const reason = prompt("Причина запроса на удаление", "");
+      await adminPost(`/admin/api/applications/${id}/request-deletion`, "POST", { reason });
+      window.location.reload();
+    }
+  </script>
+  {% endif %}
+{% endblock %}

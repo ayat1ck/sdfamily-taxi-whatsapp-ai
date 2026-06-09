@@ -1,14 +1,21 @@
 from fastapi import Depends, FastAPI
+from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.admin.auth import ensure_default_admin_account
+from app.admin.router import router as admin_router
 from app.applications.models import Application
+from app.audit.models import ApplicationAuditLog
 from app.config import get_settings
+from app.conversation_events.models import ConversationEvent
 from app.database.base import Base
+from app.database.bootstrap import ensure_runtime_schema
 from app.database.session import engine, get_db
 from app.documents.models import Document
 from app.debug.router import router as debug_router
 from app.drivers.models import Driver
+from app.integration_jobs.models import IntegrationJob
 from app.messages.models import Message
 from app.public_site import router as public_site_router
 from app.vehicles.models import Vehicle
@@ -17,17 +24,27 @@ from app.whatsapp.webhook import router as whatsapp_router
 
 app = FastAPI(title="Taxi WhatsApp AI Manager", version="0.1.0")
 logger = get_logger(__name__)
+settings = get_settings()
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.admin_session_secret,
+    session_cookie=settings.admin_session_cookie_name,
+    same_site="lax",
+    https_only=settings.app_env != "development",
+)
 
 
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
-    settings = get_settings()
+    ensure_runtime_schema(engine)
     missing = settings.missing_config()
     if missing:
         logger.warning("Missing external integration config: %s", missing)
         if settings.strict_config:
             raise RuntimeError(f"Missing required configuration: {missing}")
+    with Session(engine) as db:
+        ensure_default_admin_account(db)
 
 
 @app.get("/health")
@@ -80,6 +97,11 @@ def get_application(application_id: int, db: Session = Depends(get_db)) -> dict[
             "hired_at": driver.hired_at if driver else None,
             "is_hearing_impaired": driver.is_hearing_impaired if driver else None,
             "state": driver.state if driver else None,
+            "dialog_mode": driver.dialog_mode if driver else None,
+            "assigned_manager_name": driver.assigned_manager_name if driver else None,
+            "unread_count": driver.unread_count if driver else None,
+            "requires_attention": driver.requires_attention if driver else None,
+            "duplicate_flag": driver.duplicate_flag if driver else None,
         },
         "vehicle": {
             "brand": vehicle.brand if vehicle else None,
@@ -93,7 +115,13 @@ def get_application(application_id: int, db: Session = Depends(get_db)) -> dict[
             for document in documents
         ],
         "messages": [
-            {"direction": message.direction, "message_type": message.message_type, "text": message.text}
+            {
+                "direction": message.direction,
+                "sender_type": message.sender_type,
+                "message_type": message.message_type,
+                "text": message.text,
+                "delivery_status": message.delivery_status,
+            }
             for message in messages
         ],
     }
@@ -101,4 +129,5 @@ def get_application(application_id: int, db: Session = Depends(get_db)) -> dict[
 
 app.include_router(whatsapp_router)
 app.include_router(debug_router)
+app.include_router(admin_router)
 app.include_router(public_site_router)

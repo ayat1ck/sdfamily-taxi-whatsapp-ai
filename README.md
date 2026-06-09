@@ -49,6 +49,25 @@ knowledge_base/
 - `YANDEX_DRIVER_PROFILE_WORK_RULE_ID`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `ADMIN_PASSWORD`
+- `ADMIN_SESSION_SECRET`
+
+## Админка
+
+- URL: `/admin`
+- Login page: `/admin/login`
+- Логин фиксированный: `admin`
+- Пароль берется из `ADMIN_PASSWORD`
+
+Админка показывает:
+
+- все чаты и историю сообщений
+- статус и шаг заявки
+- документы
+- внутренние заметки
+- ручные ответы менеджера
+- retry Yandex / Google
+- аудит ручных изменений
 
 ## AI-слой
 

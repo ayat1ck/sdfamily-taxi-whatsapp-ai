@@ -85,8 +85,10 @@ def debug_messages(phone: str, db: Session = Depends(get_db)) -> dict[str, objec
             {
                 "id": message.id,
                 "direction": message.direction,
+                "sender_type": message.sender_type,
                 "message_type": message.message_type,
                 "text": message.text,
+                "delivery_status": message.delivery_status,
                 "created_at": message.created_at.isoformat() if message.created_at else None,
             }
             for message in messages

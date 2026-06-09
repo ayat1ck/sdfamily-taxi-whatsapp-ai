@@ -13,6 +13,11 @@ def upsert_document(
     google_drive_file_id: str | None,
     whatsapp_media_id: str | None,
     status: str = "uploaded",
+    message_id: int | None = None,
+    file_name: str | None = None,
+    mime_type: str | None = None,
+    storage_provider: str | None = None,
+    storage_path: str | None = None,
 ) -> Document:
     document = db.scalar(
         select(Document).where(
@@ -25,6 +30,11 @@ def upsert_document(
     document.file_url = file_url
     document.google_drive_file_id = google_drive_file_id
     document.whatsapp_media_id = whatsapp_media_id
+    document.message_id = message_id
+    document.file_name = file_name
+    document.mime_type = mime_type
+    document.storage_provider = storage_provider
+    document.storage_path = storage_path
     document.status = status
     db.add(document)
     db.flush()

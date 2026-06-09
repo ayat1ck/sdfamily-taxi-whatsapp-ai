@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Документы{% endblock %}
+{% block content %}
+  <div class="topbar"><h1>Документы</h1></div>
+  <section class="card">
+    <table class="table">
+      <thead>
+        <tr><th>ID</th><th>Driver</th><th>Тип</th><th>Статус</th><th>Файл</th><th>Время</th></tr>
+      </thead>
+      <tbody>
+        {% for document in documents %}
+          <tr>
+            <td>{{ document.id }}</td>
+            <td>{{ document.driver_id }}</td>
+            <td>{{ document.document_type }}</td>
+            <td>{{ document.status }}</td>
+            <td>{% if document.file_url %}<a href="/admin/api/documents/{{ document.id }}" target="_blank">Открыть</a>{% else %}-{% endif %}</td>
+            <td>{{ document.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="muted">Документов пока нет.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

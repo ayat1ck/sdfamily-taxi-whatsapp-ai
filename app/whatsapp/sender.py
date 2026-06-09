@@ -11,7 +11,7 @@ class WhatsAppSender:
     def __init__(self) -> None:
         self.settings = get_settings()
 
-    def send_text(self, phone: str, text: str) -> None:
+    def send_text(self, phone: str, text: str) -> dict[str, object]:
         if not self.settings.whatsapp_access_token or not self.settings.whatsapp_phone_number_id:
             raise RuntimeError("WhatsApp sender is not configured")
         payload = {
@@ -30,4 +30,6 @@ class WhatsAppSender:
                 json=payload,
             )
             response.raise_for_status()
+            result = response.json()
         logger.info("Sent WhatsApp message to %s", phone)
+        return result

@@ -21,3 +21,5 @@ class Application(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     driver = relationship("Driver", back_populates="applications")
+    audit_logs = relationship("ApplicationAuditLog", back_populates="application", cascade="all, delete-orphan")
+    integration_jobs = relationship("IntegrationJob", back_populates="application", cascade="all, delete-orphan")

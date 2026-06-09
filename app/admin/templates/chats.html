@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}Чаты{% endblock %}
+{% block content %}
+  <div class="topbar">
+    <h1>Чаты</h1>
+    <div class="muted">Общий аккаунт: {{ admin_username }}</div>
+  </div>
+
+  <form class="filters" method="get" action="/admin/chats">
+    <input type="text" name="search" placeholder="Поиск по телефону, ФИО, ИИН, номеру" value="{{ filters.search }}">
+    <select name="status">
+      <option value="">Все статусы</option>
+      {% for status in statuses %}<option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}
+    </select>
+    <select name="state">
+      <option value="">Все шаги</option>
+      {% for state in states %}<option value="{{ state }}" {% if filters.state == state %}selected{% endif %}>{{ state }}</option>{% endfor %}
+    </select>
+    <select name="dialog_mode">
+      <option value="">Все режимы</option>
+      {% for mode in ["bot_active", "manual", "paused", "closed"] %}<option value="{{ mode }}" {% if filters.dialog_mode == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}
+    </select>
+    <select name="requires_attention">
+      <option value="">Любое внимание</option>
+      <option value="1" {% if filters.requires_attention == "1" %}selected{% endif %}>Требуют внимания</option>
+    </select>
+    <select name="duplicate">
+      <option value="">Любые дубли</option>
+      <option value="1" {% if filters.duplicate == "1" %}selected{% endif %}>Только дубли</option>
+    </select>
+    <select name="yandex_status">
+      <option value="">Любой статус Yandex</option>
+      {% for status in yandex_statuses %}<option value="{{ status }}" {% if filters.yandex_status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}
+    </select>
+    <select name="has_documents">
+      <option value="">С документами и без</option>
+      <option value="1" {% if filters.has_documents == "1" %}selected{% endif %}>Только с документами</option>
+    </select>
+  </form>
+
+  <div class="chat-layout">
+    <section class="chat-list">
+      {% for driver in drivers %}
+        {% set application = driver.applications[0] if driver.applications else None %}
+        {% set last_message = (driver.messages|sort(attribute='created_at'))[-1] if driver.messages else None %}
+        <a href="/admin/chats/{{ driver.id }}" class="chat-item {% if selected_driver and selected_driver.id == driver.id %}active{% endif %}">
+          <strong>{{ driver.full_name or driver.whatsapp_phone }}</strong>
+          <div class="muted">{{ driver.whatsapp_phone }}</div>
+          <div style="margin:6px 0;" class="actions">
+            <span class="badge {% if driver.requires_attention %}bad{% else %}good{% endif %}">{{ application.status if application else "без заявки" }}</span>
+            <span class="badge warn">{{ driver.dialog_mode }}</span>
+            {% if driver.unread_count %}<span class="badge bad">{{ driver.unread_count }} unread</span>{% endif %}
+            {% if driver.duplicate_flag %}<span class="badge bad">дубль</span>{% endif %}
+          </div>
+          <div>{{ last_message.text if last_message and last_message.text else "—" }}</div>
+          <div class="muted">{{ driver.last_message_at.strftime("%Y-%m-%d %H:%M:%S") if driver.last_message_at else "-" }}</div>
+        </a>
+      {% else %}
+        <div class="card muted">Нет чатов.</div>
+      {% endfor %}
+    </section>
+
+    <section class="card">
+      {% if selected_driver %}
+        {% set application = selected_application %}
+        <div class="topbar" style="margin-bottom:12px;">
+          <div>
+            <h3 style="margin:0;">{{ selected_driver.full_name or selected_driver.whatsapp_phone }}</h3>
+            <div class="muted">{{ selected_driver.whatsapp_phone }}</div>
+          </div>
+          <div class="actions">
+            <button class="secondary" onclick="switchMode('bot_active')">Бот</button>
+            <button class="secondary" onclick="switchMode('manual')">Ручной</button>
+            <button class="secondary" onclick="pauseChat()">Пауза</button>
+            <button class="danger" onclick="restartApplication({{ application.id if application else 0 }})">Перезапуск</button>
+          </div>
+        </div>
+
+        <div class="message-list">
+          {% for message in selected_driver.messages|sort(attribute='created_at') %}
+            {% if message.sender_type == 'manager' %}
+              {% set message_role = 'manager' %}
+              {% set message_side = 'right' %}
+              {% set message_label = 'Менеджер' %}
+            {% elif message.direction == 'outgoing' %}
+              {% set message_role = 'bot' %}
+              {% set message_side = 'right' %}
+              {% set message_label = 'Бот' %}
+            {% elif message.sender_type == 'bot' %}
+              {% set message_role = 'bot' %}
+              {% set message_side = 'right' %}
+              {% set message_label = 'Бот' %}
+            {% elif message.direction == 'incoming' %}
+              {% set message_role = 'incoming' %}
+              {% set message_side = 'left' %}
+              {% set message_label = 'Клиент' %}
+            {% elif message.sender_type == 'customer' %}
+              {% set message_role = 'incoming' %}
+              {% set message_side = 'left' %}
+              {% set message_label = 'Клиент' %}
+            {% else %}
+              {% set message_role = 'system' %}
+              {% set message_side = 'center' %}
+              {% set message_label = 'Система' %}
+            {% endif %}
+            <div class="message-row {{ message_side }}">
+              <div class="message {{ message_role }}">
+                <div class="message-meta">
+                  <span><span class="message-author">{{ message_label }}</span> <span class="message-type">· {{ message.message_type }}</span></span>
+                  <span>{{ message.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
+                </div>
+                <div>{{ message.text or "—" }}</div>
+                {% if message.delivery_status or message.provider_message_id %}
+                  <div class="muted" style="margin-top:6px;">{{ message.delivery_status or "" }} {{ message.provider_message_id or "" }}</div>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+          {% for event in selected_driver.conversation_events|sort(attribute='created_at') %}
+            <div class="message-row center">
+              <div class="message system">
+                <div class="message-meta">
+                  <span><span class="message-author">Система</span> <span class="message-type">· событие</span></span>
+                  <span>{{ event.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
+                </div>
+                <div>{{ event.event_type }}</div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+
+        <div class="card" style="margin-top:12px;">
+          <h4 class="section-title">Ответить вручную</h4>
+          <div class="stack">
+            <textarea id="manual-reply-text" placeholder="Введите ответ менеджера"></textarea>
+            <div class="actions">
+              <button onclick="sendReply()">Отправить</button>
+              <button class="secondary" onclick="markRead()">Сбросить unread</button>
+              <button class="secondary" onclick="syncGoogle({{ application.id if application else 0 }})">Sync Google</button>
+              <button class="secondary" onclick="submitYandex({{ application.id if application else 0 }})">Yandex retry</button>
+              <button class="secondary" onclick="toggleDuplicate({{ application.id if application else 0 }}, true)">Дубль</button>
+              <button class="secondary" onclick="requestDeletion({{ application.id if application else 0 }})">Удаление</button>
+            </div>
+          </div>
+        </div>
+      {% else %}
+        <div class="notice">Выберите чат слева.</div>
+      {% endif %}
+    </section>
+
+    <aside class="card chat-side">
+      {% if selected_driver %}
+        {% set application = selected_application %}
+        {% set vehicle = selected_driver.vehicle %}
+        <h3 class="section-title">Карточка</h3>
+        <div class="stack">
+          <section>
+            <h4 class="section-title">Профиль</h4>
+            <div class="kv">
+              <div><span>Телефон</span><strong>{{ selected_driver.whatsapp_phone }}</strong></div>
+              <div><span>ФИО</span><strong>{{ selected_driver.full_name or "-" }}</strong></div>
+              <div><span>Город</span><strong>{{ selected_driver.city or "-" }}</strong></div>
+              <div><span>Адрес</span><strong>{{ selected_driver.address or "-" }}</strong></div>
+              <div><span>ИИН</span><strong>{{ selected_driver.iin or "-" }}</strong></div>
+              <div><span>Дата рождения</span><strong>{{ selected_driver.birth_date or "-" }}</strong></div>
+            </div>
+          </section>
+          <section>
+            <h4 class="section-title">ВУ</h4>
+            <div class="kv">
+              <div><span>Номер</span><strong>{{ selected_driver.driver_license_number or "-" }}</strong></div>
+              <div><span>Выдача</span><strong>{{ selected_driver.driver_license_issue_date or "-" }}</strong></div>
+              <div><span>Срок</span><strong>{{ selected_driver.driver_license_expires_at or "-" }}</strong></div>
+              <div><span>Стаж</span><strong>{{ selected_driver.driving_experience_since or "-" }}</strong></div>
+            </div>
+          </section>
+          <section>
+            <h4 class="section-title">Авто</h4>
+            <div class="kv">
+              <div><span>Марка</span><strong>{{ vehicle.brand if vehicle else "-" }}</strong></div>
+              <div><span>Модель</span><strong>{{ vehicle.model if vehicle else "-" }}</strong></div>
+              <div><span>Год</span><strong>{{ vehicle.year if vehicle else "-" }}</strong></div>
+              <div><span>Госномер</span><strong>{{ vehicle.plate_number if vehicle else "-" }}</strong></div>
+              <div><span>Цвет</span><strong>{{ vehicle.color if vehicle else "-" }}</strong></div>
+              <div><span>VIN</span><strong>{{ vehicle.vin if vehicle else "-" }}</strong></div>
+            </div>
+          </section>
+          <section>
+            <h4 class="section-title">Статусы</h4>
+            <div class="kv">
+              <div><span>Заявка</span><strong>{{ application.status if application else "-" }}</strong></div>
+              <div><span>Шаг</span><strong>{{ selected_driver.state }}</strong></div>
+              <div><span>Режим</span><strong>{{ selected_driver.dialog_mode }}</strong></div>
+              <div><span>Yandex</span><strong>{{ application.yandex_status if application else "-" }}</strong></div>
+              <div><span>Attention</span><strong>{{ "да" if selected_driver.requires_attention else "нет" }}</strong></div>
+            </div>
+          </section>
+          <section>
+            <h4 class="section-title">Документы</h4>
+            <div class="stack">
+              {% for document in selected_driver.documents %}
+                <div class="card">
+                  <strong>{{ document.document_type }}</strong><br>
+                  <span class="muted">{{ document.status }}</span><br>
+                  {% if document.file_url %}<a class="button secondary" href="/admin/api/documents/{{ document.id }}" target="_blank">Открыть</a>{% endif %}
+                </div>
+              {% else %}
+                <div class="muted">Документы еще не загружены.</div>
+              {% endfor %}
+            </div>
+          </section>
+          <section>
+            <h4 class="section-title">Внутренние заметки</h4>
+            <input id="manager-name" value="{{ selected_driver.assigned_manager_name or '' }}" placeholder="Имя менеджера">
+            <textarea id="admin-notes">{{ selected_driver.admin_notes or '' }}</textarea>
+            <textarea id="admin-tags" placeholder="Теги через запятую">{{ selected_driver.admin_tags or '' }}</textarea>
+            <div class="actions">
+              <button class="secondary" onclick="saveManagerName()">Сохранить менеджера</button>
+              <button class="secondary" onclick="saveApplicationSnapshot()">Сохранить заметки</button>
+            </div>
+          </section>
+        </div>
+      {% else %}
+        <div class="notice">Структурированная карточка появится после выбора чата.</div>
+      {% endif %}
+    </aside>
+  </div>
+
+  {% if selected_driver and selected_application %}
+  <script>
+    const driverId = {{ selected_driver.id }};
+    const applicationId = {{ selected_application.id }};
+    async function sendReply() {
+      const text = document.getElementById("manual-reply-text").value.trim();
+      if (!text) return;
+      await adminPost(`/admin/api/chats/${driverId}/reply`, "POST", { text });
+      window.location.reload();
+    }
+    async function switchMode(mode) {
+      await adminPost(`/admin/api/chats/${driverId}/switch-mode`, "POST", { mode });
+      window.location.reload();
+    }
+    async function pauseChat() {
+      await adminPost(`/admin/api/chats/${driverId}/pause`);
+      window.location.reload();
+    }
+    async function markRead() {
+      await adminPost(`/admin/api/chats/${driverId}/mark-read`);
+      window.location.reload();
+    }
+    async function saveManagerName() {
+      const name = document.getElementById("manager-name").value;
+      await adminPost(`/admin/api/chats/${driverId}/assign-manager-name`, "POST", { name });
+      window.location.reload();
+    }
+    async function saveApplicationSnapshot() {
+      const driver = {
+        admin_notes: document.getElementById("admin-notes").value,
+        admin_tags: document.getElementById("admin-tags").value
+      };
+      await adminPost(`/admin/api/applications/${applicationId}`, "PATCH", { driver, vehicle: {}, application: {} });
+      window.location.reload();
+    }
+    async function restartApplication(id) {
+      if (!id || !confirm("Перезапустить регистрацию и очистить заявку?")) return;
+      await adminPost(`/admin/api/applications/${id}/restart`);
+      window.location.reload();
+    }
+    async function syncGoogle(id) {
+      if (!id) return;
+      await adminPost(`/admin/api/applications/${id}/sync-google`);
+      window.location.reload();
+    }
+    async function submitYandex(id) {
+      if (!id) return;
+      await adminPost(`/admin/api/applications/${id}/submit-yandex`);
+      window.location.reload();
+    }
+    async function toggleDuplicate(id, flag) {
+      if (!id) return;
+      const data = new FormData();
+      data.append("flag", String(flag));
+      data.append("csrf_token", "{{ csrf_token }}");
+      await adminPost(`/admin/api/applications/${id}/mark-duplicate`, "POST", data);
+      window.location.reload();
+    }
+    async function requestDeletion(id) {
+      if (!id) return;
+      const reason = prompt("Причина удаления", "");
+      await adminPost(`/admin/api/applications/${id}/request-deletion`, "POST", { reason });
+      window.location.reload();
+    }
+    adminPost(`/admin/api/chats/${driverId}/mark-read`).catch(() => {});
+  </script>
+  {% endif %}
+{% endblock %}

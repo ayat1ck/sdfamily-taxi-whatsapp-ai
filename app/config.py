@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     app_host: str = "http://localhost:8000"
     strict_config: bool = False
     database_url: str = Field(default="sqlite:///./taxi_ai_manager.db", alias="DATABASE_URL")
+    admin_username: str = "admin"
+    admin_password: str = Field(default="changeme-admin", alias="ADMIN_PASSWORD")
+    admin_session_secret: str = Field(default="changeme-session-secret", alias="ADMIN_SESSION_SECRET")
+    admin_session_cookie_name: str = "sd_family_admin_session"
+    admin_login_rate_limit_attempts: int = 10
+    admin_login_rate_limit_window_seconds: int = 900
 
     public_site_brand_name: str = "SD Family Taxi"
     public_site_legal_name: str = "SD FAMILY, IP"
