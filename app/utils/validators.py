@@ -45,11 +45,11 @@ CYRILLIC_TO_LATIN = {
 }
 
 CAR_BRAND_ALIASES = {
-    "мерседес": "Mercedes",
-    "мерс": "Mercedes",
+    "мерседес": "Mercedes-Benz",
+    "мерс": "Mercedes-Benz",
     "мерседес бенц": "Mercedes-Benz",
     "мерседес-бенц": "Mercedes-Benz",
-    "mercedes": "Mercedes",
+    "mercedes": "Mercedes-Benz",
     "mercedes benz": "Mercedes-Benz",
     "mercedes-benz": "Mercedes-Benz",
     "бмв": "BMW",
@@ -411,10 +411,14 @@ def normalize_car_brand(value: str) -> str:
 
 def normalize_car_model(value: str) -> str:
     cleaned = normalize_text_token(value)
+    for key in sorted(CAR_BRAND_ALIASES.keys(), key=len, reverse=True):
+        if cleaned.startswith(f"{key} "):
+            cleaned = cleaned[len(key) + 1 :].strip()
+            break
     alias = CAR_MODEL_ALIASES.get(cleaned)
     if alias:
         return alias
-    transliterated = transliterate_cyrillic_to_latin(value)
+    transliterated = transliterate_cyrillic_to_latin(cleaned)
     if not transliterated:
         return value.strip()
     normalized = transliterated.replace(" Class", "-Class").replace(" class", "-Class")
@@ -438,6 +442,10 @@ def extract_known_car_brand(value: str) -> str | None:
 
 def looks_like_precise_car_model(value: str) -> bool:
     cleaned = normalize_text_token(value)
+    for key in sorted(CAR_BRAND_ALIASES.keys(), key=len, reverse=True):
+        if cleaned.startswith(f"{key} "):
+            cleaned = cleaned[len(key) + 1 :].strip()
+            break
     if cleaned in CAR_MODEL_ALIASES:
         return True
     if len(cleaned) < 2:

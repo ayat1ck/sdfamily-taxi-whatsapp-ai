@@ -1107,27 +1107,44 @@ def _resolve_field_name(value: str) -> str | None:
     return None
 
 
+
 def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResult | None:
     if current_state != DialogueState.CONFIRM_DATA:
         return None
+
     normalized = normalize_text_token(text)
-    if not any(marker in normalized for marker in ("исправ", "измени", "поменяй", "замени")):
+    if not any(marker in normalized for marker in ("исправ", "измен", "поменя", "замен")):
         return None
 
-    marker_match = re.match(r"^(исправь|исправить|измени|поменяй|замени)\s+(.*)$", normalized)
-    if not marker_match:
-        return None
+    normalized_compact = normalized.strip()
+    raw_text = text.strip()
+    tail = normalized_compact
+    raw_tail = raw_text
 
-    tail = marker_match.group(2).strip()
-    raw_tail = text.strip()[len(text.strip().split(maxsplit=1)[0]) :].strip()
+    prefix_match = re.match(
+        r"^(?:исправь|исправить|измени|изменить|поменяй|поменять|замени|заменить)\s+(.*)$",
+        normalized_compact,
+    )
+    if prefix_match:
+        tail = prefix_match.group(1).strip()
+        raw_tail = raw_text.split(maxsplit=1)[1].strip() if len(raw_text.split(maxsplit=1)) > 1 else ""
+    else:
+        suffix_match = re.match(
+            r"^(.*?)\s+(?:поменять|изменить|исправить|заменить)$",
+            normalized_compact,
+        )
+        if suffix_match:
+            tail = suffix_match.group(1).strip()
+            raw_tail = raw_text.rsplit(" ", 1)[0].strip() if " " in raw_text else raw_text
 
+    target_field = None
+    raw_value = ""
     if " на " in tail:
         field_phrase, _, _ = tail.partition(" на ")
         target_field = _resolve_field_name(field_phrase)
         raw_value = _extract_raw_value(raw_tail)
     else:
         target_field = _resolve_field_name(tail)
-        raw_value = ""
 
     if not target_field:
         return AIResult(
@@ -1142,7 +1159,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResu
 
     if not raw_value:
         return AIResult(
-            f"Понял. Напишите новое значение для поля «{_human_field_label(target_field)}».",
+            f"Хорошо. Отправьте новое значение для поля «{_human_field_label(target_field)}» одним сообщением.",
             "field_edit",
             {},
             DialogueState.CONFIRM_DATA.value,
@@ -1171,9 +1188,9 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResu
     return AIResult(
         "Хорошо, сразу обновляю это поле.",
         "field_edit",
-        normalized_fields.copy(),
+        normalized_fields,
         DialogueState.CONFIRM_DATA.value,
-        0.93,
+        0.9,
         target_field=target_field,
         new_value_raw=raw_value,
         normalized_fields=normalized_fields,
@@ -1187,7 +1204,7 @@ def _extract_raw_value(raw_tail: str) -> str:
     for separator in (" на ", " : ", ": "):
         index = lowered.find(separator)
         if index != -1:
-            return raw_tail[index + len(separator) :].strip().strip("\"' ")
+            return raw_tail[index + len(separator):].strip().strip("\"' ")
     return ""
 
 
@@ -1221,6 +1238,8 @@ def _resolve_field_name(value: str) -> str | None:
     for markers, field_name in mapping:
         if any(marker in normalized for marker in markers):
             return field_name
+    if any(marker in normalized for marker in ("авто", "машин", "автомобил")):
+        return "vehicle_descriptor"
     return None
 
 
@@ -1246,7 +1265,16 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
     if target_field == "brand":
         return {"brand": normalize_car_brand(value)}, []
     if target_field == "model":
-        return {"model": normalize_car_model(value)}, []
+        normalized_model = normalize_car_model(value)
+        if not looks_like_precise_car_model(normalized_model):
+            return {}, ["invalid_model"]
+        return {"model": normalized_model}, []
+    if target_field == "vehicle_descriptor":
+        brand = extract_known_car_brand(value)
+        model = normalize_car_model(value)
+        if not brand or not looks_like_precise_car_model(model):
+            return {}, ["invalid_vehicle_descriptor"]
+        return {"brand": brand, "model": model}, []
     if target_field == "phone":
         if not looks_like_phone(value):
             return {}, ["invalid_phone"]
@@ -1284,10 +1312,10 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
             return {}, ["invalid_license_number"]
         return {"driver_license_number": value.replace(" ", "")}, []
     if target_field == "employment_type":
-        normalized = normalize_employment_type(value)
-        if normalized.lower() not in {"штатный", "самозанятый", "ип"} and normalized == value:
+        normalized_employment = normalize_employment_type(value)
+        if normalized_employment.lower() not in {"штатный", "самозанятый", "ип"} and normalized_employment == value:
             return {}, ["invalid_employment_type"]
-        return {"employment_type": normalized}, []
+        return {"employment_type": normalized_employment}, []
     if target_field == "is_hearing_impaired":
         parsed = parse_yes_no(value)
         if parsed is None:
@@ -1308,6 +1336,8 @@ def _field_edit_error_reply(target_field: str) -> str:
         "driver_license_issue_date": "Например: измени дату выдачи на 17.03.2015.",
         "driver_license_expires_at": "Например: измени срок действия на 17.03.2030.",
         "plate_number": "Например: исправь госномер на 004YAT03.",
+        "model": "Например: измени модель авто на Camry.",
+        "vehicle_descriptor": "Например: исправь авто на Mercedes-Benz S-Class.",
     }
     return f"Не удалось обновить поле «{_human_field_label(target_field)}». Проверьте формат. {examples.get(target_field, '')}".strip()
 
@@ -1332,6 +1362,7 @@ def _human_field_label(target_field: str) -> str:
         "is_hearing_impaired": "слабослышащий водитель",
         "brand": "марка авто",
         "model": "модель авто",
+        "vehicle_descriptor": "авто",
         "year": "год выпуска",
         "plate_number": "госномер",
         "color": "цвет авто",
