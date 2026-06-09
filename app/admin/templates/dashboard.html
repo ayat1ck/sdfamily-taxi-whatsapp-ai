@@ -54,24 +54,26 @@
 
   <section class="card" style="margin-top:16px;">
     <h3 class="section-title">Последние интеграционные операции</h3>
-    <table class="table">
-      <thead>
-        <tr><th>Провайдер</th><th>Действие</th><th>Статус</th><th>Driver</th><th>Время</th><th>Ошибка</th></tr>
-      </thead>
-      <tbody>
-        {% for job in stats.recent_jobs %}
-          <tr>
-            <td>{{ job.provider }}</td>
-            <td>{{ job.action }}</td>
-            <td>{{ job.status }}</td>
-            <td>{{ job.driver_id or "-" }}</td>
-            <td>{{ job.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-            <td>{{ job.error_text or "-" }}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="6" class="muted">Нет операций.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>Провайдер</th><th>Действие</th><th>Статус</th><th>Driver</th><th>Время</th><th>Ошибка</th></tr>
+        </thead>
+        <tbody>
+          {% for job in stats.recent_jobs %}
+            <tr>
+              <td>{{ job.provider }}</td>
+              <td>{{ job.action }}</td>
+              <td>{{ job.status }}</td>
+              <td>{{ job.driver_id or "-" }}</td>
+              <td>{{ job.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ job.error_text or "-" }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="muted">Нет операций.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 {% endblock %}

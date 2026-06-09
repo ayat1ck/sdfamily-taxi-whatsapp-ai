@@ -3,25 +3,27 @@
 {% block content %}
   <div class="topbar"><h1>Интеграции</h1></div>
   <section class="card">
-    <table class="table">
-      <thead>
-        <tr><th>ID</th><th>Провайдер</th><th>Действие</th><th>Статус</th><th>Driver</th><th>Создано</th><th>Ошибка</th></tr>
-      </thead>
-      <tbody>
-        {% for job in jobs %}
-          <tr>
-            <td>{{ job.id }}</td>
-            <td>{{ job.provider }}</td>
-            <td>{{ job.action }}</td>
-            <td>{{ job.status }}</td>
-            <td>{{ job.driver_id or "-" }}</td>
-            <td>{{ job.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-            <td>{{ job.error_text or "-" }}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="7" class="muted">Нет данных.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>ID</th><th>Провайдер</th><th>Действие</th><th>Статус</th><th>Driver</th><th>Создано</th><th>Ошибка</th></tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+            <tr>
+              <td>{{ job.id }}</td>
+              <td>{{ job.provider }}</td>
+              <td>{{ job.action }}</td>
+              <td>{{ job.status }}</td>
+              <td>{{ job.driver_id or "-" }}</td>
+              <td>{{ job.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ job.error_text or "-" }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="muted">Нет данных.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 {% endblock %}

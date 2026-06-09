@@ -15,28 +15,30 @@
 
   <div class="two-col">
     <section class="card">
-      <table class="table">
-        <thead>
-          <tr><th>ID</th><th>Водитель</th><th>Статус</th><th>Yandex</th><th>Обновлено</th></tr>
-        </thead>
-        <tbody>
-          {% for application in applications %}
-            <tr>
-              <td><a href="/admin/applications/{{ application.id }}">{{ application.id }}</a></td>
-              <td>
-                {% if application.driver %}
-                  <a href="/admin/chats/{{ application.driver.id }}">{{ application.driver.full_name or application.driver.whatsapp_phone }}</a>
-                {% else %}-{% endif %}
-              </td>
-              <td>{{ application.status }}</td>
-              <td>{{ application.yandex_status or "-" }}</td>
-              <td>{{ application.updated_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-            </tr>
-          {% else %}
-            <tr><td colspan="5" class="muted">Нет заявок.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr><th>ID</th><th>Водитель</th><th>Статус</th><th>Yandex</th><th>Обновлено</th></tr>
+          </thead>
+          <tbody>
+            {% for application in applications %}
+              <tr>
+                <td><a href="/admin/applications/{{ application.id }}">{{ application.id }}</a></td>
+                <td>
+                  {% if application.driver %}
+                    <a href="/admin/chats/{{ application.driver.id }}">{{ application.driver.full_name or application.driver.whatsapp_phone }}</a>
+                  {% else %}-{% endif %}
+                </td>
+                <td>{{ application.status }}</td>
+                <td>{{ application.yandex_status or "-" }}</td>
+                <td>{{ application.updated_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" class="muted">Нет заявок.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section class="card">
