@@ -91,6 +91,9 @@ class DialogueEngine:
         if command_reply:
             return self._respond(db, driver, application, command_reply)
 
+        if state == DialogueState.COMPLETED:
+            return self._handle_registered_driver_support(db, driver, application, incoming.text or "")
+
         if self._is_yandex_pro_followup_state(state):
             return self._handle_yandex_pro_followup(db, driver, application, state, incoming.text or "")
 
@@ -369,6 +372,7 @@ class DialogueEngine:
         message_text: str,
     ) -> str:
         normalized = normalize_text_token(message_text)
+        ai_result = self.ai.respond(state.value, message_text, driver)
 
         if _looks_like_yandex_pro_success(normalized):
             update_driver_state(db, driver, DialogueState.COMPLETED.value)
@@ -416,7 +420,23 @@ class DialogueEngine:
                 "Принял описание проблемы. После успешного входа напишите: Вошел.",
             )
 
+        if ai_result.intent in {"faq", "help", "smalltalk", "clarification"} and ai_result.reply:
+            return self._respond(db, driver, application, self._format_post_yandex_reply(state, ai_result.reply))
+
         return self._respond(db, driver, application, self._build_yandex_pro_start_reply(driver))
+
+    def _handle_registered_driver_support(self, db: Session, driver: Driver, application, message_text: str) -> str:
+        ai_result = self.ai.respond(DialogueState.COMPLETED.value, message_text, driver)
+        if ai_result.reply:
+            return self._respond(db, driver, application, self._format_registered_driver_reply(ai_result.reply))
+        return self._respond(
+            db,
+            driver,
+            application,
+            self._format_registered_driver_reply(
+                "Регистрация уже завершена. Могу помочь по Яндекс Про, выходу на линию, условиям парка, выплатам, офису и дальнейшим шагам."
+            ),
+        )
 
     def _handle_special_commands(self, db: Session, driver: Driver, application, message_text: str) -> str | None:
         normalized = normalize_text_token(message_text)
@@ -607,6 +627,27 @@ class DialogueEngine:
         if base_reply.strip() == reminder.strip():
             return base_reply
         return f"{base_reply}\n\nТекущий шаг регистрации: {reminder}"
+
+    def _format_post_yandex_reply(self, state: DialogueState, base_reply: str) -> str:
+        if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS:
+            reminder = "Если проблема уже решена и вы вошли в Яндекс Про, напишите: Вошел. Если нет, опишите, что именно не получается."
+        else:
+            reminder = (
+                "Сейчас шаг после отправки заявки в парк: нужно зайти в Яндекс Про. "
+                "Если уже вошли, напишите: Вошел. Если не получается, опишите проблему."
+            )
+        if base_reply.strip() == reminder.strip():
+            return base_reply
+        return f"{base_reply}\n\n{reminder}"
+
+    def _format_registered_driver_reply(self, base_reply: str) -> str:
+        tail = (
+            "Если нужна помощь по Яндекс Про, выходу на линию, условиям парка, выплатам или офису, просто напишите вопрос. "
+            f"Адрес офиса: {self.settings.public_site_address}"
+        )
+        if tail in base_reply:
+            return base_reply
+        return f"{base_reply}\n\n{tail}"
 
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
         create_message(

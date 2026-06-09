@@ -38,9 +38,12 @@ def build_user_prompt(
 ) -> str:
     kb_text = "\n\n".join(f"[{name}]\n{content}" for name, content in knowledge_base.items())
     vehicle = driver.vehicle
-    current_prompt = PROMPTS.get(DialogueState(state), "")
+    current_state = DialogueState(state)
+    current_prompt = PROMPTS.get(current_state, "")
+    dialogue_mode = _dialogue_context(current_state)
     return (
         f"Текущее состояние: {state}\n"
+        f"Режим диалога: {dialogue_mode}\n"
         f"Допустимые next_state: {', '.join(allowed_states)}\n"
         f"Текущий обязательный вопрос: {current_prompt}\n"
         "Уже собранные данные:\n"
@@ -73,3 +76,13 @@ def build_user_prompt(
         "Если это FAQ или обычный вопрос по теме работы, ответь по смыслу и оставь next_state равным текущему state. "
         "Если пользователь уходит в сторону от текущего шага, не заполняй extracted_fields."
     )
+
+
+def _dialogue_context(state: DialogueState) -> str:
+    if state == DialogueState.NEW:
+        return "знакомство и старт регистрации"
+    if state in {DialogueState.ASK_YANDEX_PRO_LOGIN, DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS}:
+        return "помощь после отправки заявки в парк и вход в Яндекс Про"
+    if state == DialogueState.COMPLETED:
+        return "поддержка уже зарегистрированного водителя"
+    return "сбор анкеты на регистрацию"
