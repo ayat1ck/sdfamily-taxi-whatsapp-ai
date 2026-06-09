@@ -32,6 +32,7 @@ from app.admin.service import (
     get_application_or_404,
     get_driver_application,
     get_driver_or_404,
+    hard_delete_driver,
     list_applications,
     list_audit_logs,
     list_drivers,
@@ -393,6 +394,20 @@ async def api_chat_assign_manager(
     assign_manager_name(db, driver, payload.name)
     db.commit()
     return {"status": "ok"}
+
+
+@router.post("/api/chats/{driver_id}/hard-delete")
+async def api_chat_hard_delete(
+    driver_id: int,
+    request: Request,
+    _admin=Depends(require_admin_api),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    driver = get_driver_or_404(db, driver_id)
+    phone = hard_delete_driver(db, driver)
+    db.commit()
+    return {"status": "ok", "deleted_phone": phone}
 
 
 @router.patch("/api/applications/{application_id}")

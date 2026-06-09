@@ -449,6 +449,13 @@ def restart_application(db: Session, application: Application) -> None:
     )
 
 
+def hard_delete_driver(db: Session, driver: Driver) -> str:
+    phone = driver.whatsapp_phone
+    db.delete(driver)
+    db.flush()
+    return phone
+
+
 def set_duplicate_flag(db: Session, application: Application, flag: bool) -> None:
     driver = get_driver_or_404(db, application.driver_id)
     old_value = driver.duplicate_flag

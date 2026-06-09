@@ -50,6 +50,7 @@
             <button class="secondary" onclick="syncGoogle({{ selected_application.id }})">Sync Google</button>
             <button class="secondary" onclick="toggleDuplicate({{ selected_application.id }}, true)">Отметить дубль</button>
             <button class="danger" onclick="restartApplication({{ selected_application.id }})">Перезапуск</button>
+            <button class="danger" onclick="hardDeleteDriver({{ driver.id if driver else 0 }})">Удалить полностью</button>
           </div>
           <div class="two-col">
             <label>Статус заявки
@@ -149,6 +150,12 @@
       const reason = prompt("Причина запроса на удаление", "");
       await adminPost(`/admin/api/applications/${id}/request-deletion`, "POST", { reason });
       window.location.reload();
+    }
+    async function hardDeleteDriver(driverId) {
+      if (!driverId) return;
+      if (!confirm("Удалить водителя полностью? Будут удалены чат, документы, заявка и вся история. Действие необратимо.")) return;
+      await adminPost(`/admin/api/chats/${driverId}/hard-delete`);
+      window.location.href = "/admin/applications";
     }
   </script>
   {% endif %}

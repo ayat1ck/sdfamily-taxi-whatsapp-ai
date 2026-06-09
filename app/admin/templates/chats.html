@@ -73,6 +73,7 @@
             <button class="secondary" onclick="switchMode('manual')">Ручной</button>
             <button class="secondary" onclick="pauseChat()">Пауза</button>
             <button class="danger" onclick="restartApplication({{ application.id if application else 0 }})">Перезапуск</button>
+            <button class="danger" onclick="hardDeleteDriver()">Удалить полностью</button>
           </div>
         </div>
 
@@ -289,6 +290,11 @@
       const reason = prompt("Причина удаления", "");
       await adminPost(`/admin/api/applications/${id}/request-deletion`, "POST", { reason });
       window.location.reload();
+    }
+    async function hardDeleteDriver() {
+      if (!confirm("Удалить водителя полностью? Будут удалены чат, документы, заявка и вся история. Действие необратимо.")) return;
+      await adminPost(`/admin/api/chats/${driverId}/hard-delete`);
+      window.location.href = "/admin/chats";
     }
     adminPost(`/admin/api/chats/${driverId}/mark-read`).catch(() => {});
   </script>
