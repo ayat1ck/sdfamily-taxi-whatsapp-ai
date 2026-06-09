@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.dialog.faq import load_knowledge_base
+from app.dialog.prompts import PROMPTS
 from app.dialog.llm_prompt import build_system_prompt, build_user_prompt
 from app.dialog.states import DialogueState
 from app.drivers.models import Driver
@@ -162,6 +163,34 @@ class DeterministicAIProvider:
         current_state = DialogueState(state)
         text = message.strip()
 
+        if not text:
+            return AIResult(
+                PROMPTS.get(current_state, "Пожалуйста, ответьте на текущий вопрос."),
+                "clarification",
+                {},
+                state,
+                0.4,
+            )
+
+        if current_state == DialogueState.ASK_FULL_NAME:
+            if _looks_like_full_name(text):
+                last_name, first_name, middle_name = split_full_name(text)
+                extracted = {"full_name": text}
+                if last_name:
+                    extracted["last_name"] = last_name
+                if first_name:
+                    extracted["first_name"] = first_name
+                if middle_name:
+                    extracted["middle_name"] = middle_name
+                return AIResult("", "registration", extracted, DialogueState.ASK_PHONE.value, 0.9)
+            return AIResult(
+                "Напишите ваше ФИО полностью. Например: Абай Аят Жаныбекулы.",
+                "clarification",
+                {},
+                state,
+                0.45,
+            )
+
         if current_state == DialogueState.ASK_PHONE and looks_like_phone(text):
             return AIResult("", "registration", {"phone": normalize_phone(text)}, DialogueState.ASK_CITY.value, 0.95)
         if current_state == DialogueState.ASK_IIN and looks_like_iin(text):
@@ -205,7 +234,6 @@ class DeterministicAIProvider:
             return AIResult("", "confirmation", {}, DialogueState.READY_TO_SEND_YANDEX.value, 0.99)
 
         fallback_field_map = {
-            DialogueState.ASK_FULL_NAME: "full_name",
             DialogueState.ASK_CITY: "city",
             DialogueState.ASK_ADDRESS: "address",
             DialogueState.ASK_CAR_BRAND: "brand",
@@ -217,20 +245,12 @@ class DeterministicAIProvider:
         }
         if current_state in fallback_field_map and text:
             extracted = {fallback_field_map[current_state]: text}
-            if current_state == DialogueState.ASK_FULL_NAME:
-                last_name, first_name, middle_name = split_full_name(text)
-                if last_name:
-                    extracted["last_name"] = last_name
-                if first_name:
-                    extracted["first_name"] = first_name
-                if middle_name:
-                    extracted["middle_name"] = middle_name
             if current_state == DialogueState.ASK_EMPLOYMENT_TYPE:
                 extracted["employment_type"] = normalize_employment_type(text)
             return AIResult("", "registration", extracted, _default_next_state(current_state).value, 0.8)
 
         return AIResult(
-            "Не совсем понял сообщение. Пожалуйста, ответьте еще раз коротко.",
+            PROMPTS.get(current_state, "Пожалуйста, ответьте на текущий вопрос."),
             "clarification",
             {},
             state,
@@ -308,6 +328,17 @@ def _default_next_state(state: DialogueState) -> DialogueState:
     return order[min(index + 1, len(order) - 1)]
 
 
+def _looks_like_full_name(value: str) -> bool:
+    parts = [part for part in normalize_text_token(value).split() if part]
+    if len(parts) < 2:
+        return False
+    if any(part.isdigit() for part in parts):
+        return False
+    if len(parts[0]) < 2 or len(parts[1]) < 2:
+        return False
+    return True
+
+
 def _match_faq(message: str, knowledge_base: dict[str, str]) -> str | None:
     lowered = normalize_text_token(message)
     keyword_map = {
@@ -335,3 +366,4 @@ def _match_faq(message: str, knowledge_base: dict[str, str]) -> str | None:
 @lru_cache
 def get_ai_service() -> AIService:
     return AIService()
+
