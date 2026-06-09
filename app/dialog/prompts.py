@@ -1,6 +1,13 @@
 from app.dialog.states import DialogueState
 
 
+CAR_MODEL_PROMPT = (
+    "Напишите модель автомобиля, как в документах или техпаспорте "
+    "(Camry, Rio, S-Class, X5 и т.п.). "
+    "Пожалуйста, указывайте название модели, а не код кузова (w221, e90 и подобное)."
+)
+
+
 PROMPTS: dict[DialogueState, str] = {
     DialogueState.NEW: "Здравствуйте. Я помогу подключиться к таксопарку SD Family Taxi и пройти регистрацию. Если готовы начать, напишите ваше ФИО полностью.",
     DialogueState.ASK_FULL_NAME: "Напишите ваше ФИО полностью.",
@@ -14,7 +21,7 @@ PROMPTS: dict[DialogueState, str] = {
     DialogueState.ASK_HAS_CAR: "Напишите марку автомобиля, например Toyota.",
     DialogueState.ASK_EXISTING_VEHICLE_IDENTIFIER: "Напишите марку автомобиля, например Toyota.",
     DialogueState.ASK_CAR_BRAND: "Напишите марку автомобиля, например Toyota.",
-    DialogueState.ASK_CAR_MODEL: "Теперь напишите модель автомобиля, например Camry.",
+    DialogueState.ASK_CAR_MODEL: CAR_MODEL_PROMPT,
     DialogueState.ASK_CAR_YEAR: "Укажите год выпуска автомобиля.",
     DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля.",
     DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля.",

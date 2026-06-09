@@ -233,6 +233,56 @@ CAR_MODEL_ALIASES = {
     "окаванго": "Okavango",
 }
 
+# Mercedes-Benz chassis codes (W/V) → catalog model names accepted by Yandex Fleet.
+CAR_CHASSIS_ALIASES = {
+    "w140": "S-Class",
+    "w220": "S-Class",
+    "w221": "S-Class",
+    "w222": "S-Class",
+    "w223": "S-Class",
+    "w204": "C-Class",
+    "w205": "C-Class",
+    "w206": "C-Class",
+    "w210": "E-Class",
+    "w211": "E-Class",
+    "w212": "E-Class",
+    "w213": "E-Class",
+    "w214": "E-Class",
+    "w245": "B-Class",
+    "w246": "B-Class",
+    "w247": "B-Class",
+    "w176": "A-Class",
+    "w177": "A-Class",
+    "w463": "G-Class",
+    "w464": "G-Class",
+    "w461": "G-Class",
+    "w164": "GLE",
+    "w166": "GLE",
+    "w167": "GLE",
+    "w253": "GLC",
+    "x253": "GLC",
+    "w251": "R-Class",
+    "v447": "V-Class",
+    "vito": "Vito",
+    "sprinter": "Sprinter",
+}
+
+
+def _normalize_chassis_key(value: str) -> str:
+    return re.sub(r"[\s._-]+", "", normalize_text_token(value).lower())
+
+
+def resolve_car_chassis_model(value: str) -> str | None:
+    key = _normalize_chassis_key(value)
+    if not key:
+        return None
+    if key in CAR_CHASSIS_ALIASES:
+        return CAR_CHASSIS_ALIASES[key]
+    match = re.fullmatch(r"([wvx]\d{3})[a-z]?", key)
+    if match:
+        return CAR_CHASSIS_ALIASES.get(match.group(1))
+    return None
+
 
 def normalize_text_token(value: str) -> str:
     normalized = value.strip().lower().replace("ё", "е")
@@ -427,6 +477,9 @@ def normalize_car_model(value: str) -> str:
         if cleaned.startswith(f"{key} "):
             cleaned = cleaned[len(key) + 1 :].strip()
             break
+    chassis = resolve_car_chassis_model(cleaned)
+    if chassis:
+        return chassis
     alias = CAR_MODEL_ALIASES.get(cleaned)
     if alias:
         return alias
@@ -459,6 +512,8 @@ def looks_like_precise_car_model(value: str) -> bool:
             cleaned = cleaned[len(key) + 1 :].strip()
             break
     if cleaned in CAR_MODEL_ALIASES:
+        return True
+    if resolve_car_chassis_model(cleaned):
         return True
     if len(cleaned) < 2:
         return False

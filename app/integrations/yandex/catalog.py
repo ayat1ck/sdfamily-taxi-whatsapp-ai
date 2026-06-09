@@ -266,7 +266,8 @@ def catalog_validation_error_message(errors: list[str]) -> str:
     if any(error.startswith("invalid:car_model_not_in_catalog") or error == "car_model_not_in_catalog" for error in errors):
         return (
             "Эта модель не найдена в справочнике Яндекса для указанной марки. "
-            "Напишите модель точно, как в документах. Например: Camry, Rio, Sonata."
+            "Напишите название модели из документов, как Camry, Rio, S-Class или X5 — "
+            "не код кузова (w221, e90 и т.п.)."
         )
     if "car_brand_model_not_in_catalog" in errors:
         return (
