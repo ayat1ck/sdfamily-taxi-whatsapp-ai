@@ -143,9 +143,9 @@ CAR_BRAND_ALIASES = {
 }
 
 CAR_MODEL_ALIASES = {
-    "с класс": "C-Class",
+    "с класс": "S-Class",
     "ц класс": "C-Class",
-    "с-класс": "C-Class",
+    "с-класс": "S-Class",
     "ц-класс": "C-Class",
     "c class": "C-Class",
     "c-class": "C-Class",
