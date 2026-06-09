@@ -8,10 +8,250 @@ YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
 PLATE_PATTERN = re.compile(r"\b[A-ZА-Я0-9]{5,10}\b", re.IGNORECASE)
 DATE_PATTERN = re.compile(r"\b(\d{2})[.\-/](\d{2})[.\-/](\d{4})\b")
 
+CYRILLIC_TO_LATIN = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "kh",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+}
+
+CAR_BRAND_ALIASES = {
+    "мерседес": "Mercedes",
+    "мерс": "Mercedes",
+    "мерседес бенц": "Mercedes-Benz",
+    "мерседес-бенц": "Mercedes-Benz",
+    "mercedes": "Mercedes",
+    "mercedes benz": "Mercedes-Benz",
+    "mercedes-benz": "Mercedes-Benz",
+    "бмв": "BMW",
+    "bmw": "BMW",
+    "тойота": "Toyota",
+    "toyota": "Toyota",
+    "хундай": "Hyundai",
+    "хендай": "Hyundai",
+    "hyundai": "Hyundai",
+    "киа": "Kia",
+    "kia": "Kia",
+    "лада": "Lada",
+    "ваз": "Lada",
+    "lada": "Lada",
+    "лексус": "Lexus",
+    "lexus": "Lexus",
+    "ниссан": "Nissan",
+    "nissan": "Nissan",
+    "шевроле": "Chevrolet",
+    "chevrolet": "Chevrolet",
+    "шкода": "Skoda",
+    "skoda": "Skoda",
+    "фольксваген": "Volkswagen",
+    "volkswagen": "Volkswagen",
+    "ауди": "Audi",
+    "audi": "Audi",
+    "хонда": "Honda",
+    "honda": "Honda",
+    "мазда": "Mazda",
+    "mazda": "Mazda",
+    "рено": "Renault",
+    "renault": "Renault",
+    "джили": "Geely",
+    "geely": "Geely",
+    "хавал": "Haval",
+    "haval": "Haval",
+    "чанган": "Changan",
+    "changan": "Changan",
+    "черри": "Chery",
+    "chery": "Chery",
+    "омода": "Omoda",
+    "omoda": "Omoda",
+    "джейку": "Jaecoo",
+    "jaecoo": "Jaecoo",
+    "эксид": "Exeed",
+    "exeed": "Exeed",
+    "джетур": "Jetour",
+    "jetour": "Jetour",
+    "танк": "Tank",
+    "tank": "Tank",
+    "лисян": "Li Auto",
+    "li auto": "Li Auto",
+    "бид": "BYD",
+    "byd": "BYD",
+    "зикр": "Zeekr",
+    "zeekr": "Zeekr",
+    "гак": "GAC",
+    "gac": "GAC",
+    "джак": "JAC",
+    "jac": "JAC",
+    "донгфенг": "Dongfeng",
+    "dongfeng": "Dongfeng",
+    "войя": "Voyah",
+    "voyah": "Voyah",
+    "хончи": "Hongqi",
+    "hongqi": "Hongqi",
+    "фау": "FAW",
+    "faw": "FAW",
+    "грейт вол": "Great Wall",
+    "great wall": "Great Wall",
+    "эм джи": "MG",
+    "mg": "MG",
+    "равон": "Ravon",
+    "ravon": "Ravon",
+    "инфинити": "Infiniti",
+    "infiniti": "Infiniti",
+    "порше": "Porsche",
+    "porsche": "Porsche",
+    "вольво": "Volvo",
+    "volvo": "Volvo",
+    "ленд ровер": "Land Rover",
+    "land rover": "Land Rover",
+    "рэндж ровер": "Range Rover",
+    "range rover": "Range Rover",
+    "субару": "Subaru",
+    "subaru": "Subaru",
+    "сузуки": "Suzuki",
+    "suzuki": "Suzuki",
+    "митсубиси": "Mitsubishi",
+    "mitsubishi": "Mitsubishi",
+}
+
+CAR_MODEL_ALIASES = {
+    "с класс": "C-Class",
+    "ц класс": "C-Class",
+    "с-класс": "C-Class",
+    "ц-класс": "C-Class",
+    "c class": "C-Class",
+    "c-class": "C-Class",
+    "е класс": "E-Class",
+    "е-класс": "E-Class",
+    "e class": "E-Class",
+    "e-class": "E-Class",
+    "эс класс": "S-Class",
+    "эс-класс": "S-Class",
+    "s class": "S-Class",
+    "s-class": "S-Class",
+    "s klasse": "S-Class",
+    "s-klasse": "S-Class",
+    "эска": "S-Class",
+    "г класс": "G-Class",
+    "г-класс": "G-Class",
+    "g class": "G-Class",
+    "g-class": "G-Class",
+    "гелик": "G-Class",
+    "камри": "Camry",
+    "camry": "Camry",
+    "королла": "Corolla",
+    "corolla": "Corolla",
+    "авенсис": "Avensis",
+    "avensis": "Avensis",
+    "элантра": "Elantra",
+    "elantra": "Elantra",
+    "солярис": "Solaris",
+    "solaris": "Solaris",
+    "соната": "Sonata",
+    "sonata": "Sonata",
+    "к5": "K5",
+    "k5": "K5",
+    "рио": "Rio",
+    "rio": "Rio",
+    "церато": "Cerato",
+    "cerato": "Cerato",
+    "приора": "Priora",
+    "гранта": "Granta",
+    "granta": "Granta",
+    "веста": "Vesta",
+    "vesta": "Vesta",
+    "джолион": "Jolion",
+    "jolion": "Jolion",
+    "дарго": "Dargo",
+    "dargo": "Dargo",
+    "f7": "F7",
+    "f7x": "F7x",
+    "h5": "H5",
+    "h6": "H6",
+    "uni k": "Uni-K",
+    "uni-k": "Uni-K",
+    "уни кей": "Uni-K",
+    "uni t": "Uni-T",
+    "uni-t": "Uni-T",
+    "уни ти": "Uni-T",
+    "alsvin": "Alsvin",
+    "алсвин": "Alsvin",
+    "cs35": "CS35",
+    "cs55": "CS55",
+    "cs55 plus": "CS55 Plus",
+    "cs75": "CS75",
+    "тигго 7": "Tiggo 7",
+    "тигго 8": "Tiggo 8",
+    "tiggo 7": "Tiggo 7",
+    "tiggo 8": "Tiggo 8",
+    "arrizo 8": "Arrizo 8",
+    "арризо 8": "Arrizo 8",
+    "c5": "C5",
+    "s5": "S5",
+    "j7": "J7",
+    "t2": "T2",
+    "txl": "TXL",
+    "lx": "LX",
+    "rx": "RX",
+    "монжаро": "Monjaro",
+    "monjaro": "Monjaro",
+    "кулрей": "Coolray",
+    "coolray": "Coolray",
+    "эмгранд": "Emgrand",
+    "emgrand": "Emgrand",
+    "атлас": "Atlas",
+    "atlas": "Atlas",
+    "okavango": "Okavango",
+    "окаванго": "Okavango",
+}
+
 
 def normalize_text_token(value: str) -> str:
     normalized = value.strip().lower().replace("ё", "е")
     return re.sub(r"\s+", " ", normalized)
+
+
+def transliterate_cyrillic_to_latin(value: str) -> str:
+    result: list[str] = []
+    for char in value:
+        lower = char.lower()
+        if lower in CYRILLIC_TO_LATIN:
+            latin = CYRILLIC_TO_LATIN[lower]
+            if char.isupper() and latin:
+                result.append(latin[0].upper() + latin[1:])
+            else:
+                result.append(latin)
+        else:
+            result.append(char)
+    return re.sub(r"\s+", " ", "".join(result)).strip()
 
 
 def normalize_phone(value: str) -> str:
@@ -54,6 +294,15 @@ def parse_date(value: str) -> str | None:
     except ValueError:
         return None
     return parsed.strftime("%Y-%m-%d")
+
+
+def parse_iso_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return None
 
 
 def parse_yes_no(value: str) -> bool | None:
@@ -127,6 +376,8 @@ def normalize_employment_type(value: str) -> str:
         "samozanyatyy": "самозанятый",
         "self employed": "самозанятый",
         "self-employed": "самозанятый",
+        "ип": "ип",
+        "individual entrepreneur": "ип",
     }
     return mapping.get(normalized, value.strip())
 
@@ -145,3 +396,126 @@ def split_full_name(value: str) -> tuple[str | None, str | None, str | None]:
     first_name = parts[1] if len(parts) > 1 else None
     middle_name = " ".join(parts[2:]) if len(parts) > 2 else None
     return last_name, first_name, middle_name
+
+
+def normalize_car_brand(value: str) -> str:
+    cleaned = normalize_text_token(value)
+    alias = CAR_BRAND_ALIASES.get(cleaned)
+    if alias:
+        return alias
+    transliterated = transliterate_cyrillic_to_latin(value)
+    if not transliterated:
+        return value.strip()
+    return " ".join(part.capitalize() if not part.isupper() else part for part in transliterated.split())
+
+
+def normalize_car_model(value: str) -> str:
+    cleaned = normalize_text_token(value)
+    alias = CAR_MODEL_ALIASES.get(cleaned)
+    if alias:
+        return alias
+    transliterated = transliterate_cyrillic_to_latin(value)
+    if not transliterated:
+        return value.strip()
+    normalized = transliterated.replace(" Class", "-Class").replace(" class", "-Class")
+    return " ".join(
+        part.capitalize() if re.search(r"[A-Za-z]", part) and not part.isupper() and not re.search(r"\d", part) else part
+        for part in normalized.split()
+    )
+
+
+def extract_known_car_brand(value: str) -> str | None:
+    cleaned = normalize_text_token(value)
+    if cleaned in CAR_BRAND_ALIASES:
+        return CAR_BRAND_ALIASES[cleaned]
+    for key, brand in sorted(CAR_BRAND_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        if cleaned == key:
+            return brand
+        if cleaned.startswith(f"{key} ") or cleaned.endswith(f" {key}") or f" {key} " in cleaned:
+            return brand
+    return None
+
+
+def looks_like_precise_car_model(value: str) -> bool:
+    cleaned = normalize_text_token(value)
+    if cleaned in CAR_MODEL_ALIASES:
+        return True
+    if len(cleaned) < 2:
+        return False
+    if len(cleaned.split()) >= 5:
+        return False
+    return bool(re.search(r"[a-zA-Zа-яА-Я]", value))
+
+
+def validate_kz_iin(value: str) -> list[str]:
+    digits = re.sub(r"\D+", "", value)
+    if len(digits) != 12:
+        return ["invalid_iin_length"]
+    try:
+        datetime.strptime(digits[:6], "%y%m%d")
+    except ValueError:
+        return ["invalid_iin_birth_date"]
+    return []
+
+
+def validate_birth_date(value: str) -> list[str]:
+    parsed = parse_iso_date(value)
+    if not parsed:
+        return ["invalid_birth_date"]
+    now = datetime.utcnow()
+    if parsed > now:
+        return ["birth_date_in_future"]
+    age = now.year - parsed.year - ((now.month, now.day) < (parsed.month, parsed.day))
+    if age < 18:
+        return ["driver_underage"]
+    if age > 80:
+        return ["driver_age_too_high"]
+    return []
+
+
+def validate_hired_at(value: str) -> list[str]:
+    parsed = parse_iso_date(value)
+    if not parsed:
+        return ["invalid_hired_at"]
+    if parsed > datetime.utcnow():
+        return ["hired_at_in_future"]
+    return []
+
+
+def validate_driver_dates(
+    *,
+    birth_date: str | None = None,
+    driving_experience_since: str | None = None,
+    driver_license_issue_date: str | None = None,
+    driver_license_expires_at: str | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    birth = parse_iso_date(birth_date)
+    experience = parse_iso_date(driving_experience_since)
+    issue = parse_iso_date(driver_license_issue_date)
+    expires = parse_iso_date(driver_license_expires_at)
+    now = datetime.utcnow()
+
+    if experience:
+        if experience > now:
+            errors.append("driving_experience_in_future")
+        if birth and experience < birth:
+            errors.append("driving_experience_before_birth")
+        if birth and (experience.year - birth.year - ((experience.month, experience.day) < (birth.month, birth.day))) < 16:
+            errors.append("driving_experience_too_early")
+
+    if issue:
+        if issue > now:
+            errors.append("license_issue_in_future")
+        if birth and issue < birth:
+            errors.append("license_issue_before_birth")
+        if birth and (issue.year - birth.year - ((issue.month, issue.day) < (birth.month, birth.day))) < 16:
+            errors.append("license_issue_too_early")
+
+    if expires:
+        if issue and expires <= issue:
+            errors.append("license_expires_before_issue")
+        if expires < now:
+            errors.append("license_expired")
+
+    return errors

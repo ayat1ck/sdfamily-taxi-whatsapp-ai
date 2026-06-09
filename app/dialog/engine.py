@@ -28,6 +28,7 @@ from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.service import create_message
 from app.utils.logger import get_logger
 from app.utils.validators import normalize_plate_number, normalize_text_token
+from app.utils.validators import normalize_car_brand, normalize_car_model
 from app.vehicles.service import find_vehicle_by_plate_number, get_or_create_vehicle
 from app.whatsapp.media import WhatsAppMediaClient
 from app.whatsapp.parser import ParsedWhatsAppMessage
@@ -146,6 +147,18 @@ class DialogueEngine:
             )
             return self._respond(db, driver, application, command_reply)
 
+        pending_field = self._get_pending_field_edit(driver)
+        if pending_field and state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
+            return self._handle_pending_field_edit_value(
+                db,
+                driver,
+                application,
+                state,
+                incoming.text or "",
+                incoming_message.id,
+                pending_field,
+            )
+
         if state == DialogueState.COMPLETED:
             return self._handle_registered_driver_support(db, driver, application, incoming.text or "", incoming_message.id)
 
@@ -193,6 +206,25 @@ class DialogueEngine:
             return self._handle_field_edit(db, driver, application, state, ai_result)
         if ai_result.intent == "correction":
             correction_state = DialogueState(ai_result.next_state or state.value)
+            pending_target_field = self._correction_state_to_field_name(correction_state)
+            if pending_target_field and state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
+                self._set_pending_field_edit(driver, pending_target_field, state.value)
+                create_conversation_event(
+                    db,
+                    driver,
+                    "field_edit_requested",
+                    {
+                        "from_state": state.value,
+                        "target_field": pending_target_field,
+                        "message": incoming.text or "",
+                    },
+                )
+                return self._respond(
+                    db,
+                    driver,
+                    application,
+                    f"Хорошо. Отправьте новое значение для поля «{self._field_label(pending_target_field)}» одним сообщением.",
+                )
             update_driver_state(db, driver, correction_state.value)
             set_application_status(db, application, _application_status_from_state(correction_state))
             create_conversation_event(
@@ -464,6 +496,72 @@ class DialogueEngine:
             driver,
             application,
             f"Готово, обновил поле «{self._field_label(ai_result.target_field)}». Проверьте данные еще раз.\n\n{self._build_confirmation(driver)}",
+        )
+
+    def _handle_pending_field_edit_value(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+        incoming_message_id: int,
+        target_field: str,
+    ) -> str:
+        target_state = self._field_name_to_correction_state(target_field)
+        if target_state is None:
+            self._clear_pending_field_edit(driver)
+            return self._respond(db, driver, application, "Не удалось определить поле для исправления. Напишите, что именно нужно изменить.")
+
+        ai_result = self.ai.respond(target_state.value, message_text, driver)
+        ai_result.target_field = ai_result.target_field or target_field
+        ai_result.reasoning_summary = ai_result.reasoning_summary or f"pending_field_edit:{target_field}"
+        ai_result.suggested_next_action = ai_result.suggested_next_action or DialogueState.CONFIRM_DATA.value
+        self._record_ai_trace(db, incoming_message_id, driver, state.value, message_text, ai_result)
+
+        normalized_fields = ai_result.normalized_fields or ai_result.extracted_fields or {}
+        if ai_result.validation_errors or not normalized_fields:
+            reply = ai_result.reply or f"Отправьте корректное значение для поля «{self._field_label(target_field)}»."
+            return self._respond(db, driver, application, reply)
+
+        duplicate_state = state
+        if "iin" in normalized_fields:
+            duplicate_state = DialogueState.ASK_IIN
+        elif "plate_number" in normalized_fields:
+            duplicate_state = DialogueState.ASK_CAR_PLATE
+        duplicate_reply = self._check_duplicate_constraints(db, driver, application, duplicate_state, normalized_fields)
+        if duplicate_reply:
+            return self._respond(db, driver, application, duplicate_reply)
+
+        changed_fields = self._apply_extracted_fields(
+            driver,
+            normalized_fields,
+            db,
+            application=application,
+            audit_action="field_corrected_by_user",
+            actor_type="driver",
+        )
+        self._clear_pending_field_edit(driver)
+        update_driver_state(db, driver, DialogueState.CONFIRM_DATA.value)
+        set_application_status(db, application, "confirming_data", yandex_status="needs_resubmit")
+        application.yandex_error = None
+        db.add(application)
+        create_conversation_event(
+            db,
+            driver,
+            "field_corrected_by_user",
+            {
+                "target_field": target_field,
+                "changed_fields": changed_fields,
+                "message": message_text,
+                "source": "pending_field_edit",
+            },
+        )
+        return self._respond(
+            db,
+            driver,
+            application,
+            f"Готово, обновил поле «{self._field_label(target_field)}». Проверьте данные еще раз.\n\n{self._build_confirmation(driver)}",
         )
 
     def _record_ai_trace(
@@ -837,6 +935,10 @@ class DialogueEngine:
         for key, value in fields.items():
             if key == "plate_number":
                 value = normalize_plate_number(value)
+            if key == "brand":
+                value = normalize_car_brand(value)
+            if key == "model":
+                value = normalize_car_model(value)
             if hasattr(driver, key):
                 old_value = getattr(driver, key)
                 setattr(driver, key, value)
@@ -954,6 +1056,76 @@ class DialogueEngine:
         if tail in base_reply:
             return base_reply
         return f"{base_reply}\n\n{tail}"
+
+    def _get_pending_field_edit(self, driver: Driver) -> str | None:
+        context = driver.support_context_json or {}
+        pending = context.get("pending_field_edit")
+        if isinstance(pending, dict):
+            target_field = pending.get("target_field")
+            if isinstance(target_field, str) and target_field:
+                return target_field
+        return None
+
+    def _set_pending_field_edit(self, driver: Driver, target_field: str, source_state: str) -> None:
+        context = dict(driver.support_context_json or {})
+        context["pending_field_edit"] = {
+            "target_field": target_field,
+            "source_state": source_state,
+            "requested_at": datetime.utcnow().isoformat(),
+        }
+        driver.support_context_json = context
+        driver.updated_at = datetime.utcnow()
+
+    def _clear_pending_field_edit(self, driver: Driver) -> None:
+        context = dict(driver.support_context_json or {})
+        context.pop("pending_field_edit", None)
+        driver.support_context_json = context or None
+
+    def _correction_state_to_field_name(self, state: DialogueState) -> str | None:
+        mapping = {
+            DialogueState.ASK_FULL_NAME: "full_name",
+            DialogueState.ASK_PHONE: "phone",
+            DialogueState.ASK_CITY: "city",
+            DialogueState.ASK_ADDRESS: "address",
+            DialogueState.ASK_IIN: "iin",
+            DialogueState.ASK_BIRTH_DATE: "birth_date",
+            DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "driving_experience_since",
+            DialogueState.ASK_CAR_BRAND: "brand",
+            DialogueState.ASK_CAR_MODEL: "model",
+            DialogueState.ASK_CAR_YEAR: "year",
+            DialogueState.ASK_CAR_PLATE: "plate_number",
+            DialogueState.ASK_CAR_COLOR: "color",
+            DialogueState.ASK_DRIVER_LICENSE_NUMBER: "driver_license_number",
+            DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "driver_license_issue_date",
+            DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "driver_license_expires_at",
+            DialogueState.ASK_EMPLOYMENT_TYPE: "employment_type",
+            DialogueState.ASK_HIRED_AT: "hired_at",
+            DialogueState.ASK_HEARING_IMPAIRED: "is_hearing_impaired",
+        }
+        return mapping.get(state)
+
+    def _field_name_to_correction_state(self, field_name: str) -> DialogueState | None:
+        mapping = {
+            "full_name": DialogueState.ASK_FULL_NAME,
+            "phone": DialogueState.ASK_PHONE,
+            "city": DialogueState.ASK_CITY,
+            "address": DialogueState.ASK_ADDRESS,
+            "iin": DialogueState.ASK_IIN,
+            "birth_date": DialogueState.ASK_BIRTH_DATE,
+            "driving_experience_since": DialogueState.ASK_DRIVING_EXPERIENCE_SINCE,
+            "brand": DialogueState.ASK_CAR_BRAND,
+            "model": DialogueState.ASK_CAR_MODEL,
+            "year": DialogueState.ASK_CAR_YEAR,
+            "plate_number": DialogueState.ASK_CAR_PLATE,
+            "color": DialogueState.ASK_CAR_COLOR,
+            "driver_license_number": DialogueState.ASK_DRIVER_LICENSE_NUMBER,
+            "driver_license_issue_date": DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE,
+            "driver_license_expires_at": DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT,
+            "employment_type": DialogueState.ASK_EMPLOYMENT_TYPE,
+            "hired_at": DialogueState.ASK_HIRED_AT,
+            "is_hearing_impaired": DialogueState.ASK_HEARING_IMPAIRED,
+        }
+        return mapping.get(field_name)
 
     def _field_label(self, field_name: str | None) -> str:
         labels = {

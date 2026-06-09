@@ -6,6 +6,7 @@ from app.applications.models import Application
 from app.drivers.models import Driver
 from app.integrations.yandex.client import YandexFleetClient, YandexPartialSubmissionError
 from app.integrations.yandex.mapper import map_driver_to_yandex
+from app.utils.validators import validate_birth_date, validate_driver_dates, validate_hired_at, validate_kz_iin
 
 
 class YandexSubmissionService:
@@ -88,6 +89,21 @@ class YandexSubmissionService:
                 errors.append("invalid:driver_license_expires_at_before_issue_date")
         if payload.birth_date and payload.driving_experience_since and payload.driving_experience_since < payload.birth_date:
             errors.append("invalid:driving_experience_before_birth_date")
+        if payload.iin:
+            errors.extend(f"invalid:{item}" for item in validate_kz_iin(payload.iin))
+        if payload.birth_date:
+            errors.extend(f"invalid:{item}" for item in validate_birth_date(payload.birth_date))
+        errors.extend(
+            f"invalid:{item}"
+            for item in validate_driver_dates(
+                birth_date=payload.birth_date,
+                driving_experience_since=payload.driving_experience_since,
+                driver_license_issue_date=payload.driver_license_issue_date,
+                driver_license_expires_at=payload.driver_license_expires_at,
+            )
+        )
+        if payload.hired_at:
+            errors.extend(f"invalid:{item}" for item in validate_hired_at(payload.hired_at))
         if payload.document_refs:
             warnings.append(f"documents_as_refs:{len(payload.document_refs)}")
         else:
