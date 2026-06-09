@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.applications.models import Application
 from app.database.session import get_db
+from app.dialog.ai import get_ai_service
 from app.dialog.engine import DialogueEngine
+from app.dialog.states import DialogueState
 from app.documents.models import Document
 from app.drivers.models import Driver
 from app.drivers.service import get_or_create_driver
@@ -22,6 +24,7 @@ engine = DialogueEngine()
 google_drive = GoogleDriveClient()
 google_sheets = GoogleSheetsClient()
 yandex = YandexSubmissionService()
+ai_service = get_ai_service()
 
 
 class DebugMessageRequest(BaseModel):
@@ -34,6 +37,12 @@ class DebugDocumentRequest(BaseModel):
     filename: str
     content_base64: str
     upload_to_drive: bool = True
+
+
+class DebugAIInspectRequest(BaseModel):
+    phone: str
+    text: str = Field(min_length=1)
+    state: str | None = None
 
 
 def _get_driver_or_404(db: Session, phone: str) -> Driver:
@@ -93,6 +102,26 @@ def debug_messages(phone: str, db: Session = Depends(get_db)) -> dict[str, objec
             }
             for message in messages
         ],
+    }
+
+
+@router.post("/ai/inspect")
+def debug_ai_inspect(payload: DebugAIInspectRequest, db: Session = Depends(get_db)) -> dict[str, object]:
+    driver = get_or_create_driver(db, payload.phone)
+    state = payload.state or driver.state or DialogueState.NEW.value
+    result = ai_service.respond(state, payload.text, driver)
+    return {
+        "status": "ok",
+        "phone": driver.whatsapp_phone,
+        "state": state,
+        "text": payload.text,
+        "ai_result": {
+            "reply": result.reply,
+            "intent": result.intent,
+            "next_state": result.next_state,
+            "confidence": result.confidence,
+            "extracted_fields": result.extracted_fields,
+        },
     }
 
 

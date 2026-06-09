@@ -132,6 +132,17 @@ class DialogueEngine:
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
         if ai_result.intent == "clarification":
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
+        if ai_result.intent == "correction":
+            correction_state = DialogueState(ai_result.next_state or state.value)
+            update_driver_state(db, driver, correction_state.value)
+            set_application_status(db, application, _application_status_from_state(correction_state))
+            create_conversation_event(
+                db,
+                driver,
+                "correction_requested",
+                {"from_state": state.value, "to_state": correction_state.value, "message": incoming.text or ""},
+            )
+            return self._respond(db, driver, application, ai_result.reply or PROMPTS[correction_state])
 
         duplicate_reply = self._check_duplicate_constraints(db, driver, application, state, ai_result.extracted_fields)
         if duplicate_reply:

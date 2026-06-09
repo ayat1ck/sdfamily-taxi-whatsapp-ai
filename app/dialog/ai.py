@@ -203,6 +203,16 @@ class DeterministicAIProvider:
                 0.55,
             )
 
+        correction_state = _detect_correction_state(current_state, text)
+        if correction_state is not None:
+            return AIResult(
+                f"Хорошо, исправим этот пункт. {PROMPTS[correction_state]}",
+                "correction",
+                {},
+                correction_state.value,
+                0.85,
+            )
+
         if current_state == DialogueState.ASK_FULL_NAME:
             if _looks_like_full_name(text):
                 last_name, first_name, middle_name = split_full_name(text)
@@ -527,6 +537,41 @@ def _coerce_model_response(payload: dict[str, object], current_state: str) -> AI
     normalized.setdefault("next_state", current_state)
     normalized.setdefault("confidence", 0.6)
     return AIModelResponse.model_validate(normalized)
+
+
+def _detect_correction_state(current_state: DialogueState, text: str) -> DialogueState | None:
+    normalized = normalize_text_token(text)
+    correction_markers = ("исправ", "измен", "ошибка", "неверно", "не правильно", "другое", "поменяй")
+    if not any(marker in normalized for marker in correction_markers):
+        return None
+
+    field_mapping: list[tuple[tuple[str, ...], DialogueState]] = [
+        (("фио", "полное имя"), DialogueState.ASK_FULL_NAME),
+        (("телефон", "номер"), DialogueState.ASK_PHONE),
+        (("город",), DialogueState.ASK_CITY),
+        (("адрес",), DialogueState.ASK_ADDRESS),
+        (("иин",), DialogueState.ASK_IIN),
+        (("дата рождения", "рождение"), DialogueState.ASK_BIRTH_DATE),
+        (("стаж", "опыт"), DialogueState.ASK_DRIVING_EXPERIENCE_SINCE),
+        (("марка", "бренд"), DialogueState.ASK_CAR_BRAND),
+        (("модель",), DialogueState.ASK_CAR_MODEL),
+        (("год",), DialogueState.ASK_CAR_YEAR),
+        (("госномер", "номер машины", "номер авто", "номер автомобиля"), DialogueState.ASK_CAR_PLATE),
+        (("цвет",), DialogueState.ASK_CAR_COLOR),
+        (("права", "ву", "номер прав", "водительское удостоверение"), DialogueState.ASK_DRIVER_LICENSE_NUMBER),
+        (("дата выдачи", "выдано"), DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE),
+        (("срок действия", "действует до"), DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT),
+        (("условие работы", "самозанятый", "штатный"), DialogueState.ASK_EMPLOYMENT_TYPE),
+        (("дата принятия", "принятия"), DialogueState.ASK_HIRED_AT),
+        (("слабослышащий",), DialogueState.ASK_HEARING_IMPAIRED),
+    ]
+    for markers, state in field_mapping:
+        if any(marker in normalized for marker in markers):
+            return state
+
+    if current_state == DialogueState.CONFIRM_DATA:
+        return DialogueState.ASK_FULL_NAME
+    return None
 
 
 @lru_cache
