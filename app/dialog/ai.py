@@ -1357,6 +1357,10 @@ def _normalize_fields_map(fields: dict[str, str]) -> dict[str, str]:
             cleaned = str(parsed_year) if parsed_year else cleaned
         elif key == "plate_number":
             cleaned = normalize_plate_number(cleaned)
+        elif key == "brand":
+            cleaned = normalize_car_brand(cleaned)
+        elif key == "model":
+            cleaned = normalize_car_model(cleaned)
         elif key == "employment_type":
             cleaned = normalize_employment_type(cleaned)
         elif key == "is_hearing_impaired":

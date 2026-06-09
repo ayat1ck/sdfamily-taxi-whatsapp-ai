@@ -1,6 +1,7 @@
 from app.config import get_settings
 from app.drivers.models import Driver
 from app.integrations.yandex.schemas import YandexDriverPayload
+from app.utils.validators import normalize_car_brand, normalize_car_model
 
 
 def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
@@ -38,8 +39,8 @@ def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
         existing_vehicle_lookup=None,
         has_personal_car="true",
         is_hearing_impaired=driver.is_hearing_impaired,
-        car_brand=vehicle.brand if vehicle else None,
-        car_model=vehicle.model if vehicle else None,
+        car_brand=normalize_car_brand(vehicle.brand) if vehicle and vehicle.brand else None,
+        car_model=normalize_car_model(vehicle.model) if vehicle and vehicle.model else None,
         car_year=vehicle.year if vehicle else None,
         plate_number=vehicle.plate_number if vehicle else None,
         color=vehicle.color if vehicle else None,
