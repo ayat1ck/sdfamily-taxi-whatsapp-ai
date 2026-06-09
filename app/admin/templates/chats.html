@@ -202,7 +202,7 @@
                 <div class="card">
                   <strong>{{ document.document_type }}</strong><br>
                   <span class="muted">{{ document.status }}</span><br>
-                  {% if document.file_url %}<a class="button secondary" href="/admin/api/documents/{{ document.id }}" target="_blank">Открыть</a>{% endif %}
+                  {% if document.file_url or document.whatsapp_media_id %}<a class="button secondary" href="/admin/api/documents/{{ document.id }}" target="_blank">Открыть</a>{% endif %}
                 </div>
               {% else %}
                 <div class="muted">Документы еще не загружены.</div>

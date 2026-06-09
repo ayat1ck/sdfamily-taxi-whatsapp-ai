@@ -196,33 +196,27 @@ class DialogueEngine:
                 "Сейчас ожидается текстовый ответ. Отправьте сообщение по текущему шагу.",
             )
 
-        content = self.media.download_media(incoming.media_id)
         document_type = DOCUMENT_STATE_MAP[state]
-        try:
-            upload_result = self.drive.upload_driver_document(driver, document_type, content, incoming.filename or f"{document_type}.bin")
-        except Exception as exc:
-            logger.exception("Failed to upload document for driver %s: %s", driver.whatsapp_phone, exc)
-            return self._respond(
-                db,
-                driver,
-                application,
-                "Не удалось сохранить документ. Проверьте настройки интеграций и отправьте файл еще раз.",
-            )
-
         upsert_document(
             db,
             driver,
             document_type=document_type,
-            file_url=upload_result["file_url"],
-            google_drive_file_id=upload_result["file_id"],
+            file_url=None,
+            google_drive_file_id=None,
             whatsapp_media_id=incoming.media_id,
             message_id=incoming_message_id,
             file_name=incoming.filename,
             mime_type=incoming.mime_type,
-            storage_provider="google_drive",
-            storage_path=upload_result["file_id"],
+            storage_provider="whatsapp",
+            storage_path=incoming.media_id,
+            status="stored_in_whatsapp",
         )
-        create_conversation_event(db, driver, "document_uploaded", {"document_type": document_type, "status": "uploaded"})
+        create_conversation_event(
+            db,
+            driver,
+            "document_uploaded",
+            {"document_type": document_type, "status": "stored_in_whatsapp"},
+        )
         next_state = self._next_document_state(state, driver)
         update_driver_state(db, driver, next_state.value)
         set_application_status(db, application, _application_status_from_state(next_state))

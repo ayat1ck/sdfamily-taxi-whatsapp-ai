@@ -58,7 +58,10 @@ class GoogleSheetsClient:
         sheet_name = self.settings.google_sheets_worksheet_name
         self._ensure_headers(service, spreadsheet_id, sheet_name, APPLICATION_HEADERS, "A1:X1")
 
-        doc_map = {document.document_type: document.file_url or "" for document in driver.documents}
+        doc_map = {
+            document.document_type: self._document_link(document)
+            for document in driver.documents
+        }
         vehicle = driver.vehicle
         row = [
             application.created_at.isoformat() if application.created_at else "",
@@ -177,3 +180,10 @@ class GoogleSheetsClient:
             valueInputOption="RAW",
             body={"values": [headers]},
         ).execute()
+
+    def _document_link(self, document) -> str:
+        if document.file_url:
+            return document.file_url
+        if document.id and self.settings.app_host:
+            return f"{self.settings.app_host}/admin/api/documents/{document.id}"
+        return ""

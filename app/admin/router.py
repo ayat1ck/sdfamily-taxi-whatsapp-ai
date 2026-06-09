@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -54,9 +54,11 @@ from app.database.session import get_db
 from app.documents.models import Document
 from app.drivers.models import Driver
 from app.integration_jobs.models import IntegrationJob
+from app.whatsapp.media import WhatsAppMediaClient
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+media_client = WhatsAppMediaClient()
 
 
 class ManualReplyRequest(BaseModel):
@@ -485,11 +487,19 @@ def api_document_view(
     document_id: int,
     _admin=Depends(require_admin_api),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+) -> Response:
     document = db.get(Document, document_id)
-    if not document or not document.file_url:
+    if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    return RedirectResponse(document.file_url, status_code=307)
+    if document.file_url:
+        return RedirectResponse(document.file_url, status_code=307)
+    if document.whatsapp_media_id:
+        content, detected_mime_type = media_client.fetch_media(document.whatsapp_media_id)
+        media_type = document.mime_type or detected_mime_type or "application/octet-stream"
+        filename = document.file_name or f"document_{document.id}"
+        headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+        return Response(content=content, media_type=media_type, headers=headers)
+    raise HTTPException(status_code=404, detail="Document content is not available")
 
 
 @router.get("/api/events")

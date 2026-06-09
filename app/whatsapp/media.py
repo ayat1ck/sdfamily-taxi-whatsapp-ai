@@ -7,7 +7,7 @@ class WhatsAppMediaClient:
     def __init__(self) -> None:
         self.settings = get_settings()
 
-    def download_media(self, media_id: str | None) -> bytes:
+    def fetch_media(self, media_id: str | None) -> tuple[bytes, str | None]:
         if not media_id:
             raise ValueError("media_id is required")
         if not self.settings.whatsapp_access_token:
@@ -18,7 +18,8 @@ class WhatsAppMediaClient:
                 headers={"Authorization": f"Bearer {self.settings.whatsapp_access_token}"},
             )
             metadata.raise_for_status()
-            media_url = metadata.json().get("url")
+            metadata_json = metadata.json()
+            media_url = metadata_json.get("url")
             if not media_url:
                 raise RuntimeError("WhatsApp media URL is missing in response")
             media_response = client.get(
@@ -26,4 +27,8 @@ class WhatsAppMediaClient:
                 headers={"Authorization": f"Bearer {self.settings.whatsapp_access_token}"},
             )
             media_response.raise_for_status()
-            return media_response.content
+            return media_response.content, metadata_json.get("mime_type")
+
+    def download_media(self, media_id: str | None) -> bytes:
+        content, _mime_type = self.fetch_media(media_id)
+        return content
