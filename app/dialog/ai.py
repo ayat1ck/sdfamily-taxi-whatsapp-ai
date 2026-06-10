@@ -362,6 +362,11 @@ class DeterministicAIProvider:
                 ),
             )
 
+        if _is_in_flow_registration_state(current_state):
+            step_help = _step_help_result(current_state, text, state)
+            if step_help:
+                return step_help
+
         faq_answer = _match_faq(message, self.knowledge_base)
         if faq_answer:
             return AIResult(
@@ -374,17 +379,9 @@ class DeterministicAIProvider:
                 suggested_next_action=state,
             )
 
-        step_help_reply = _build_step_help_reply(current_state, text)
-        if step_help_reply:
-            return AIResult(
-                step_help_reply,
-                "help",
-                {},
-                state,
-                0.88,
-                reasoning_summary=f"step_help:{current_state.value}",
-                suggested_next_action=state,
-            )
+        step_help = _step_help_result(current_state, text, state)
+        if step_help:
+            return step_help
 
         side_reply = _registration_side_reply(current_state, text, self.knowledge_base)
         if side_reply:
@@ -753,19 +750,51 @@ _MIXED_INELIGIBLE_STATES = {
     DialogueState.DUPLICATE_REJECTED,
 }
 
+_IN_FLOW_REGISTRATION_STATES = frozenset(
+    state
+    for state in DialogueState
+    if state not in _MIXED_INELIGIBLE_STATES
+    and state
+    not in {
+        DialogueState.ASK_YANDEX_PRO_LOGIN,
+        DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS,
+        DialogueState.SENT_TO_YANDEX,
+    }
+    and (state.value.startswith("ask_") or state == DialogueState.ASK_EXECUTOR_TYPE)
+)
+
+
+def _is_in_flow_registration_state(state: DialogueState) -> bool:
+    return state in _IN_FLOW_REGISTRATION_STATES
+
+
+def _step_help_result(current_state: DialogueState, text: str, state_value: str) -> AIResult | None:
+    step_help_reply = _build_step_help_reply(current_state, text)
+    if not step_help_reply:
+        return None
+    return AIResult(
+        step_help_reply,
+        "help",
+        {},
+        state_value,
+        0.88,
+        reasoning_summary=f"step_help:{current_state.value}",
+        suggested_next_action=state_value,
+    )
+
 
 def _resolve_support_during_registration(
     current_state: DialogueState,
     text: str,
     knowledge_base: dict[str, str],
 ) -> str | None:
-    faq_reply = resolve_faq_replies(text, knowledge_base, office_address=get_settings().public_site_address)
-    if faq_reply:
-        return faq_reply
-
     step_help = _build_step_help_reply(current_state, text)
     if step_help:
         return step_help
+
+    faq_reply = resolve_faq_replies(text, knowledge_base, office_address=get_settings().public_site_address)
+    if faq_reply:
+        return faq_reply
 
     if looks_like_support_question(text):
         return build_office_invite_reply(get_settings().public_site_address)
@@ -1289,14 +1318,13 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
             f"Когда будете готовы продолжить регистрацию: {PROMPTS[current_state]}"
         )
 
+    step_help = _build_step_help_reply(current_state, text)
+    if step_help:
+        return step_help
+
     faq_answer = resolve_faq_replies(text, knowledge_base, office_address=get_settings().public_site_address)
     if faq_answer:
         return faq_answer
-
-    if normalized in {"зачем", "почему", "для чего"}:
-        explanation = _build_step_help_reply(current_state, "зачем")
-        if explanation:
-            return explanation
 
     return build_office_invite_reply(get_settings().public_site_address)
 

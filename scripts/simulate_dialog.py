@@ -84,7 +84,9 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario("ASK_IIN: только ИИН", DialogueState.ASK_IIN.value, TEST_IIN, expect_intent="registration", expect_fields=("iin",)),
     Scenario("ASK_IIN: bad IIN", DialogueState.ASK_IIN.value, "123", expect_intent="clarification", must_contain=("ИИН",)),
-    Scenario("ASK_IIN: зачем", DialogueState.ASK_IIN.value, "Зачем нужен ИИН?", expect_intent="faq", must_contain=("ИИН",), must_not_contain=(office_marker(),)),
+    Scenario("ASK_PHONE: зачем полный", DialogueState.ASK_PHONE.value, "Зачем тебе мой номер телефона?", expect_intent="help", must_contain=("Яндекс Про", "телефон"), must_not_contain=(office_marker(), "ИИН")),
+    Scenario("ASK_PHONE: зачем короткий", DialogueState.ASK_PHONE.value, "Зачем?", expect_intent="help", must_contain=("Яндекс Про",), must_not_contain=(office_marker(), "ИИН")),
+    Scenario("ASK_IIN: зачем короткий", DialogueState.ASK_IIN.value, "Зачем?", expect_intent="help", must_contain=("ИИН",), must_not_contain=(office_marker(),)),
     Scenario(
         "ASK_BIRTH_DATE: дата",
         DialogueState.ASK_BIRTH_DATE.value,

@@ -202,7 +202,11 @@ def _qa_pairs_from_content(content: str) -> list[tuple[str, str]]:
 
 def _find_qa_match(lowered: str, content: str) -> str | None:
     for question, answer in _qa_pairs_from_content(content):
-        if question == lowered or question in lowered or lowered in question:
+        if question == lowered:
+            return answer
+        if question in lowered:
+            return answer
+        if lowered in question and len(lowered) >= max(12, len(question) // 2):
             return answer
     return None
 
