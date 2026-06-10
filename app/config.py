@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     llm_faq_assist_enabled: bool = False
     openai_model: str = "gpt-4o-mini"
     gemini_model: str = "gemini-2.5-flash"
+    document_extraction_enabled: bool = True
 
     whatsapp_access_token: str | None = None
     whatsapp_phone_number_id: str | None = None

@@ -56,10 +56,15 @@ PROMPTS: dict[DialogueState, str] = {
         "Обычно это сегодняшняя дата или день подключения — не путайте со сроком действия прав."
     ),
     DialogueState.ASK_HEARING_IMPAIRED: "❓ Вы являетесь слабослышащим водителем? Ответьте: да или нет.",
-    DialogueState.ASK_DRIVER_LICENSE_FRONT: "📸 Отправьте фото водительского удостоверения: лицевая сторона.",
+    DialogueState.ASK_DRIVER_LICENSE_FRONT: (
+        "📸 Отправьте фото водительского удостоверения — лицевая сторона.\n"
+        "Бот распознает ФИО, ИИН, даты и номер прав — меньше вопросов вручную."
+    ),
     DialogueState.ASK_DRIVER_LICENSE_BACK: "✅ Принял! Теперь отправьте фото водительского удостоверения: обратная сторона.",
-    DialogueState.ASK_ID_CARD: "✅ Принял! Теперь отправьте фото удостоверения личности.",
-    DialogueState.ASK_VEHICLE_REGISTRATION_DOC: "✅ Принял! Теперь отправьте фото техпаспорта или СТС автомобиля.",
+    DialogueState.ASK_ID_CARD: "✅ Принял! Теперь отправьте фото удостоверения личности (лицевая сторона).",
+    DialogueState.ASK_VEHICLE_REGISTRATION_DOC: (
+        "✅ Принял! Теперь отправьте фото техпаспорта или СТС — распознаем марку, модель, госномер и номер СТС."
+    ),
     DialogueState.ASK_SELFIE_WITH_LICENSE: "✅ Принял! Теперь отправьте селфи с водительским удостоверением.",
     DialogueState.ASK_RENT_OR_POWER_OF_ATTORNEY: "✅ Принял! Проверьте введённые данные.",
     DialogueState.CONFIRM_DATA: (

@@ -30,6 +30,7 @@ from app.dialog.prompts import (
     WELCOME_GREETING,
     format_in_flow_reply,
 )
+from app.documents.registration_flow import next_registration_state
 from app.dialog.states import DialogueState
 from app.drivers.models import Driver
 from app.integrations.yandex.catalog import (
@@ -683,11 +684,18 @@ def _allowed_next_states(current_state: DialogueState) -> list[str]:
     return [current_state.value, _default_next_state(current_state).value]
 
 
-def _default_next_state(state: DialogueState) -> DialogueState:
+def _default_next_state(state: DialogueState, driver: Driver | None = None) -> DialogueState:
+    if driver is not None:
+        return next_registration_state(driver, driver.vehicle)
     order = [
         DialogueState.ASK_FULL_NAME,
         DialogueState.ASK_PHONE,
         DialogueState.ASK_CITY,
+        DialogueState.ASK_DRIVER_LICENSE_FRONT,
+        DialogueState.ASK_DRIVER_LICENSE_BACK,
+        DialogueState.ASK_ID_CARD,
+        DialogueState.ASK_VEHICLE_REGISTRATION_DOC,
+        DialogueState.ASK_SELFIE_WITH_LICENSE,
         DialogueState.ASK_ADDRESS,
         DialogueState.ASK_IIN,
         DialogueState.ASK_BIRTH_DATE,
@@ -704,11 +712,6 @@ def _default_next_state(state: DialogueState) -> DialogueState:
         DialogueState.ASK_EMPLOYMENT_TYPE,
         DialogueState.ASK_HIRED_AT,
         DialogueState.ASK_HEARING_IMPAIRED,
-        DialogueState.ASK_DRIVER_LICENSE_FRONT,
-        DialogueState.ASK_DRIVER_LICENSE_BACK,
-        DialogueState.ASK_ID_CARD,
-        DialogueState.ASK_VEHICLE_REGISTRATION_DOC,
-        DialogueState.ASK_SELFIE_WITH_LICENSE,
         DialogueState.CONFIRM_DATA,
     ]
     index = order.index(state)
@@ -1031,7 +1034,7 @@ def _try_registration_field_extract(
 
     extracted = _extract_safe_field_answer(current_state, text, driver)
     if extracted:
-        next_state = _default_next_state(current_state).value
+        next_state = _default_next_state(current_state, driver).value
         return AIResult(
             "",
             "registration",

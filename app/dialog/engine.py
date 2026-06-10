@@ -21,6 +21,15 @@ from app.dialog.prompts import (
     format_in_flow_reply,
 )
 from app.dialog.states import DialogueState
+from app.documents.extraction import DocumentExtractionService, normalize_extracted_fields
+from app.documents.registration_flow import (
+    DOCUMENT_TYPE_LABELS,
+    build_recognition_reply,
+    is_registration_collecting_state,
+    next_registration_state,
+    prompt_for_state,
+    resolve_document_type_for_upload,
+)
 from app.documents.service import upsert_document
 from app.drivers.models import Driver
 from app.drivers.service import find_other_driver_by_iin, update_driver_state
@@ -115,6 +124,7 @@ class DialogueEngine:
         self.sheets = GoogleSheetsClient()
         self.yandex = YandexSubmissionService()
         self.media = WhatsAppMediaClient()
+        self.document_extractor = DocumentExtractionService()
 
     def handle_message(self, db: Session, driver: Driver, incoming: ParsedWhatsAppMessage) -> str:
         application = get_or_create_application(db, driver)
@@ -385,7 +395,7 @@ class DialogueEngine:
             storage_path=file_id,
         )
         create_conversation_event(db, driver, "document_uploaded", {"document_type": document_type, "status": status})
-        next_state = self._next_document_state(state, driver)
+        next_state = next_registration_state(driver, driver.vehicle)
         update_driver_state(db, driver, next_state.value)
         set_application_status(db, application, _application_status_from_state(next_state))
         reply = self._build_confirmation(driver) if next_state == DialogueState.CONFIRM_DATA else PROMPTS[next_state]
@@ -426,7 +436,40 @@ class DialogueEngine:
                 "Файл получил. Менеджер увидит его в чате и поможет дальше. Если вы уже вошли в Яндекс Про, напишите: Вошел.",
             )
 
-        if state not in DOCUMENT_STATE_MAP:
+        vehicle = get_or_create_vehicle(db, driver)
+        image_bytes: bytes | None = None
+        mime_type = incoming.mime_type
+        detected_type: str | None = None
+        extraction = None
+
+        if incoming.media_id:
+            try:
+                image_bytes, mime_type = self.media.fetch_media(incoming.media_id)
+            except Exception as exc:
+                logger.warning("Failed to download WhatsApp media %s: %s", incoming.media_id, exc)
+
+        if self.document_extractor.is_enabled() and image_bytes:
+            extraction = self.document_extractor.extract(
+                image_bytes,
+                mime_type=mime_type,
+                expected_document_type=DOCUMENT_STATE_MAP.get(state, "unknown"),
+            )
+            if extraction.document_type and extraction.document_type != "unknown":
+                detected_type = extraction.document_type
+
+        if state in DOCUMENT_STATE_MAP:
+            document_type = DOCUMENT_STATE_MAP[state]
+        elif is_registration_collecting_state(state):
+            document_type = resolve_document_type_for_upload(state, driver, detected_type=detected_type)
+            if not document_type:
+                next_state = next_registration_state(driver, vehicle)
+                if next_state in DOCUMENT_STATE_MAP:
+                    expected_label = DOCUMENT_TYPE_LABELS.get(DOCUMENT_STATE_MAP[next_state], "документ")
+                    hint = f"📸 Сейчас нужно фото: {expected_label}."
+                else:
+                    hint = f"📋 Сейчас нужен ответ по шагу:\n{prompt_for_state(state)}"
+                return self._respond(db, driver, application, hint)
+        else:
             return self._respond(
                 db,
                 driver,
@@ -434,7 +477,6 @@ class DialogueEngine:
                 "Сейчас ожидается текстовый ответ. Отправьте сообщение по текущему шагу.",
             )
 
-        document_type = DOCUMENT_STATE_MAP[state]
         upsert_document(
             db,
             driver,
@@ -444,7 +486,7 @@ class DialogueEngine:
             whatsapp_media_id=incoming.media_id,
             message_id=incoming_message_id,
             file_name=incoming.filename,
-            mime_type=incoming.mime_type,
+            mime_type=mime_type,
             storage_provider="whatsapp",
             storage_path=incoming.media_id,
             status="stored_in_whatsapp",
@@ -455,10 +497,53 @@ class DialogueEngine:
             "document_uploaded",
             {"document_type": document_type, "status": "stored_in_whatsapp"},
         )
-        next_state = self._next_document_state(state, driver)
+
+        recognized: dict[str, str] = {}
+        if image_bytes and self.document_extractor.is_enabled():
+            if extraction is None or extraction.document_type != document_type:
+                extraction = self.document_extractor.extract(
+                    image_bytes,
+                    mime_type=mime_type,
+                    expected_document_type=document_type,
+                )
+            fields, recognized = normalize_extracted_fields(extraction, document_type=document_type)
+            if fields:
+                if "iin" in fields:
+                    duplicate_reply = self._check_duplicate_constraints(
+                        db, driver, application, DialogueState.ASK_IIN, fields
+                    )
+                    if duplicate_reply:
+                        return self._respond(db, driver, application, duplicate_reply)
+                if "plate_number" in fields:
+                    duplicate_reply = self._check_duplicate_constraints(
+                        db, driver, application, DialogueState.ASK_CAR_PLATE, fields
+                    )
+                    if duplicate_reply:
+                        return self._respond(db, driver, application, duplicate_reply)
+                self._apply_extracted_fields(
+                    driver,
+                    fields,
+                    db,
+                    application=application,
+                    audit_action="document_ocr_extracted",
+                    actor_type="system",
+                )
+                create_conversation_event(
+                    db,
+                    driver,
+                    "document_fields_extracted",
+                    {"document_type": document_type, "fields": sorted(fields.keys())},
+                )
+
+        db.refresh(driver)
+        vehicle = driver.vehicle or vehicle
+        next_state = next_registration_state(driver, vehicle)
         update_driver_state(db, driver, next_state.value)
         set_application_status(db, application, _application_status_from_state(next_state))
-        reply = self._build_confirmation(driver) if next_state == DialogueState.CONFIRM_DATA else PROMPTS[next_state]
+        if next_state == DialogueState.CONFIRM_DATA:
+            reply = self._build_confirmation(driver)
+        else:
+            reply = build_recognition_reply(document_type, recognized, next_state)
         return self._respond(db, driver, application, reply)
 
     def _check_duplicate_constraints(
@@ -960,18 +1045,6 @@ class DialogueEngine:
             yandex_error=reply,
         )
         create_conversation_event(db, driver, "duplicate_rejected", {"reply": reply})
-
-    def _next_document_state(self, state: DialogueState, driver: Driver) -> DialogueState:
-        order = [
-            DialogueState.ASK_DRIVER_LICENSE_FRONT,
-            DialogueState.ASK_DRIVER_LICENSE_BACK,
-            DialogueState.ASK_ID_CARD,
-            DialogueState.ASK_VEHICLE_REGISTRATION_DOC,
-            DialogueState.ASK_SELFIE_WITH_LICENSE,
-            DialogueState.CONFIRM_DATA,
-        ]
-        index = order.index(state)
-        return order[min(index + 1, len(order) - 1)]
 
     def _apply_extracted_fields(
         self,
