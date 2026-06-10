@@ -47,6 +47,8 @@ class DocumentExtractionResult(BaseModel):
     registration_certificate: str | None = None
     vin: str | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    contains_both_license_sides: bool = False
+    additional_document_types: list[str] = Field(default_factory=list)
 
 
 DOCUMENT_TYPES = {
@@ -58,14 +60,19 @@ DOCUMENT_TYPES = {
     "unknown",
 }
 
-EXTRACTION_PROMPT = """Ты помощник таксопарка в Казахстане. По фото документа извлеки данные для регистрации водителя.
+EXTRACTION_PROMPT = """Ты помощник таксопарка в Казахстане. По фото или PDF документа извлеки данные для регистрации водителя.
 
 Ожидаемый тип документа: {expected_type}
 Если на фото другой документ — укажи его в document_type.
 
+В Казахстане PDF из eGov или Kaspi часто содержит обе стороны водительского удостоверения на одной странице.
+Если видишь лицевую и обратную сторону ВУ — поставь contains_both_license_sides=true и добавь оба типа в additional_document_types.
+
 Верни JSON:
 {{
   "document_type": "driver_license_front|driver_license_back|id_card|vehicle_registration_doc|selfie_with_license|unknown",
+  "contains_both_license_sides": false,
+  "additional_document_types": [],
   "full_name": "ФИО полностью или null",
   "iin": "12 цифр ИИН или null",
   "birth_date": "YYYY-MM-DD или null",
@@ -149,6 +156,9 @@ class DocumentExtractionService:
         parsed = DocumentExtractionResult.model_validate(payload)
         if parsed.document_type not in DOCUMENT_TYPES:
             parsed.document_type = expected_document_type
+        parsed.additional_document_types = [
+            item for item in parsed.additional_document_types if item in DOCUMENT_TYPES and item != "unknown"
+        ]
         return parsed
 
 

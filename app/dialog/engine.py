@@ -25,6 +25,7 @@ from app.documents.extraction import DocumentExtractionService, normalize_extrac
 from app.documents.registration_flow import (
     DOCUMENT_TYPE_LABELS,
     build_recognition_reply,
+    expand_uploaded_document_types,
     is_registration_collecting_state,
     next_registration_state,
     prompt_for_state,
@@ -477,27 +478,6 @@ class DialogueEngine:
                 "Сейчас ожидается текстовый ответ. Отправьте сообщение по текущему шагу.",
             )
 
-        upsert_document(
-            db,
-            driver,
-            document_type=document_type,
-            file_url=None,
-            google_drive_file_id=None,
-            whatsapp_media_id=incoming.media_id,
-            message_id=incoming_message_id,
-            file_name=incoming.filename,
-            mime_type=mime_type,
-            storage_provider="whatsapp",
-            storage_path=incoming.media_id,
-            status="stored_in_whatsapp",
-        )
-        create_conversation_event(
-            db,
-            driver,
-            "document_uploaded",
-            {"document_type": document_type, "status": "stored_in_whatsapp"},
-        )
-
         recognized: dict[str, str] = {}
         if image_bytes and self.document_extractor.is_enabled():
             if extraction is None or extraction.document_type != document_type:
@@ -506,6 +486,36 @@ class DialogueEngine:
                     mime_type=mime_type,
                     expected_document_type=document_type,
                 )
+
+        stored_document_types = expand_uploaded_document_types(
+            document_type,
+            mime_type=mime_type,
+            contains_both_license_sides=bool(extraction and extraction.contains_both_license_sides),
+            additional_document_types=extraction.additional_document_types if extraction else None,
+        )
+        for stored_type in stored_document_types:
+            upsert_document(
+                db,
+                driver,
+                document_type=stored_type,
+                file_url=None,
+                google_drive_file_id=None,
+                whatsapp_media_id=incoming.media_id,
+                message_id=incoming_message_id,
+                file_name=incoming.filename,
+                mime_type=mime_type,
+                storage_provider="whatsapp",
+                storage_path=incoming.media_id,
+                status="stored_in_whatsapp",
+            )
+            create_conversation_event(
+                db,
+                driver,
+                "document_uploaded",
+                {"document_type": stored_type, "status": "stored_in_whatsapp", "source_mime_type": mime_type},
+            )
+
+        if image_bytes and self.document_extractor.is_enabled() and extraction is not None:
             fields, recognized = normalize_extracted_fields(extraction, document_type=document_type)
             if fields:
                 if "iin" in fields:
@@ -543,7 +553,7 @@ class DialogueEngine:
         if next_state == DialogueState.CONFIRM_DATA:
             reply = self._build_confirmation(driver)
         else:
-            reply = build_recognition_reply(document_type, recognized, next_state)
+            reply = build_recognition_reply(stored_document_types, recognized, next_state)
         return self._respond(db, driver, application, reply)
 
     def _check_duplicate_constraints(

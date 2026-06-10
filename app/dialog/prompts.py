@@ -15,6 +15,11 @@ WELCOME_GREETING = (
 
 REGISTRATION_START_CTA = "✍️ Для подключения напишите ФИО полностью."
 
+DOCUMENT_PHOTO_QUALITY_HINT = (
+    "💡 Для фото: положите документ на ровную поверхность, снимайте при ярком освещении — "
+    "весь документ в кадре, без бликов и засветов."
+)
+
 
 CAR_MODEL_PROMPT = (
     "🚗 Напишите модель автомобиля, как в документах или техпаспорте "
@@ -57,15 +62,30 @@ PROMPTS: dict[DialogueState, str] = {
     ),
     DialogueState.ASK_HEARING_IMPAIRED: "❓ Вы являетесь слабослышащим водителем? Ответьте: да или нет.",
     DialogueState.ASK_DRIVER_LICENSE_FRONT: (
-        "📸 Отправьте фото водительского удостоверения — лицевая сторона.\n"
-        "Бот распознает ФИО, ИИН, даты и номер прав — меньше вопросов вручную."
+        "📸 Отправьте водительское удостоверение:\n"
+        "• PDF из eGov или Kaspi (обе стороны на одной странице) — один файл\n"
+        "• или 2 фото: лицевая и обратная стороны\n\n"
+        f"{DOCUMENT_PHOTO_QUALITY_HINT}\n\n"
+        "Бот распознает ФИО, ИИН, даты и номер прав."
     ),
-    DialogueState.ASK_DRIVER_LICENSE_BACK: "✅ Принял! Теперь отправьте фото водительского удостоверения: обратная сторона.",
-    DialogueState.ASK_ID_CARD: "✅ Принял! Теперь отправьте фото удостоверения личности (лицевая сторона).",
+    DialogueState.ASK_DRIVER_LICENSE_BACK: (
+        "📸 Отправьте обратную сторону водительского удостоверения.\n"
+        "Или PDF из eGov/Kaspi с обеими сторонами на одной странице.\n\n"
+        f"{DOCUMENT_PHOTO_QUALITY_HINT}"
+    ),
+    DialogueState.ASK_ID_CARD: (
+        "📸 Отправьте удостоверение личности — фото или PDF из eGov/Kaspi.\n\n"
+        f"{DOCUMENT_PHOTO_QUALITY_HINT}"
+    ),
     DialogueState.ASK_VEHICLE_REGISTRATION_DOC: (
-        "✅ Принял! Теперь отправьте фото техпаспорта или СТС — распознаем марку, модель, госномер и номер СТС."
+        "📸 Отправьте техпаспорт или СТС — фото или PDF из eGov/Kaspi.\n"
+        "Распознаем марку, модель, госномер и номер СТС.\n\n"
+        f"{DOCUMENT_PHOTO_QUALITY_HINT}"
     ),
-    DialogueState.ASK_SELFIE_WITH_LICENSE: "✅ Принял! Теперь отправьте селфи с водительским удостоверением.",
+    DialogueState.ASK_SELFIE_WITH_LICENSE: (
+        "📸 Отправьте селфи с водительским удостоверением в руке.\n"
+        "Лицо и документ должны быть чётко видны, без бликов."
+    ),
     DialogueState.ASK_RENT_OR_POWER_OF_ATTORNEY: "✅ Принял! Проверьте введённые данные.",
     DialogueState.CONFIRM_DATA: (
         "📋 Проверьте собранные данные. "

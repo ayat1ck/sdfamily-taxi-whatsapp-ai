@@ -60,6 +60,31 @@ STATE_TO_VEHICLE_FIELD: dict[DialogueState, str] = {
     DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "registration_certificate",
 }
 
+LICENSE_DOCUMENT_TYPES = {"driver_license_front", "driver_license_back"}
+
+
+def expand_uploaded_document_types(
+    primary_type: str,
+    *,
+    mime_type: str | None = None,
+    contains_both_license_sides: bool = False,
+    additional_document_types: list[str] | None = None,
+) -> list[str]:
+    """eGov/Kaspi PDF often has both license sides on one page — mark both slots at once."""
+    ordered: list[str] = [primary_type]
+    if primary_type not in LICENSE_DOCUMENT_TYPES:
+        return ordered
+
+    partner = "driver_license_back" if primary_type == "driver_license_front" else "driver_license_front"
+    is_pdf = (mime_type or "").lower() == "application/pdf"
+    add_partner = is_pdf or contains_both_license_sides
+    if not add_partner and additional_document_types:
+        add_partner = partner in additional_document_types
+    if add_partner and partner not in ordered:
+        ordered.append(partner)
+    return ordered
+
+
 DOCUMENT_TYPE_LABELS: dict[str, str] = {
     "driver_license_front": "водительское удостоверение (лицевая)",
     "driver_license_back": "водительское удостоверение (обратная)",
@@ -155,8 +180,19 @@ def prompt_for_state(state: DialogueState) -> str:
     return PROMPTS.get(state, "")
 
 
-def build_recognition_reply(document_type: str, recognized_fields: dict[str, str], next_state: DialogueState) -> str:
-    lines = [f"✅ Принял фото: {DOCUMENT_TYPE_LABELS.get(document_type, document_type)}."]
+def build_recognition_reply(
+    document_types: list[str] | str,
+    recognized_fields: dict[str, str],
+    next_state: DialogueState,
+) -> str:
+    types = [document_types] if isinstance(document_types, str) else document_types
+    labels = [DOCUMENT_TYPE_LABELS.get(document_type, document_type) for document_type in types]
+    if len(labels) == 1:
+        lines = [f"✅ Принял фото: {labels[0]}."]
+    elif len(labels) == 2 and set(types) == LICENSE_DOCUMENT_TYPES:
+        lines = ["✅ Принял PDF: водительское удостоверение (лицевая и обратная сторона)."]
+    else:
+        lines = [f"✅ Принял: {', '.join(labels)}."]
     if recognized_fields:
         lines.append("🔍 Распознал:")
         for key, value in recognized_fields.items():
