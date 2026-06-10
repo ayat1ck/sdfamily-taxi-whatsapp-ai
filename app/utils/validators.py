@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from difflib import SequenceMatcher
 
 
 PHONE_PATTERN = re.compile(r"\+?\d{10,15}")
@@ -284,18 +285,155 @@ def resolve_car_chassis_model(value: str) -> str | None:
     return None
 
 
+ENGINE_TOKENS = frozenset(
+    {
+        "i",
+        "d",
+        "e",
+        "s",
+        "x",
+        "ti",
+        "xi",
+        "ci",
+        "di",
+        "id",
+        "td",
+        "si",
+        "li",
+        "tdi",
+        "cdi",
+        "dci",
+        "hdi",
+        "tfsi",
+        "fsi",
+        "tsi",
+        "gdi",
+        "mpi",
+        "crdi",
+        "mjet",
+        "dtdi",
+        "ecoboost",
+        "hybrid",
+        "phev",
+        "ev",
+        "bev",
+        "at",
+        "mt",
+        "amt",
+        "cvt",
+    }
+)
+NUMERIC_ENGINE_TRIM = re.compile(r"^(\d{2,4})([a-z]{1,5})$", re.IGNORECASE)
+DISPLACEMENT_TOKEN = re.compile(r"^\d(\.\d)?l?$|^\d\.\d+l?$", re.IGNORECASE)
+
+
+def iter_car_model_normalize_candidates(value: str) -> list[str]:
+    """Variants for Yandex catalog lookup: original first, then without engine trim."""
+    cleaned = normalize_text_token(value)
+    if not cleaned:
+        return []
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(item: str) -> None:
+        token = item.strip()
+        if token and token not in seen:
+            seen.add(token)
+            candidates.append(token)
+
+    add(cleaned)
+
+    compact = cleaned.replace(" ", "")
+    numeric_match = NUMERIC_ENGINE_TRIM.fullmatch(compact)
+    if numeric_match:
+        add(numeric_match.group(1))
+
+    parts = cleaned.split()
+    if len(parts) == 1:
+        single_match = NUMERIC_ENGINE_TRIM.fullmatch(parts[0])
+        if single_match:
+            add(single_match.group(1))
+        return candidates
+
+    trimmed_parts = parts[:]
+    while len(trimmed_parts) > 1:
+        last = trimmed_parts[-1]
+        if last in ENGINE_TOKENS or DISPLACEMENT_TOKEN.fullmatch(last):
+            trimmed_parts = trimmed_parts[:-1]
+            add(" ".join(trimmed_parts))
+            continue
+        numeric_last = NUMERIC_ENGINE_TRIM.fullmatch(last)
+        if numeric_last:
+            trimmed_parts = trimmed_parts[:-1]
+            add(" ".join(trimmed_parts))
+            add(numeric_last.group(1))
+            continue
+        break
+
+    return candidates
+
+
+def pick_catalog_car_model(value: str) -> str:
+    """Pick the best catalog-facing model from engine-trim variants."""
+    cleaned = normalize_text_token(value)
+    if not cleaned:
+        return value.strip()
+
+    candidates = iter_car_model_normalize_candidates(cleaned)
+    if len(candidates) <= 1:
+        return cleaned
+
+    letter_candidates = [item for item in candidates[1:] if re.search(r"[a-zA-Z]", item)]
+    if letter_candidates:
+        return letter_candidates[-1]
+
+    numeric_candidates = [item for item in candidates[1:] if item.isdigit()]
+    if numeric_candidates:
+        return numeric_candidates[-1]
+
+    return cleaned
+
+
+def strip_car_engine_trim(value: str) -> str | None:
+    picked = pick_catalog_car_model(value)
+    if normalize_text_token(picked) != normalize_text_token(value):
+        return picked
+    return None
+
+
 def _car_model_suffix_needs_clarification(parts: list[str]) -> bool:
     for part in parts:
         if resolve_car_chassis_model(part):
             return True
         if re.fullmatch(r"[wvx]\d{3}[a-z]?", part):
             return True
-        if re.fullmatch(r"\d{1,3}[a-z]?", part):
+        if re.fullmatch(r"\d{1,3}[a-z]{1,5}?", part):
+            return True
+        if part in ENGINE_TOKENS:
             return True
     return False
 
 
-def detect_car_model_clarification(value: str) -> str | None:
+def _extract_model_tail(value: str, brand: str | None = None) -> str:
+    cleaned = normalize_text_token(value)
+    if not cleaned:
+        return cleaned
+    if brand:
+        brand_key = normalize_text_token(brand)
+        if cleaned == brand_key:
+            return ""
+        if cleaned.startswith(f"{brand_key} "):
+            return cleaned[len(brand_key) + 1 :].strip()
+    known_brand = extract_known_car_brand(cleaned)
+    if known_brand:
+        brand_key = normalize_text_token(known_brand)
+        if cleaned.startswith(f"{brand_key} "):
+            return cleaned[len(brand_key) + 1 :].strip()
+    return cleaned
+
+
+def detect_car_model_clarification(value: str, brand: str | None = None) -> str | None:
     cleaned = normalize_text_token(value)
     if not cleaned:
         return None
@@ -323,6 +461,11 @@ def detect_car_model_clarification(value: str) -> str | None:
         first = parts[0]
         if first in CAR_MODEL_ALIASES and _car_model_suffix_needs_clarification(parts[1:]):
             return CAR_MODEL_ALIASES[first]
+
+    model_tail = _extract_model_tail(value, brand)
+    picked = pick_catalog_car_model(model_tail)
+    if normalize_text_token(picked) != normalize_text_token(model_tail):
+        return picked
 
     return None
 
@@ -495,22 +638,35 @@ def parse_yes_no(value: str) -> bool | None:
     return None
 
 
+_CONFIRMATION_EXACT = {
+    "подтверждаю",
+    "подтверждаю данные",
+    "потверждаю",
+    "подтвержаю",
+    "подверждаю",
+    "подтверждаю.",
+    "все верно",
+    "всё верно",
+    "ok",
+    "confirm",
+    "confirmed",
+    "podtverzhdayu",
+    "podtverjdau",
+    "podtverzhdaiu",
+    "potverzhdayu",
+    "vse verno",
+    "vsyo verno",
+}
+
+
 def parse_confirmation(value: str) -> bool:
-    normalized = normalize_text_token(value)
-    return normalized in {
-        "подтверждаю",
-        "подтверждаю данные",
-        "все верно",
-        "всё верно",
-        "ok",
-        "confirm",
-        "confirmed",
-        "podtverzhdayu",
-        "podtverjdau",
-        "podtverzhdaiu",
-        "vse verno",
-        "vsyo verno",
-    }
+    normalized = normalize_text_token(value).strip(".,!?")
+    if normalized in _CONFIRMATION_EXACT:
+        return True
+    if normalized.startswith(("подтвер", "potver", "потвер")) and len(normalized) >= 8:
+        if SequenceMatcher(None, normalized, "подтверждаю").ratio() >= 0.82:
+            return True
+    return False
 
 
 def normalize_employment_type(value: str) -> str:
@@ -580,10 +736,20 @@ def normalize_car_model(value: str) -> str:
     if not transliterated:
         return value.strip()
     normalized = transliterated.replace(" Class", "-Class").replace(" class", "-Class")
-    return " ".join(
+    parts = [
         part.capitalize() if re.search(r"[A-Za-z]", part) and not part.isupper() and not re.search(r"\d", part) else part
         for part in normalized.split()
-    )
+    ]
+    joined = " ".join(parts)
+    picked = pick_catalog_car_model(joined)
+    if picked != normalize_text_token(joined):
+        return " ".join(
+            token.capitalize()
+            if re.search(r"[A-Za-z]", token) and not token.isupper() and not re.search(r"\d", token)
+            else token
+            for token in picked.split()
+        )
+    return joined
 
 
 def extract_known_car_brand(value: str) -> str | None:

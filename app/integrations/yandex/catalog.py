@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.integrations.yandex.client import YandexFleetClient
 from app.utils.validators import (
     extract_known_car_brand,
+    iter_car_model_normalize_candidates,
     normalize_car_brand,
     normalize_car_model,
     normalize_text_token,
@@ -294,8 +295,11 @@ def _model_candidates(value: str, brand: str) -> list[str]:
         _strip_brand_prefix(normalize_car_model(value), brand),
     ):
         cleaned = (item or "").strip()
-        if cleaned and cleaned not in candidates:
-            candidates.append(cleaned)
+        if not cleaned:
+            continue
+        for variant in iter_car_model_normalize_candidates(cleaned):
+            if variant not in candidates:
+                candidates.append(variant)
     return candidates
 
 

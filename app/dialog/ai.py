@@ -1613,15 +1613,14 @@ def _process_car_model_answer(text: str, driver: Driver) -> AIResult | None:
         if normalize_car_model(text) == pending:
             return _car_model_registration_result(pending)
 
-    suggested = detect_car_model_clarification(text)
-    if suggested and normalize_text_token(text) != normalize_text_token(suggested):
-        return _car_model_clarification_result(text, suggested)
-
     brand = driver.vehicle.brand if driver.vehicle else None
     if brand:
         model, errors = resolve_model_input(brand, text)
         if model:
             return _car_model_registration_result(model)
+        suggested = detect_car_model_clarification(text, brand=brand)
+        if suggested and normalize_text_token(text) != normalize_text_token(suggested):
+            return _car_model_clarification_result(text, suggested)
         if errors:
             return AIResult(
                 catalog_validation_error_message(errors),
@@ -1633,6 +1632,10 @@ def _process_car_model_answer(text: str, driver: Driver) -> AIResult | None:
                 validation_errors=errors,
                 suggested_next_action=DialogueState.ASK_CAR_MODEL.value,
             )
+
+    suggested = detect_car_model_clarification(text, brand=brand)
+    if suggested and normalize_text_token(text) != normalize_text_token(suggested):
+        return _car_model_clarification_result(text, suggested)
 
     return _car_model_registration_result(normalize_car_model(text))
 
@@ -1899,7 +1902,17 @@ def _normalize_field_edit(target_field: str, raw_value: str, *, driver: Driver |
             return {}, errors
         return {"brand": normalize_car_brand(value)}, []
     if target_field == "model":
-        suggested = detect_car_model_clarification(value)
+        brand = driver.vehicle.brand if driver and driver.vehicle else None
+        if brand:
+            model, errors = resolve_model_input(brand, value)
+            if model:
+                return {"model": model}, []
+            suggested = detect_car_model_clarification(value, brand=brand)
+            if suggested and normalize_text_token(value) != normalize_text_token(suggested):
+                return {}, ["car_model_needs_clarification"]
+            if errors:
+                return {}, errors
+        suggested = detect_car_model_clarification(value, brand=brand)
         if suggested and normalize_text_token(value) != normalize_text_token(suggested):
             return {}, ["car_model_needs_clarification"]
         normalized_model = normalize_car_model(value)
