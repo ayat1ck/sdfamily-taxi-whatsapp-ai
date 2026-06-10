@@ -436,9 +436,40 @@ def _find_best_trigger_match(lowered: str, kb: dict[str, str]) -> str | None:
     return best_answer
 
 
+def _looks_like_registration_field_edit(message: str) -> bool:
+    lowered = normalize_text_token(message)
+    if not any(marker in lowered for marker in ("исправ", "измен", "поменя", "замен")):
+        return False
+    field_markers = (
+        "модель",
+        "марка",
+        "госномер",
+        "номер",
+        "город",
+        "адрес",
+        "иин",
+        "фио",
+        "фамил",
+        "имя",
+        "отчеств",
+        "год",
+        "цвет",
+        "стс",
+        "техпаспорт",
+        "vin",
+        "вин",
+        "права",
+        "стаж",
+        "телефон",
+    )
+    return any(marker in lowered for marker in field_markers)
+
+
 def _find_single_faq_answer(message: str, kb: dict[str, str]) -> str | None:
     lowered = normalize_text_token(message).strip(" ?!,.")
     if not lowered:
+        return None
+    if _looks_like_registration_field_edit(message):
         return None
 
     for content in kb.values():

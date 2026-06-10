@@ -362,6 +362,11 @@ class DeterministicAIProvider:
                 ),
             )
 
+        if current_state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
+            field_edit = _parse_confirm_field_edit(current_state, text, driver)
+            if field_edit:
+                return field_edit
+
         if _is_in_flow_registration_state(current_state):
             step_help = _step_help_result(current_state, text, state)
             if step_help:
@@ -1744,6 +1749,8 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         return None
 
     normalized = normalize_text_token(text)
+    if not any(marker in normalized for marker in ("исправ", "измен", "поменя", "замен", "хочу", "надо", "нужно", "можно")):
+        return None
     if not any(marker in normalized for marker in ("исправ", "измен", "поменя", "замен")):
         return None
 
@@ -1752,14 +1759,27 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
     tail = normalized_compact
     raw_tail = raw_text
 
+    optional_prefix = re.match(
+        r"^(?:хочу|надо|нужно|можно|могу|мне\s+нужно)\s+(?:\w+\s+)?(?:исправить|изменить|поменять|заменить)\s+(.*)$",
+        normalized_compact,
+    )
+    if optional_prefix:
+        tail = optional_prefix.group(1).strip()
+        raw_tail = raw_text
+        for marker in ("исправить", "изменить", "поменять", "заменить", "исправь", "измени", "поменяй", "замени"):
+            index = raw_text.lower().find(marker)
+            if index != -1:
+                raw_tail = raw_text[index + len(marker) :].strip()
+                break
+
     prefix_match = re.match(
         r"^(?:исправь|исправить|измени|изменить|поменяй|поменять|замени|заменить)\s+(.*)$",
         normalized_compact,
     )
-    if prefix_match:
+    if prefix_match and not optional_prefix:
         tail = prefix_match.group(1).strip()
         raw_tail = raw_text.split(maxsplit=1)[1].strip() if len(raw_text.split(maxsplit=1)) > 1 else ""
-    else:
+    elif not optional_prefix:
         suffix_match = re.match(
             r"^(.*?)\s+(?:поменять|изменить|исправить|заменить)$",
             normalized_compact,

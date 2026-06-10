@@ -498,7 +498,19 @@ class DialogueEngine:
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply or PROMPTS[state]))
 
         if ai_result.validation_errors or not ai_result.normalized_fields:
-            if ai_result.fallback_used:
+            if ai_result.target_field and "missing_new_value" in (ai_result.validation_errors or []):
+                self._set_pending_field_edit(driver, ai_result.target_field, state.value)
+                create_conversation_event(
+                    db,
+                    driver,
+                    "field_edit_requested",
+                    {
+                        "from_state": state.value,
+                        "target_field": ai_result.target_field,
+                        "message": ai_result.new_value_raw or "",
+                    },
+                )
+            elif ai_result.fallback_used:
                 driver.fallback_count = (driver.fallback_count or 0) + 1
                 db.add(driver)
             return self._respond(db, driver, application, ai_result.reply or "Не понял, что именно нужно изменить.")
