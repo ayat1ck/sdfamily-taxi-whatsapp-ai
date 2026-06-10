@@ -87,6 +87,71 @@ class YandexFleetClient:
             "yandex_vehicle_id": vehicle_id,
         }
 
+    def submit_vehicle_and_bind(self, payload: YandexDriverPayload, driver_profile_id: str) -> dict[str, str]:
+        if not driver_profile_id:
+            raise ValueError("Missing existing Yandex driver profile id")
+        self._validate_config()
+        headers = self._build_headers()
+        vehicle_id = ""
+
+        try:
+            with httpx.Client(base_url=self.settings.yandex_api_base_url, timeout=self.settings.yandex_api_timeout_seconds) as client:
+                vehicle_response = client.post(
+                    "/v2/parks/vehicles/car",
+                    headers=headers,
+                    json=self._build_vehicle_payload(payload),
+                )
+                self._raise_for_status(vehicle_response)
+                vehicle_json = vehicle_response.json()
+                vehicle_id = self._extract_vehicle_id(vehicle_json)
+
+                self._wait_between_requests()
+                bind_response = client.put(
+                    "/v1/parks/driver-profiles/car-bindings",
+                    headers=headers,
+                    params={
+                        "park_id": self.settings.yandex_park_id,
+                        "driver_profile_id": driver_profile_id,
+                        "car_id": vehicle_id,
+                    },
+                )
+                self._raise_for_status(bind_response)
+        except Exception as exc:
+            raise YandexPartialSubmissionError(
+                str(exc),
+                stage="vehicle_or_bind_failed",
+                yandex_driver_id=driver_profile_id,
+                yandex_vehicle_id=vehicle_id,
+            ) from exc
+
+        return {
+            "status": "sent_to_yandex",
+            "yandex_driver_id": driver_profile_id,
+            "yandex_vehicle_id": vehicle_id,
+        }
+
+    def bind_driver_to_vehicle(self, driver_profile_id: str, vehicle_id: str) -> dict[str, str]:
+        if not driver_profile_id or not vehicle_id:
+            raise ValueError("Missing Yandex driver or vehicle id for binding")
+        self._validate_config()
+        headers = self._build_headers()
+        with httpx.Client(base_url=self.settings.yandex_api_base_url, timeout=self.settings.yandex_api_timeout_seconds) as client:
+            bind_response = client.put(
+                "/v1/parks/driver-profiles/car-bindings",
+                headers=headers,
+                params={
+                    "park_id": self.settings.yandex_park_id,
+                    "driver_profile_id": driver_profile_id,
+                    "car_id": vehicle_id,
+                },
+            )
+            self._raise_for_status(bind_response)
+        return {
+            "status": "sent_to_yandex",
+            "yandex_driver_id": driver_profile_id,
+            "yandex_vehicle_id": vehicle_id,
+        }
+
     def build_submission_preview(self, payload: YandexDriverPayload) -> dict[str, object]:
         self._validate_config()
         return {

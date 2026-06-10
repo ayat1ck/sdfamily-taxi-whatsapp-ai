@@ -22,6 +22,8 @@ from app.integrations.yandex.catalog import (
 )
 from app.utils.logger import get_logger
 from app.utils.validators import (
+    build_car_model_clarification_message,
+    detect_car_model_clarification,
     extract_known_car_brand,
     looks_like_iin,
     looks_like_phone,
@@ -29,6 +31,7 @@ from app.utils.validators import (
     looks_like_registration_certificate,
     normalize_car_brand,
     normalize_car_model,
+    normalize_driver_license_number,
     normalize_employment_type,
     normalize_phone,
     normalize_plate_number,
@@ -42,6 +45,7 @@ from app.utils.validators import (
     split_full_name,
     validate_birth_date,
     validate_driver_dates,
+    validate_driver_license_number,
     validate_hired_at,
     validate_kz_iin,
 )
@@ -70,6 +74,8 @@ class AIResult:
     fallback_reason: str | None = None
     validation_errors: list[str] = field(default_factory=list)
     suggested_next_action: str | None = None
+    suggested_clarification_value: str | None = None
+    clear_suggested_clarification: bool = False
     raw_decision: dict[str, object] = field(default_factory=dict)
 
 
@@ -100,7 +106,7 @@ class AIService:
         try:
             current_state = DialogueState(state)
             llm_result = self.llm.respond(state, message, driver, self.knowledge_base)
-            normalized = _normalize_llm_result(llm_result, current_state, fallback)
+            normalized = _normalize_llm_result(llm_result, current_state, fallback, driver)
             if normalized.fallback_used:
                 logger.warning(
                     "AI normalization fallback for state=%s reason=%s raw=%s",
@@ -246,7 +252,7 @@ class DeterministicAIProvider:
                 suggested_next_action=state,
             )
 
-        field_edit = _parse_confirm_field_edit(current_state, text)
+        field_edit = _parse_confirm_field_edit(current_state, text, driver)
         if field_edit:
             return field_edit
 
@@ -404,6 +410,8 @@ class DeterministicAIProvider:
                         birth_date=getattr(driver, "birth_date", None),
                         driving_experience_since=parsed_date,
                     )
+                    if not validation_errors and getattr(driver, "birth_date", None) == parsed_date:
+                        validation_errors.append("driving_experience_same_as_birth")
                 elif current_state == DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE:
                     validation_errors = validate_driver_dates(
                         birth_date=getattr(driver, "birth_date", None),
@@ -417,6 +425,11 @@ class DeterministicAIProvider:
                     )
                 elif current_state == DialogueState.ASK_HIRED_AT:
                     validation_errors = validate_hired_at(parsed_date)
+                    if (
+                        not validation_errors
+                        and getattr(driver, "driver_license_expires_at", None) == parsed_date
+                    ):
+                        validation_errors.append("hired_at_same_as_license_expiry")
 
                 if validation_errors:
                     return AIResult(
@@ -491,42 +504,15 @@ class DeterministicAIProvider:
                     suggested_next_action=state,
                 )
 
-        if current_state == DialogueState.ASK_CAR_MODEL and _looks_like_short_entity_answer(text):
-            if not looks_like_precise_car_model(text):
-                return AIResult(
-                    _clarification_reply(current_state),
-                    "clarification",
-                    {},
-                    state,
-                    0.45,
-                    reasoning_summary="clarification:car_model",
-                    suggested_next_action=state,
-                )
-            brand = driver.vehicle.brand if driver.vehicle else None
-            if brand:
-                model, errors = resolve_model_input(brand, text)
-                if model:
-                    return AIResult(
-                        "",
-                        "registration",
-                        {"model": model},
-                        DialogueState.ASK_CAR_YEAR.value,
-                        0.9,
-                        normalized_fields={"model": model},
-                        reasoning_summary="registration_extract:model",
-                        suggested_next_action=DialogueState.ASK_CAR_YEAR.value,
-                    )
-                if errors:
-                    return AIResult(
-                        catalog_validation_error_message(errors),
-                        "clarification",
-                        {},
-                        state,
-                        0.72,
-                        reasoning_summary="validation:car_model_catalog",
-                        validation_errors=errors,
-                        suggested_next_action=state,
-                    )
+        if current_state == DialogueState.ASK_CAR_MODEL:
+            car_model_result = _process_car_model_answer(text, driver)
+            if car_model_result is not None:
+                return car_model_result
+
+        if current_state == DialogueState.ASK_DRIVER_LICENSE_NUMBER:
+            license_result = _process_driver_license_answer(text)
+            if license_result is not None:
+                return license_result
 
         extracted = _extract_safe_field_answer(current_state, text, driver)
         if extracted:
@@ -570,7 +556,7 @@ def _result_from_model(model: AIModelResponse, *, provider: str) -> AIResult:
     )
 
 
-def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallback: AIResult) -> AIResult:
+def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallback: AIResult, driver: Driver) -> AIResult:
     normalized = AIResult(**asdict(result))
     normalized.reply = _cleanup_text(normalized.reply)
     normalized.new_value_raw = _cleanup_text(normalized.new_value_raw)
@@ -598,12 +584,53 @@ def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallba
     if normalized.intent == "registration" and not _is_safe_registration_result(normalized, current_state):
         return _fallback_from(fallback, result, "unsafe_registration_fields")
 
+    if normalized.intent == "registration":
+        if current_state == DialogueState.ASK_CAR_MODEL and "model" in normalized.extracted_fields:
+            model_result = _process_car_model_answer(normalized.extracted_fields["model"], driver)
+            if model_result is not None and model_result.intent != "registration":
+                return model_result
+            if model_result is not None and model_result.intent == "registration":
+                normalized = model_result
+                normalized.provider = result.provider or normalized.provider
+                normalized.fallback_used = True
+                normalized.fallback_reason = "car_model_normalized"
+        if "driver_license_number" in normalized.extracted_fields:
+            normalized_license = normalize_driver_license_number(normalized.extracted_fields["driver_license_number"])
+            license_errors = validate_driver_license_number(normalized_license)
+            if license_errors:
+                return _fallback_from(fallback, result, "driver_license_validation_failed", license_errors)
+            normalized.extracted_fields["driver_license_number"] = normalized_license
+            normalized.normalized_fields["driver_license_number"] = normalized_license
+        date_validation = _validate_registration_fields_for_state(
+            current_state,
+            normalized.extracted_fields,
+            driver,
+        )
+        if date_validation:
+            return AIResult(
+                _validation_error_reply(current_state, date_validation),
+                "clarification",
+                {},
+                current_state.value,
+                0.74,
+                reasoning_summary=f"validation:{current_state.value}",
+                validation_errors=date_validation,
+                suggested_next_action=current_state.value,
+                fallback_used=True,
+                fallback_reason="registration_date_validation_failed",
+                provider=result.provider or normalized.provider,
+            )
+
     if normalized.intent == "field_edit":
         if current_state not in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
             return _fallback_from(fallback, result, "field_edit_outside_confirm")
         if not normalized.target_field:
             return _fallback_from(fallback, result, "field_edit_missing_target")
-        normalized_edit, errors = _normalize_field_edit(normalized.target_field, normalized.new_value_raw or "")
+        normalized_edit, errors = _normalize_field_edit(
+            normalized.target_field,
+            normalized.new_value_raw or "",
+            driver=driver,
+        )
         if errors:
             return _fallback_from(fallback, result, "field_edit_invalid_value", errors)
         normalized.normalized_fields = normalized_edit
@@ -805,17 +832,6 @@ def _extract_safe_field_answer(current_state: DialogueState, text: str, driver: 
         if errors:
             return {}
         return {"brand": normalize_car_brand(text)}
-    if current_state == DialogueState.ASK_CAR_MODEL and _looks_like_short_entity_answer(text):
-        if not looks_like_precise_car_model(text):
-            return {}
-        brand = driver.vehicle.brand if driver and driver.vehicle else None
-        if brand:
-            model, errors = resolve_model_input(brand, text)
-            if model:
-                return {"model": model}
-            if errors:
-                return {}
-        return {"model": normalize_car_model(text)}
     if current_state == DialogueState.ASK_CAR_PLATE and _looks_like_plate_answer(text):
         return {"plate_number": normalize_plate_number(text)}
     if current_state == DialogueState.ASK_CAR_COLOR and _looks_like_short_entity_answer(text):
@@ -846,7 +862,10 @@ def _clarification_reply(current_state: DialogueState) -> str:
         DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля без лишних пояснений.",
         DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля. Например: белый.",
         DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Укажите номер техпаспорта (СТС) автомобиля, как в документе. Например: AA12345678.",
-        DialogueState.ASK_DRIVER_LICENSE_NUMBER: "Напишите серию и номер водительского удостоверения.",
+        DialogueState.ASK_DRIVER_LICENSE_NUMBER: (
+            "Напишите серию и номер водительского удостоверения, как в документе "
+            "(например CQ 981709). Серию и номер можно через пробел."
+        ),
         DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_EMPLOYMENT_TYPE: "Укажите условие работы: штатный, самозанятый или ИП.",
@@ -873,7 +892,10 @@ def _clarification_reply(current_state: DialogueState) -> str:
         DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля без лишних пояснений.",
         DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля. Например: белый.",
         DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Укажите номер техпаспорта (СТС) автомобиля, как в документе. Например: AA12345678.",
-        DialogueState.ASK_DRIVER_LICENSE_NUMBER: "Напишите серию и номер водительского удостоверения.",
+        DialogueState.ASK_DRIVER_LICENSE_NUMBER: (
+            "Напишите серию и номер водительского удостоверения, как в документе "
+            "(например CQ 981709). Серию и номер можно через пробел."
+        ),
         DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_EMPLOYMENT_TYPE: "Укажите условие работы: штатный, самозанятый или ИП.",
@@ -955,7 +977,15 @@ def _validation_error_reply(current_state: DialogueState, errors: list[str]) -> 
     if "birth_date_in_future" in errors:
         return "Дата рождения не может быть в будущем. Отправьте корректную дату в формате ДД.ММ.ГГГГ."
     if "driving_experience_too_early" in errors or "driving_experience_before_birth" in errors:
-        return "Дата начала стажа выглядит невозможной. Проверьте стаж и отправьте дату начала водительского стажа еще раз."
+        return (
+            "Дата начала стажа выглядит невозможной. "
+            "Укажите дату из водительского удостоверения, а не дату рождения."
+        )
+    if "driving_experience_same_as_birth" in errors:
+        return (
+            "Дата начала стажа совпадает с датой рождения. "
+            "Укажите, когда вы начали водить — обычно это дата из водительского удостоверения."
+        )
     if "driving_experience_in_future" in errors:
         return "Дата начала стажа не может быть в будущем. Отправьте корректную дату в формате ДД.ММ.ГГГГ."
     if "license_issue_before_birth" in errors or "license_issue_too_early" in errors:
@@ -967,8 +997,65 @@ def _validation_error_reply(current_state: DialogueState, errors: list[str]) -> 
     if "license_expired" in errors:
         return "Срок действия прав уже истек. Проверьте дату и отправьте актуальную дату окончания действия прав."
     if "hired_at_in_future" in errors:
-        return "Дата принятия не может быть в будущем. Обычно указывают дату подключения в парк или сегодняшнюю дату."
+        return (
+            "Дата принятия не может быть в будущем. "
+            "Обычно указывают дату подключения к парку или сегодняшнюю дату."
+        )
+    if "hired_at_same_as_license_expiry" in errors:
+        return (
+            "Дата принятия совпадает со сроком действия прав. "
+            "Укажите дату подключения к парку, а не «действует до» из водительского удостоверения."
+        )
     return _clarification_reply(current_state)
+
+
+def _validate_registration_fields_for_state(
+    current_state: DialogueState,
+    fields: dict[str, str],
+    driver: Driver,
+) -> list[str]:
+    state_field_map = {
+        DialogueState.ASK_BIRTH_DATE: "birth_date",
+        DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "driving_experience_since",
+        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "driver_license_issue_date",
+        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "driver_license_expires_at",
+        DialogueState.ASK_HIRED_AT: "hired_at",
+    }
+    field_name = state_field_map.get(current_state)
+    if not field_name or field_name not in fields:
+        return []
+    parsed = parse_date(fields[field_name]) or fields[field_name]
+    return _validate_registration_date_field(field_name, parsed, driver)
+
+
+def _validate_registration_date_field(field_name: str, parsed_date: str, driver: Driver) -> list[str]:
+    if field_name == "birth_date":
+        return validate_birth_date(parsed_date)
+    if field_name == "driving_experience_since":
+        errors = validate_driver_dates(
+            birth_date=driver.birth_date,
+            driving_experience_since=parsed_date,
+        )
+        if not errors and driver.birth_date and parsed_date == driver.birth_date:
+            errors.append("driving_experience_same_as_birth")
+        return errors
+    if field_name == "driver_license_issue_date":
+        return validate_driver_dates(
+            birth_date=driver.birth_date,
+            driver_license_issue_date=parsed_date,
+        )
+    if field_name == "driver_license_expires_at":
+        return validate_driver_dates(
+            birth_date=driver.birth_date,
+            driver_license_issue_date=driver.driver_license_issue_date,
+            driver_license_expires_at=parsed_date,
+        )
+    if field_name == "hired_at":
+        errors = validate_hired_at(parsed_date)
+        if not errors and driver.driver_license_expires_at and parsed_date == driver.driver_license_expires_at:
+            errors.append("hired_at_same_as_license_expiry")
+        return errors
+    return []
 
 
 def _looks_like_non_field_message(text: str) -> bool:
@@ -1029,8 +1116,141 @@ def _looks_like_plate_answer(text: str) -> bool:
 
 
 def _looks_like_license_number(text: str) -> bool:
-    token = text.strip().replace(" ", "")
-    return 4 <= len(token) <= 20 and token.isalnum()
+    token = re.sub(r"\s+", " ", text.strip().upper())
+    compact = re.sub(r"\s+", "", token)
+    if len(compact) < 4 or len(compact) > 20:
+        return False
+    return bool(re.fullmatch(r"[A-Z0-9\s]+", token))
+
+
+def _get_pending_car_model_suggestion(driver: Driver) -> str | None:
+    context = driver.support_context_json or {}
+    pending = context.get("pending_car_model_suggestion")
+    return pending if isinstance(pending, str) and pending else None
+
+
+def _looks_like_clarification_confirm(text: str) -> bool:
+    normalized = normalize_text_token(text)
+    return normalized in {"да", "yes", "верно", "правильно", "именно", "ага", "ок", "ok", "угу"}
+
+
+def _looks_like_clarification_reject(text: str) -> bool:
+    normalized = normalize_text_token(text)
+    return normalized in {"нет", "no", "неа"}
+
+
+def _car_model_registration_result(model: str) -> AIResult:
+    return AIResult(
+        "",
+        "registration",
+        {"model": model},
+        DialogueState.ASK_CAR_YEAR.value,
+        0.9,
+        normalized_fields={"model": model},
+        reasoning_summary="registration_extract:model",
+        suggested_next_action=DialogueState.ASK_CAR_YEAR.value,
+        clear_suggested_clarification=True,
+    )
+
+
+def _car_model_clarification_result(original: str, suggested: str) -> AIResult:
+    return AIResult(
+        build_car_model_clarification_message(original, suggested),
+        "clarification",
+        {},
+        DialogueState.ASK_CAR_MODEL.value,
+        0.82,
+        reasoning_summary="clarification:car_model_suggestion",
+        suggested_next_action=DialogueState.ASK_CAR_MODEL.value,
+        suggested_clarification_value=suggested,
+    )
+
+
+def _process_car_model_answer(text: str, driver: Driver) -> AIResult | None:
+    if not _looks_like_short_entity_answer(text):
+        return None
+    if not looks_like_precise_car_model(text):
+        return AIResult(
+            _clarification_reply(DialogueState.ASK_CAR_MODEL),
+            "clarification",
+            {},
+            DialogueState.ASK_CAR_MODEL.value,
+            0.45,
+            reasoning_summary="clarification:car_model",
+            suggested_next_action=DialogueState.ASK_CAR_MODEL.value,
+        )
+
+    pending = _get_pending_car_model_suggestion(driver)
+    if pending:
+        if _looks_like_clarification_confirm(text):
+            return _car_model_registration_result(pending)
+        if _looks_like_clarification_reject(text):
+            return AIResult(
+                CAR_MODEL_PROMPT,
+                "clarification",
+                {},
+                DialogueState.ASK_CAR_MODEL.value,
+                0.75,
+                reasoning_summary="clarification:car_model_rejected",
+                suggested_next_action=DialogueState.ASK_CAR_MODEL.value,
+                clear_suggested_clarification=True,
+            )
+        if normalize_text_token(text) == normalize_text_token(pending):
+            return _car_model_registration_result(pending)
+        if normalize_car_model(text) == pending:
+            return _car_model_registration_result(pending)
+
+    suggested = detect_car_model_clarification(text)
+    if suggested and normalize_text_token(text) != normalize_text_token(suggested):
+        return _car_model_clarification_result(text, suggested)
+
+    brand = driver.vehicle.brand if driver.vehicle else None
+    if brand:
+        model, errors = resolve_model_input(brand, text)
+        if model:
+            return _car_model_registration_result(model)
+        if errors:
+            return AIResult(
+                catalog_validation_error_message(errors),
+                "clarification",
+                {},
+                DialogueState.ASK_CAR_MODEL.value,
+                0.72,
+                reasoning_summary="validation:car_model_catalog",
+                validation_errors=errors,
+                suggested_next_action=DialogueState.ASK_CAR_MODEL.value,
+            )
+
+    return _car_model_registration_result(normalize_car_model(text))
+
+
+def _process_driver_license_answer(text: str) -> AIResult | None:
+    if not _looks_like_license_number(text):
+        return None
+    normalized = normalize_driver_license_number(text)
+    errors = validate_driver_license_number(normalized)
+    if errors:
+        return AIResult(
+            "Номер водительского удостоверения выглядит некорректно. "
+            "Напишите серию и номер, как в документе — например CQ 981709 или 374653 8475853.",
+            "clarification",
+            {},
+            DialogueState.ASK_DRIVER_LICENSE_NUMBER.value,
+            0.72,
+            reasoning_summary="validation:driver_license_number",
+            validation_errors=errors,
+            suggested_next_action=DialogueState.ASK_DRIVER_LICENSE_NUMBER.value,
+        )
+    return AIResult(
+        "",
+        "registration",
+        {"driver_license_number": normalized},
+        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE.value,
+        0.92,
+        normalized_fields={"driver_license_number": normalized},
+        reasoning_summary="registration_extract:driver_license_number",
+        suggested_next_action=DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE.value,
+    )
 
 
 def _coerce_model_response(payload: dict[str, object], current_state: str) -> AIModelResponse:
@@ -1103,129 +1323,8 @@ def _detect_correction_state(current_state: DialogueState, text: str) -> Dialogu
     return None
 
 
-def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResult | None:
-    if current_state != DialogueState.CONFIRM_DATA:
-        return None
-    normalized = normalize_text_token(text)
-    if not any(marker in normalized for marker in ("исправ", "измени", "поменяй", "замени")):
-        return None
-
-    marker_match = re.match(r"^(исправь|исправить|измени|измени|поменяй|замени)\s+(.*)$", normalized)
-    if not marker_match:
-        return None
-    tail = marker_match.group(2).strip()
-    raw_tail = text.strip()[len(text.strip().split(maxsplit=1)[0]) :].strip()
-
-    target_field = None
-    field_phrase = ""
-    raw_value = ""
-    if " на " in tail:
-        field_phrase, _, value_part = tail.partition(" на ")
-        target_field = _resolve_field_name(field_phrase)
-        raw_value = _extract_raw_value(raw_tail)
-    else:
-        target_field = _resolve_field_name(tail)
-
-    if not target_field:
-        return AIResult(
-            "Напишите, какое именно поле исправить. Например: исправь город на Алматы.",
-            "clarification",
-            {},
-            DialogueState.CONFIRM_DATA.value,
-            0.6,
-            reasoning_summary="clarification:unknown_edit_field",
-            suggested_next_action="confirm_data",
-        )
-
-    if not raw_value:
-        return AIResult(
-            f"Понял. Напишите новое значение для поля «{_human_field_label(target_field)}».",
-            "field_edit",
-            {},
-            DialogueState.CONFIRM_DATA.value,
-            0.82,
-            target_field=target_field,
-            reasoning_summary=f"field_edit:{target_field}",
-            validation_errors=["missing_new_value"],
-            suggested_next_action="confirm_data",
-        )
-
-    normalized_fields, errors = _normalize_field_edit(target_field, raw_value)
-    if errors:
-        return AIResult(
-            _field_edit_error_reply(target_field, errors),
-            "field_edit",
-            {},
-            DialogueState.CONFIRM_DATA.value,
-            0.82,
-            target_field=target_field,
-            new_value_raw=raw_value,
-            reasoning_summary=f"field_edit:{target_field}",
-            validation_errors=errors,
-            suggested_next_action="confirm_data",
-        )
-
-    return AIResult(
-        "Хорошо, сразу обновляю это поле.",
-        "field_edit",
-        normalized_fields.copy(),
-        DialogueState.CONFIRM_DATA.value,
-        0.93,
-        target_field=target_field,
-        new_value_raw=raw_value,
-        normalized_fields=normalized_fields,
-        reasoning_summary=f"field_edit:{target_field}",
-        suggested_next_action="confirm_data",
-    )
-
-
-def _extract_raw_value(raw_tail: str) -> str:
-    separators = (" на ", " : ", ": ")
-    lowered = raw_tail.lower()
-    for separator in separators:
-        index = lowered.find(separator)
-        if index != -1:
-            return raw_tail[index + len(separator) :].strip().strip("\"' ")
-    return ""
-
-
-def _resolve_field_name(value: str) -> str | None:
-    normalized = normalize_text_token(value)
-    mapping: list[tuple[tuple[str, ...], str]] = [
-        (("фио", "полное имя"), "full_name"),
-        (("фамилия",), "last_name"),
-        (("имя",), "first_name"),
-        (("отчество",), "middle_name"),
-        (("телефон", "контактный номер", "номер телефона"), "phone"),
-        (("город",), "city"),
-        (("адрес",), "address"),
-        (("иин",), "iin"),
-        (("дата рождения", "рождение"), "birth_date"),
-        (("стаж", "водительский стаж", "опыт"), "driving_experience_since"),
-        (("номер прав", "права", "ву", "водительское удостоверение"), "driver_license_number"),
-        (("дата выдачи", "выдано"), "driver_license_issue_date"),
-        (("срок действия", "действует до"), "driver_license_expires_at"),
-        (("условие работы", "тип занятости"), "employment_type"),
-        (("дата принятия",), "hired_at"),
-        (("слабослышащий",), "is_hearing_impaired"),
-        (("марка", "бренд"), "brand"),
-        (("модель",), "model"),
-        (("год", "год выпуска"), "year"),
-        (("госномер", "номер машины", "номер авто", "номер автомобиля"), "plate_number"),
-        (("цвет",), "color"),
-        (("стс", "техпаспорт", "свидетельство"), "registration_certificate"),
-        (("vin", "вин"), "vin"),
-        (("класс", "класс авто", "тариф"), "service_class"),
-    ]
-    for markers, field_name in mapping:
-        if any(marker in normalized for marker in markers):
-            return field_name
-    return None
-
-
-
-def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResult | None:
-    if current_state != DialogueState.CONFIRM_DATA:
+def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: Driver) -> AIResult | None:
+    if current_state not in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
         return None
 
     normalized = normalize_text_token(text)
@@ -1286,7 +1385,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str) -> AIResu
             suggested_next_action="confirm_data",
         )
 
-    normalized_fields, errors = _normalize_field_edit(target_field, raw_value)
+    normalized_fields, errors = _normalize_field_edit(target_field, raw_value, driver=driver)
     if errors:
         return AIResult(
             _field_edit_error_reply(target_field, errors),
@@ -1360,7 +1459,7 @@ def _resolve_field_name(value: str) -> str | None:
     return None
 
 
-def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, str], list[str]]:
+def _normalize_field_edit(target_field: str, raw_value: str, *, driver: Driver | None = None) -> tuple[dict[str, str], list[str]]:
     value = raw_value.strip().strip("\"'")
     if not value:
         return {}, ["empty_value"]
@@ -1387,6 +1486,9 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
             return {}, errors
         return {"brand": normalize_car_brand(value)}, []
     if target_field == "model":
+        suggested = detect_car_model_clarification(value)
+        if suggested and normalize_text_token(value) != normalize_text_token(suggested):
+            return {}, ["car_model_needs_clarification"]
         normalized_model = normalize_car_model(value)
         if not looks_like_precise_car_model(normalized_model):
             return {}, ["invalid_model"]
@@ -1416,11 +1518,15 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
         parsed = parse_date(value)
         if not parsed:
             return {}, ["invalid_date"]
-        if target_field == "birth_date":
+        if driver is not None:
+            errors = _validate_registration_date_field(target_field, parsed, driver)
+            if errors:
+                return {}, errors
+        elif target_field == "birth_date":
             errors = validate_birth_date(parsed)
             if errors:
                 return {}, errors
-        if target_field == "hired_at":
+        elif target_field == "hired_at":
             errors = validate_hired_at(parsed)
             if errors:
                 return {}, errors
@@ -1441,7 +1547,11 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
     if target_field == "driver_license_number":
         if not _looks_like_license_number(value):
             return {}, ["invalid_license_number"]
-        return {"driver_license_number": value.replace(" ", "")}, []
+        normalized = normalize_driver_license_number(value)
+        errors = validate_driver_license_number(normalized)
+        if errors:
+            return {}, errors
+        return {"driver_license_number": normalized}, []
     if target_field == "employment_type":
         normalized_employment = normalize_employment_type(value)
         if normalized_employment.lower() not in {"штатный", "самозанятый", "ип"} and normalized_employment == value:
@@ -1458,6 +1568,25 @@ def _normalize_field_edit(target_field: str, raw_value: str) -> tuple[dict[str, 
 
 
 def _field_edit_error_reply(target_field: str, errors: list[str] | None = None) -> str:
+    if errors:
+        date_fields = {
+            "birth_date",
+            "driving_experience_since",
+            "driver_license_issue_date",
+            "driver_license_expires_at",
+            "hired_at",
+        }
+        if target_field in date_fields:
+            state_map = {
+                "birth_date": DialogueState.ASK_BIRTH_DATE,
+                "driving_experience_since": DialogueState.ASK_DRIVING_EXPERIENCE_SINCE,
+                "driver_license_issue_date": DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE,
+                "driver_license_expires_at": DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT,
+                "hired_at": DialogueState.ASK_HIRED_AT,
+            }
+            return _validation_error_reply(state_map[target_field], errors)
+    if target_field == "model" and errors and "car_model_needs_clarification" in errors:
+        return "Укажите модель из документов без поколения и кода кузова. Например: Camry вместо Camry 35."
     examples = {
         "phone": "Например: исправь телефон на +77071234567.",
         "city": "Например: измени город на Алматы.",
@@ -1535,6 +1664,8 @@ def _normalize_fields_map(fields: dict[str, str]) -> dict[str, str]:
             cleaned = normalize_car_brand(cleaned)
         elif key == "model":
             cleaned = normalize_car_model(cleaned)
+        elif key == "driver_license_number":
+            cleaned = normalize_driver_license_number(cleaned)
         elif key == "employment_type":
             cleaned = normalize_employment_type(cleaned)
         elif key == "is_hearing_impaired":

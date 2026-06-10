@@ -7,7 +7,14 @@ from app.drivers.models import Driver
 from app.integrations.yandex.client import YandexFleetClient, YandexPartialSubmissionError
 from app.integrations.yandex.catalog import get_yandex_car_catalog
 from app.integrations.yandex.mapper import map_driver_to_yandex
-from app.utils.validators import validate_birth_date, validate_driver_dates, validate_hired_at, validate_kz_iin
+from app.integrations.yandex.messages import format_validation_errors_for_user
+from app.utils.validators import (
+    validate_birth_date,
+    validate_driver_dates,
+    validate_driver_license_number,
+    validate_hired_at,
+    validate_kz_iin,
+)
 
 
 class YandexSubmissionService:
@@ -18,11 +25,15 @@ class YandexSubmissionService:
         payload = map_driver_to_yandex(driver)
         validation = self.validate_payload(payload)
         if validation["errors"]:
-            raise ValueError(
-                "Yandex payload validation failed: " + "; ".join(str(item) for item in validation["errors"])
-            )
+            raise ValueError(self._format_validation_failure(validation["errors"]))
+
         try:
-            result = self.client.submit_driver(payload)
+            if application.yandex_driver_id and application.yandex_vehicle_id:
+                result = self.client.bind_driver_to_vehicle(application.yandex_driver_id, application.yandex_vehicle_id)
+            elif application.yandex_driver_id:
+                result = self.client.submit_vehicle_and_bind(payload, application.yandex_driver_id)
+            else:
+                result = self.client.submit_driver(payload)
         except YandexPartialSubmissionError as exc:
             application.status = "sent_to_yandex"
             application.yandex_status = "partial_success"
@@ -36,13 +47,17 @@ class YandexSubmissionService:
 
         application.status = "sent_to_yandex"
         application.yandex_status = result["status"]
-        application.yandex_driver_id = result["yandex_driver_id"]
-        application.yandex_vehicle_id = result["yandex_vehicle_id"]
+        application.yandex_driver_id = result.get("yandex_driver_id") or application.yandex_driver_id
+        application.yandex_vehicle_id = result.get("yandex_vehicle_id") or application.yandex_vehicle_id
         application.yandex_error = None
         application.sent_to_yandex_at = datetime.utcnow()
         db.add(application)
         db.flush()
         return application
+
+    def validate_driver(self, driver: Driver) -> dict[str, list[str]]:
+        payload = map_driver_to_yandex(driver)
+        return self.validate_payload(payload)
 
     def preview(self, driver: Driver) -> dict[str, object]:
         payload = map_driver_to_yandex(driver)
@@ -91,10 +106,18 @@ class YandexSubmissionService:
                 errors.append("invalid:driver_license_expires_at_before_issue_date")
         if payload.birth_date and payload.driving_experience_since and payload.driving_experience_since < payload.birth_date:
             errors.append("invalid:driving_experience_before_birth_date")
+        if payload.birth_date and payload.driving_experience_since and payload.driving_experience_since == payload.birth_date:
+            errors.append("invalid:driving_experience_same_as_birth")
+        if payload.hired_at and payload.driver_license_expires_at and payload.hired_at == payload.driver_license_expires_at:
+            errors.append("invalid:hired_at_same_as_license_expiry")
         if payload.iin:
             errors.extend(f"invalid:{item}" for item in validate_kz_iin(payload.iin))
         if payload.birth_date:
             errors.extend(f"invalid:{item}" for item in validate_birth_date(payload.birth_date))
+        if payload.driver_license_number:
+            errors.extend(
+                f"invalid:{item}" for item in validate_driver_license_number(payload.driver_license_number)
+            )
         errors.extend(
             f"invalid:{item}"
             for item in validate_driver_dates(
@@ -124,3 +147,7 @@ class YandexSubmissionService:
             warnings.append("catalog_unavailable:using_local_normalization")
 
         return {"errors": errors, "warnings": warnings}
+
+    @staticmethod
+    def _format_validation_failure(errors: list[str]) -> str:
+        return "Yandex payload validation failed: " + "; ".join(str(item) for item in errors)

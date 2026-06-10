@@ -25,6 +25,11 @@ from app.integrations.google_drive import GoogleDriveClient
 from app.integrations.google_sheets import GoogleSheetsClient
 from app.integrations.yandex.catalog import resolve_brand_input, resolve_model_input
 from app.integrations.yandex.client import YandexPartialSubmissionError
+from app.integrations.yandex.messages import (
+    build_yandex_error_reply,
+    format_validation_errors_for_user,
+    format_yandex_error_for_user,
+)
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.service import create_message
 from app.utils.logger import get_logger
@@ -202,6 +207,10 @@ class DialogueEngine:
         if ai_result.intent in {"faq", "help", "smalltalk"}:
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
         if ai_result.intent == "clarification":
+            if ai_result.clear_suggested_clarification:
+                self._clear_pending_car_model_suggestion(driver)
+            elif ai_result.suggested_clarification_value:
+                self._set_pending_car_model_suggestion(driver, ai_result.suggested_clarification_value)
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
         if ai_result.intent == "field_edit":
             return self._handle_field_edit(db, driver, application, state, ai_result)
@@ -241,9 +250,28 @@ class DialogueEngine:
             return self._respond(db, driver, application, duplicate_reply)
 
         self._apply_extracted_fields(driver, ai_result.extracted_fields, db)
+        if "model" in ai_result.extracted_fields:
+            self._clear_pending_car_model_suggestion(driver)
         next_state = DialogueState(ai_result.next_state or state.value)
 
         if next_state == DialogueState.READY_TO_SEND_YANDEX:
+            validation = self.yandex.validate_driver(driver)
+            if validation["errors"]:
+                retry_state = state if state == DialogueState.YANDEX_ERROR else DialogueState.CONFIRM_DATA
+                update_driver_state(db, driver, retry_state.value)
+                set_application_status(db, application, "confirming_data" if retry_state == DialogueState.CONFIRM_DATA else "yandex_error")
+                issues = format_validation_errors_for_user(validation["errors"])
+                return self._respond(
+                    db,
+                    driver,
+                    application,
+                    (
+                        "Перед отправкой нужно исправить данные:\n\n"
+                        f"{issues}\n\n"
+                        f"{self._build_confirmation(driver, validation=validation)}"
+                    ),
+                )
+
             application.yandex_error = None
             db.add(application)
             update_driver_state(db, driver, DialogueState.SENDING_TO_YANDEX.value)
@@ -257,8 +285,8 @@ class DialogueEngine:
                 create_conversation_event(db, driver, "yandex_pro_guidance_started")
                 reply = self._build_yandex_pro_start_reply(driver)
             except YandexPartialSubmissionError as exc:
-                update_driver_state(db, driver, DialogueState.ASK_YANDEX_PRO_LOGIN.value)
-                set_application_status(db, application, "sent_to_yandex", yandex_status="partial_success", yandex_error=str(exc))
+                update_driver_state(db, driver, DialogueState.YANDEX_ERROR.value)
+                set_application_status(db, application, "yandex_error", yandex_status="partial_success", yandex_error=str(exc))
                 driver.requires_attention = True
                 db.add(driver)
                 create_conversation_event(
@@ -283,26 +311,28 @@ class DialogueEngine:
                         "vehicle_id": exc.yandex_vehicle_id,
                     },
                 )
-                create_conversation_event(db, driver, "yandex_pro_guidance_started")
-                reply = (
-                    "Заявка уже зарегистрирована в системе парка, но один из технических шагов завершился с ошибкой. "
-                    "Продолжайте вход в Яндекс Про по вашему номеру. Если приложение не пускает или показывает ошибку, "
-                    "напишите сюда слово Ошибка."
-                )
+                if exc.yandex_driver_id and not exc.yandex_vehicle_id:
+                    reply = (
+                        "Водитель уже создан в парке, но автомобиль не удалось добавить автоматически.\n\n"
+                        f"{format_yandex_error_for_user(str(exc))}\n\n"
+                        "Исправьте данные об автомобиле и напишите «Подтверждаю» — повторно создадим только машину."
+                    )
+                else:
+                    reply = build_yandex_error_reply(str(exc))
             except Exception as exc:
                 update_driver_state(db, driver, DialogueState.YANDEX_ERROR.value)
                 set_application_status(db, application, "yandex_error", yandex_status="error", yandex_error=str(exc))
                 driver.requires_attention = True
                 db.add(driver)
                 create_conversation_event(db, driver, "yandex_failed", {"error": str(exc)})
-                reply = PROMPTS[DialogueState.YANDEX_ERROR]
+                reply = build_yandex_error_reply(str(exc))
             return self._respond(db, driver, application, reply)
 
         update_driver_state(db, driver, next_state.value)
         set_application_status(db, application, _application_status_from_state(next_state))
         reply = ai_result.reply or PROMPTS[next_state]
         if next_state == DialogueState.CONFIRM_DATA and ai_result.intent != "faq":
-            reply = ai_result.reply or self._build_confirmation(driver)
+            reply = ai_result.reply or self._build_confirmation(driver, validation=self.yandex.validate_driver(driver))
         return self._respond(db, driver, application, reply)
 
     def handle_debug_document(
@@ -849,7 +879,7 @@ class DialogueEngine:
         if status == "duplicate_rejected":
             return application.yandex_error or STATUS_REPLIES["duplicate_rejected"]
         if status == "yandex_error":
-            return application.yandex_error or STATUS_REPLIES["yandex_error"]
+            return build_yandex_error_reply(application.yandex_error)
         return STATUS_REPLIES.get(status, STATUS_FALLBACK_TEMPLATE.format(status=status))
 
     def _reset_registration(self, db: Session, driver: Driver, application) -> None:
@@ -989,8 +1019,16 @@ class DialogueEngine:
         db.flush()
         return changed_fields
 
-    def _build_confirmation(self, driver: Driver) -> str:
+    def _build_confirmation(self, driver: Driver, validation: dict[str, list[str]] | None = None) -> str:
         vehicle = driver.vehicle
+        if validation is None:
+            validation = self.yandex.validate_driver(driver)
+        issues_block = ""
+        if validation.get("errors"):
+            issues_block = (
+                "\n\n⚠ Перед отправкой нужно исправить:\n"
+                f"{format_validation_errors_for_user(validation['errors'])}\n"
+            )
         return (
             "Проверьте данные:\n\n"
             f"ФИО: {driver.full_name or '-'}\n"
@@ -1012,7 +1050,8 @@ class DialogueEngine:
             f"Год: {vehicle.year if vehicle else '-'}\n"
             f"Госномер: {vehicle.plate_number if vehicle else '-'}\n"
             f"Цвет: {vehicle.color if vehicle else '-'}\n"
-            f"Номер СТС: {vehicle.registration_certificate if vehicle else '-'}\n\n"
+            f"Номер СТС: {vehicle.registration_certificate if vehicle else '-'}"
+            f"{issues_block}\n\n"
             'Если все верно, напишите "Подтверждаю". Если нужно исправить, напишите, что изменить.'
         )
 
@@ -1094,6 +1133,20 @@ class DialogueEngine:
         context = dict(driver.support_context_json or {})
         context.pop("pending_field_edit", None)
         driver.support_context_json = context or None
+
+    def _set_pending_car_model_suggestion(self, driver: Driver, suggested_model: str) -> None:
+        context = dict(driver.support_context_json or {})
+        context["pending_car_model_suggestion"] = suggested_model
+        driver.support_context_json = context
+        driver.updated_at = datetime.utcnow()
+
+    def _clear_pending_car_model_suggestion(self, driver: Driver) -> None:
+        context = dict(driver.support_context_json or {})
+        if "pending_car_model_suggestion" not in context:
+            return
+        context.pop("pending_car_model_suggestion", None)
+        driver.support_context_json = context or None
+        driver.updated_at = datetime.utcnow()
 
     def _correction_state_to_field_name(self, state: DialogueState) -> str | None:
         mapping = {

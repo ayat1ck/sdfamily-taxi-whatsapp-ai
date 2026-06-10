@@ -284,6 +284,98 @@ def resolve_car_chassis_model(value: str) -> str | None:
     return None
 
 
+def _car_model_suffix_needs_clarification(parts: list[str]) -> bool:
+    for part in parts:
+        if resolve_car_chassis_model(part):
+            return True
+        if re.fullmatch(r"[wvx]\d{3}[a-z]?", part):
+            return True
+        if re.fullmatch(r"\d{1,3}[a-z]?", part):
+            return True
+    return False
+
+
+def detect_car_model_clarification(value: str) -> str | None:
+    cleaned = normalize_text_token(value)
+    if not cleaned:
+        return None
+    if cleaned in CAR_MODEL_ALIASES:
+        return None
+
+    chassis = resolve_car_chassis_model(cleaned)
+    if chassis and normalize_text_token(chassis) != cleaned:
+        return chassis
+
+    parts = cleaned.split()
+    if len(parts) >= 2:
+        if len(parts) == 2 and resolve_car_chassis_model(parts[1]):
+            return resolve_car_chassis_model(parts[1])
+
+        for prefix_len in range(len(parts), 0, -1):
+            prefix = " ".join(parts[:prefix_len])
+            suffix = parts[prefix_len:]
+            if prefix not in CAR_MODEL_ALIASES:
+                continue
+            if suffix and _car_model_suffix_needs_clarification(suffix):
+                return CAR_MODEL_ALIASES[prefix]
+            return None
+
+        first = parts[0]
+        if first in CAR_MODEL_ALIASES and _car_model_suffix_needs_clarification(parts[1:]):
+            return CAR_MODEL_ALIASES[first]
+
+    return None
+
+
+def build_car_model_clarification_message(original: str, suggested: str) -> str:
+    return (
+        f"Похоже, вы указали «{original.strip()}». "
+        f"Для регистрации нужна модель из документов — без кода кузова или поколения. "
+        f"Вы имели в виду {suggested}? Напишите «{suggested}» или «да»."
+    )
+
+
+def normalize_driver_license_number(value: str) -> str:
+    text = re.sub(r"\s+", " ", value.strip().upper())
+    if not text:
+        return ""
+
+    compact = re.sub(r"\s+", "", text)
+    letter_match = re.fullmatch(r"([A-Z]{2})(\d{6,8})", compact)
+    if letter_match:
+        return f"{letter_match.group(1)} {letter_match.group(2)}"
+
+    parts = text.split()
+    if len(parts) == 2:
+        left, right = parts
+        if re.fullmatch(r"[A-Z]{2}", left) and re.fullmatch(r"\d{6,8}", right):
+            return f"{left} {right}"
+        if re.fullmatch(r"\d{4,6}", left) and re.fullmatch(r"\d{6,8}", right):
+            return f"{left} {right}"
+
+    return compact
+
+
+def validate_driver_license_number(value: str) -> list[str]:
+    normalized = normalize_driver_license_number(value)
+    if not normalized:
+        return ["invalid_license_number"]
+
+    compact = normalized.replace(" ", "")
+    if re.fullmatch(r"[A-Z]{2}\d{6,8}", compact):
+        return []
+
+    parts = normalized.split()
+    if len(parts) == 2 and all(part.isdigit() for part in parts):
+        if 10 <= sum(len(part) for part in parts) <= 14:
+            return []
+
+    if 4 <= len(compact) <= 20 and compact.isalnum():
+        return []
+
+    return ["invalid_license_number_format"]
+
+
 def normalize_text_token(value: str) -> str:
     normalized = value.strip().lower().replace("ё", "е")
     return re.sub(r"\s+", " ", normalized)

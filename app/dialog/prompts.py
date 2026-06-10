@@ -17,7 +17,10 @@ PROMPTS: dict[DialogueState, str] = {
     DialogueState.ASK_ADDRESS: "Укажите адрес проживания или регистрации.",
     DialogueState.ASK_IIN: "Укажите ИИН из 12 цифр.",
     DialogueState.ASK_BIRTH_DATE: "Укажите дату рождения в формате ДД.ММ.ГГГГ.",
-    DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "Укажите дату начала водительского стажа в формате ДД.ММ.ГГГГ.",
+    DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: (
+        "Укажите дату начала водительского стажа в формате ДД.ММ.ГГГГ. "
+        "Это не дата рождения — возьмите дату из водительского удостоверения."
+    ),
     DialogueState.ASK_HAS_CAR: "Напишите марку автомобиля, например Toyota.",
     DialogueState.ASK_EXISTING_VEHICLE_IDENTIFIER: "Напишите марку автомобиля, например Toyota.",
     DialogueState.ASK_CAR_BRAND: "Напишите марку автомобиля, например Toyota.",
@@ -26,11 +29,17 @@ PROMPTS: dict[DialogueState, str] = {
     DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля.",
     DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля.",
     DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Укажите номер техпаспорта (СТС) автомобиля, как в документе.",
-    DialogueState.ASK_DRIVER_LICENSE_NUMBER: "Напишите серию и номер водительского удостоверения.",
+    DialogueState.ASK_DRIVER_LICENSE_NUMBER: (
+        "Напишите серию и номер водительского удостоверения, как в документе "
+        "(например CQ 981709). Серию и номер можно через пробел."
+    ),
     DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
     DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
     DialogueState.ASK_EMPLOYMENT_TYPE: "Укажите условие работы: штатный, самозанятый или другое согласованное с парком условие.",
-    DialogueState.ASK_HIRED_AT: "Укажите дату принятия в формате ДД.ММ.ГГГГ.",
+    DialogueState.ASK_HIRED_AT: (
+        "Укажите дату принятия в парк в формате ДД.ММ.ГГГГ. "
+        "Обычно это сегодняшняя дата или день подключения — не путайте со сроком действия прав."
+    ),
     DialogueState.ASK_HEARING_IMPAIRED: "Вы являетесь слабослышащим водителем? Ответьте: да или нет.",
     DialogueState.ASK_DRIVER_LICENSE_FRONT: "Отправьте фото водительского удостоверения: лицевая сторона.",
     DialogueState.ASK_DRIVER_LICENSE_BACK: "Принял. Теперь отправьте фото водительского удостоверения: обратная сторона.",
