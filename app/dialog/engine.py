@@ -1087,7 +1087,7 @@ class DialogueEngine:
             return base_reply
         if base_reply.strip() == reminder.strip():
             return base_reply
-        return f"{base_reply}\n\nТекущий шаг регистрации: {reminder}"
+        return f"{base_reply}\n\nКогда будете готовы продолжить: {reminder}"
 
     def _format_post_yandex_reply(self, state: DialogueState, base_reply: str) -> str:
         if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS:

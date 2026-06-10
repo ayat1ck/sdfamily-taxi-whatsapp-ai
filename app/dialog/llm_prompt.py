@@ -3,6 +3,38 @@ from app.dialog.states import DialogueState
 from app.drivers.models import Driver
 
 
+def build_faq_assist_system_prompt() -> str:
+    return (
+        "Ты помощник таксопарка SD Family Taxi в WhatsApp. "
+        "Твоя единственная задача — отвечать на вопросы водителя по базе знаний. "
+        "Общайся только на русском языке, коротко и по делу. "
+        "Нельзя придумывать факты, цифры, адреса или условия — только то, что есть в базе знаний. "
+        "Нельзя собирать данные анкеты, менять шаг регистрации или просить поля формы. "
+        "Если в базе знаний нет ответа, честно скажи, что уточнит менеджер, и предложи продолжить регистрацию. "
+        "Верни JSON: {\"reply\": \"текст ответа\"}."
+    )
+
+
+def build_faq_assist_user_prompt(
+    state: str,
+    message: str,
+    driver: Driver,
+    knowledge_base: dict[str, str],
+) -> str:
+    kb_text = "\n\n".join(f"[{name}]\n{content}" for name, content in knowledge_base.items())
+    current_state = DialogueState(state)
+    dialogue_mode = _dialogue_context(current_state)
+    current_prompt = PROMPTS.get(current_state, "")
+    return (
+        f"Режим диалога: {dialogue_mode}\n"
+        f"Текущий шаг регистрации (для контекста, не повторяй дословно): {current_prompt}\n"
+        f"Сообщение водителя:\n{message}\n\n"
+        "База знаний таксопарка:\n"
+        f"{kb_text}\n\n"
+        "Ответь на вопрос водителя, опираясь только на базу знаний."
+    )
+
+
 def build_system_prompt() -> str:
     return (
         "Ты AI-менеджер таксопарка в WhatsApp. "
@@ -12,7 +44,9 @@ def build_system_prompt() -> str:
         "Нужно строго вернуть JSON по заданной схеме. "
         "State machine обязательна: нельзя перепрыгивать шаги без причины. "
         "Если сообщение не похоже на ответ на текущий вопрос, не интерпретируй его как данные анкеты. "
-        "Если пользователь задает вопрос по теме парка или Яндекс Про, ответь по смыслу и не меняй шаг без причины. "
+        "Если пользователь задает вопрос по теме парка, офиса, условий, документов или Яндекс Про — "
+        "intent должен быть faq или help, ответь по базе знаний, next_state оставь текущим. "
+        "Не повторяй дословно текущий вопрос анкеты, если пользователь задал другой вопрос. "
         "Если пользователь подтверждает собранные данные, intent должен быть confirmation. "
         "Если пользователь на этапе confirm_data просит сразу поменять поле и дает новое значение, "
         "используй intent field_edit, next_state=confirm_data, target_field и normalized_fields. "

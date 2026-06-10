@@ -64,6 +64,33 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "какая машина",
         "требования к авто",
     ),
+    "park_info": (
+        "кто вы",
+        "кто вы такие",
+        "что за парк",
+        "что за компания",
+        "о вас",
+        "понятно что вы таксопарк",
+        "вы таксопарк",
+        "какие условия",
+        "условия парка",
+        "условия работы",
+        "комиссия",
+        "выплаты",
+        "байге",
+        "подарок",
+        "подарочный бокс",
+        "сухой туман",
+        "офис",
+        "где офис",
+        "где находится офис",
+        "адрес офиса",
+        "ваш офис",
+        "балкантау",
+        "балкантау 117",
+        "вода",
+        "поддержка",
+    ),
     "registration": (
         "статус заявки",
         "статус",
@@ -74,25 +101,13 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "как проходит регистрация",
         "повторная регистрация",
         "перезапуск",
-    ),
-    "park_info": (
-        "кто вы",
-        "кто вы такие",
-        "что за парк",
-        "что за компания",
-        "о вас",
-        "какие условия",
-        "условия парка",
-        "комиссия",
-        "выплаты",
-        "байге",
-        "подарок",
-        "подарочный бокс",
-        "сухой туман",
-        "офис",
-        "балкантау 117",
-        "вода",
-        "поддержка",
+        "зачем иин",
+        "зачем нужен иин",
+        "почему иин",
+        "для чего иин",
+        "можно по другому",
+        "другой вопрос",
+        "можно задать",
     ),
     "registered_driver_support": (
         "после регистрации",
@@ -117,7 +132,7 @@ def load_knowledge_base() -> dict[str, str]:
 
 
 def find_faq_answer(message: str, kb: dict[str, str]) -> str | None:
-    lowered = normalize_text_token(message)
+    lowered = normalize_text_token(message).strip(" ?!.,")
 
     for _, content in kb.items():
         lines = content.splitlines()
@@ -142,3 +157,54 @@ def find_faq_answer(message: str, kb: dict[str, str]) -> str | None:
             return kb[doc_name]
 
     return None
+
+
+def looks_like_support_question(message: str) -> bool:
+    normalized = normalize_text_token(message).strip(" ?!.,")
+    if not normalized:
+        return False
+    if "?" in message:
+        return True
+
+    greeting_markers = ("ало", "алло", "привет", "здравствуйте", "салам", "добрый день", "добрый вечер", "hi", "hello")
+    if normalized in greeting_markers or any(normalized.startswith(marker) for marker in ("ало", "алло")):
+        return True
+
+    help_markers = (
+        "зачем",
+        "почему",
+        "для чего",
+        "что такое",
+        "объясни",
+        "объясните",
+        "поясни",
+        "не понял",
+        "не понимаю",
+        "помогите",
+        "помоги",
+        "help",
+        "можно по другому",
+        "другой вопрос",
+        "не про это",
+    )
+    if any(marker in normalized for marker in help_markers):
+        return True
+
+    question_starters = (
+        "где ",
+        "как ",
+        "какие ",
+        "какой ",
+        "что ",
+        "кто ",
+        "сколько ",
+        "когда ",
+        "а где ",
+        "а как ",
+        "а какие ",
+    )
+    if normalized.startswith(question_starters):
+        return True
+    if any(fragment in normalized for fragment in (" условия", " офис", " комиссия", " документы", " яндекс про")):
+        return True
+    return False
