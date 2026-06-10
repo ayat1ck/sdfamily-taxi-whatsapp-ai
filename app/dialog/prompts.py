@@ -20,6 +20,10 @@ DOCUMENT_PHOTO_QUALITY_HINT = (
     "весь документ в кадре, без бликов и засветов."
 )
 
+MANUAL_ENTRY_HINT = (
+    "✍️ Или напишите «вручную», «заполню сам», «без фото» — введём данные текстом, как в удостоверении."
+)
+
 
 CAR_MODEL_PROMPT = (
     "🚗 Напишите модель автомобиля, как в документах или техпаспорте "
@@ -66,21 +70,25 @@ PROMPTS: dict[DialogueState, str] = {
         "• PDF из eGov или Kaspi (обе стороны на одной странице) — один файл\n"
         "• или 2 фото: лицевая и обратная стороны\n\n"
         f"{DOCUMENT_PHOTO_QUALITY_HINT}\n\n"
+        f"{MANUAL_ENTRY_HINT}\n\n"
         "Бот распознает ФИО, ИИН, даты и номер прав."
     ),
     DialogueState.ASK_DRIVER_LICENSE_BACK: (
         "📸 Отправьте обратную сторону водительского удостоверения.\n"
         "Или PDF из eGov/Kaspi с обеими сторонами на одной странице.\n\n"
-        f"{DOCUMENT_PHOTO_QUALITY_HINT}"
+        f"{DOCUMENT_PHOTO_QUALITY_HINT}\n\n"
+        f"{MANUAL_ENTRY_HINT}"
     ),
     DialogueState.ASK_ID_CARD: (
         "📸 Отправьте удостоверение личности — фото или PDF из eGov/Kaspi.\n\n"
-        f"{DOCUMENT_PHOTO_QUALITY_HINT}"
+        f"{DOCUMENT_PHOTO_QUALITY_HINT}\n\n"
+        f"{MANUAL_ENTRY_HINT}"
     ),
     DialogueState.ASK_VEHICLE_REGISTRATION_DOC: (
         "📸 Отправьте техпаспорт или СТС — фото или PDF из eGov/Kaspi.\n"
         "Распознаем марку, модель, госномер и номер СТС.\n\n"
-        f"{DOCUMENT_PHOTO_QUALITY_HINT}"
+        f"{DOCUMENT_PHOTO_QUALITY_HINT}\n\n"
+        f"{MANUAL_ENTRY_HINT}"
     ),
     DialogueState.ASK_SELFIE_WITH_LICENSE: (
         "📸 Отправьте селфи с водительским удостоверением в руке.\n"

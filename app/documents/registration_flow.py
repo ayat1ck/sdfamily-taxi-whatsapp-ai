@@ -13,6 +13,27 @@ DOCUMENT_SEQUENCE: list[tuple[DialogueState, str]] = [
     (DialogueState.ASK_SELFIE_WITH_LICENSE, "selfie_with_license"),
 ]
 
+DATA_DOCUMENT_TYPES = {
+    "driver_license_front",
+    "driver_license_back",
+    "id_card",
+    "vehicle_registration_doc",
+}
+
+SATISFIED_DOCUMENT_STATUSES = {
+    "uploaded",
+    "stored_in_whatsapp",
+    "debug_saved",
+    "skipped_manual",
+}
+
+DOCUMENT_STATES = frozenset(state for state, _ in DOCUMENT_SEQUENCE)
+
+MANUAL_DATA_ENTRY_REPLY = (
+    "✅ Хорошо, заполним данные вручную по шагам — как в удостоверении и документах.\n"
+    "📸 Селфи с правами всё равно понадобится перед отправкой в парк."
+)
+
 TEXT_FIELD_SEQUENCE: list[DialogueState] = [
     DialogueState.ASK_FULL_NAME,
     DialogueState.ASK_PHONE,
@@ -112,12 +133,51 @@ EXTRACTED_FIELD_LABELS: dict[str, str] = {
 }
 
 
+def prefers_manual_data_entry(driver: Driver) -> bool:
+    context = driver.support_context_json or {}
+    return bool(context.get("manual_data_entry"))
+
+
+def set_manual_data_entry(driver: Driver, *, enabled: bool = True) -> None:
+    context = dict(driver.support_context_json or {})
+    if enabled:
+        context["manual_data_entry"] = True
+    else:
+        context.pop("manual_data_entry", None)
+    driver.support_context_json = context or None
+
+
 def uploaded_document_types(driver: Driver) -> set[str]:
     return {
         document.document_type
         for document in driver.documents
-        if document.document_type and document.status not in {"rejected", "deleted"}
+        if document.document_type
+        and document.status in SATISFIED_DOCUMENT_STATUSES
     }
+
+
+def skip_data_documents_for_manual_entry(db, driver: Driver) -> list[str]:
+    from app.documents.service import upsert_document
+
+    skipped: list[str] = []
+    for document_type in DATA_DOCUMENT_TYPES:
+        if document_type in uploaded_document_types(driver):
+            continue
+        upsert_document(
+            db,
+            driver,
+            document_type=document_type,
+            file_url=None,
+            google_drive_file_id=None,
+            whatsapp_media_id=None,
+            status="skipped_manual",
+            storage_provider="manual_entry",
+        )
+        skipped.append(document_type)
+    set_manual_data_entry(driver, enabled=True)
+    db.add(driver)
+    db.flush()
+    return skipped
 
 
 def is_text_field_filled(driver: Driver, vehicle: Vehicle | None, state: DialogueState) -> bool:
@@ -136,13 +196,30 @@ def is_text_field_filled(driver: Driver, vehicle: Vehicle | None, state: Dialogu
 
 def next_registration_state(driver: Driver, vehicle: Vehicle | None = None) -> DialogueState:
     uploaded = uploaded_document_types(driver)
-    for state, document_type in DOCUMENT_SEQUENCE:
-        if document_type not in uploaded:
-            return state
+    manual = prefers_manual_data_entry(driver)
+
+    if not manual:
+        for state, document_type in DOCUMENT_SEQUENCE:
+            if document_type not in uploaded:
+                return state
+
     for state in TEXT_FIELD_SEQUENCE:
         if not is_text_field_filled(driver, vehicle, state):
             return state
+
+    if "selfie_with_license" not in uploaded:
+        return DialogueState.ASK_SELFIE_WITH_LICENSE
+
     return DialogueState.CONFIRM_DATA
+
+
+def is_expecting_data_document(driver: Driver, state: DialogueState) -> bool:
+    if prefers_manual_data_entry(driver):
+        return False
+    if state in DOCUMENT_STATE_MAP and DOCUMENT_STATE_MAP[state] in DATA_DOCUMENT_TYPES:
+        return True
+    next_state = next_registration_state(driver, driver.vehicle)
+    return next_state in DOCUMENT_STATE_MAP and DOCUMENT_STATE_MAP[next_state] in DATA_DOCUMENT_TYPES
 
 
 def is_registration_collecting_state(state: DialogueState) -> bool:

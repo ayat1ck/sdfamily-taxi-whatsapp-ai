@@ -12,6 +12,8 @@ from app.dialog.ai import AIService, AIResult
 from app.dialog.faq import load_knowledge_base, resolve_faq_replies
 from app.dialog.prompts import format_in_flow_reply
 from app.dialog.states import DialogueState
+from app.documents.registration_flow import is_expecting_data_document, next_registration_state
+from app.utils.validators import looks_like_manual_data_entry
 
 
 # Valid test IIN (yy=88 mm=01 dd=01)
@@ -403,6 +405,105 @@ SCENARIOS: list[Scenario] = [
         expect_intent="registration",
         expect_fields=("model",),
     ),
+    Scenario(
+        "ASK_EMPLOYMENT_TYPE: самозанятый not manual",
+        DialogueState.ASK_EMPLOYMENT_TYPE.value,
+        "самозанятый",
+        expect_intent="registration",
+        expect_fields=("employment_type",),
+    ),
+]
+
+
+@dataclass
+class ManualMarkerCase:
+    message: str
+    expect: bool
+    label: str = ""
+
+
+MANUAL_MARKER_CASES: list[ManualMarkerCase] = [
+    ManualMarkerCase("хочу вручную", True, "хочу вручную"),
+    ManualMarkerCase("заполню сам", True, "заполню сам"),
+    ManualMarkerCase("без фото", True, "без фото"),
+    ManualMarkerCase("напишу сама данные", True, "напишу сама"),
+    ManualMarkerCase("лучше вручную", True, "лучше вручную"),
+    ManualMarkerCase("самозанятый", False, "самозанятый"),
+    ManualMarkerCase("Астана", False, "город"),
+]
+
+
+@dataclass
+class ManualFlowCase:
+    name: str
+    driver: dict[str, Any]
+    expect_next: str
+    expect_expecting_doc: bool | None = None
+    state: str = DialogueState.ASK_DRIVER_LICENSE_FRONT.value
+
+
+MANUAL_FLOW_CASES: list[ManualFlowCase] = [
+    ManualFlowCase(
+        "license front expects data doc",
+        driver={"documents": [], "full_name": "Абай Аят", "phone": "+77001112233", "city": "Астана"},
+        expect_next=DialogueState.ASK_DRIVER_LICENSE_FRONT.value,
+        expect_expecting_doc=True,
+    ),
+    ManualFlowCase(
+        "manual skip -> first empty text field",
+        driver={
+            "support_context_json": {"manual_data_entry": True},
+            "documents": [
+                SimpleNamespace(document_type="driver_license_front", status="skipped_manual"),
+                SimpleNamespace(document_type="driver_license_back", status="skipped_manual"),
+                SimpleNamespace(document_type="id_card", status="skipped_manual"),
+                SimpleNamespace(document_type="vehicle_registration_doc", status="skipped_manual"),
+            ],
+            "full_name": "Абай Аят",
+            "phone": "+77001112233",
+            "city": "Астана",
+        },
+        expect_next=DialogueState.ASK_ADDRESS.value,
+        expect_expecting_doc=False,
+    ),
+    ManualFlowCase(
+        "manual all text filled -> selfie",
+        driver={
+            "support_context_json": {"manual_data_entry": True},
+            "documents": [
+                SimpleNamespace(document_type=t, status="skipped_manual")
+                for t in (
+                    "driver_license_front",
+                    "driver_license_back",
+                    "id_card",
+                    "vehicle_registration_doc",
+                )
+            ],
+            "full_name": "Абай Аят Жаныбекулы",
+            "phone": "+77001112233",
+            "city": "Астана",
+            "address": "ул. Тест 1",
+            "iin": TEST_IIN,
+            "birth_date": "1988-01-01",
+            "driving_experience_since": "2010-01-01",
+            "driver_license_number": "CQ981709",
+            "driver_license_issue_date": "2020-01-01",
+            "driver_license_expires_at": "2030-01-01",
+            "employment_type": "park_employee",
+            "hired_at": "2026-01-01",
+            "is_hearing_impaired": "false",
+            "vehicle": SimpleNamespace(
+                brand="Toyota",
+                model="Camry",
+                year=2018,
+                plate_number="123ABC01",
+                color="белый",
+                registration_certificate="AB12345678",
+            ),
+        },
+        expect_next=DialogueState.ASK_SELFIE_WITH_LICENSE.value,
+        expect_expecting_doc=False,
+    ),
 ]
 
 
@@ -450,6 +551,33 @@ def check_scenario(scenario: Scenario, result: AIResult) -> list[str]:
 
     if result.intent == "clarification" and not reply.strip() and not result.extracted_fields:
         issues.append("empty clarification reply")
+
+    return issues
+
+
+def run_manual_entry_checks() -> list[str]:
+    issues: list[str] = []
+
+    for case in MANUAL_MARKER_CASES:
+        got = looks_like_manual_data_entry(case.message)
+        if got != case.expect:
+            label = case.label or case.message
+            issues.append(f"manual marker {label!r}: expected {case.expect}, got {got}")
+
+    for case in MANUAL_FLOW_CASES:
+        driver = make_driver(state=case.state, **case.driver)
+        dialogue_state = DialogueState(case.state)
+        next_state = next_registration_state(driver, driver.vehicle)
+        if next_state.value != case.expect_next:
+            issues.append(
+                f"{case.name}: next_state expected {case.expect_next!r}, got {next_state.value!r}"
+            )
+        if case.expect_expecting_doc is not None:
+            expecting = is_expecting_data_document(driver, dialogue_state)
+            if expecting != case.expect_expecting_doc:
+                issues.append(
+                    f"{case.name}: is_expecting_data_document expected {case.expect_expecting_doc}, got {expecting}"
+                )
 
     return issues
 
@@ -516,11 +644,23 @@ def print_report(passed: list[RunResult], failed: list[RunResult]) -> None:
         print(f"\n  Q: {msg}")
         print(f"  A: {truncate(ans or '(none)')}")
 
-    if failed:
+    manual_issues = run_manual_entry_checks()
+    print("\n" + "=" * 72)
+    print("MANUAL DATA ENTRY CHECKS")
+    print(f"Marker cases: {len(MANUAL_MARKER_CASES)} | Flow cases: {len(MANUAL_FLOW_CASES)}")
+    if manual_issues:
+        print(f"FAILED ({len(manual_issues)}):")
+        for issue in manual_issues:
+            print(f"  - {issue}")
+    else:
+        print("All manual entry checks passed.")
+
+    if failed or manual_issues:
         print("\n" + "=" * 72)
-        print(f"FAILED SCENARIOS ({len(failed)}):")
-        for run in failed:
-            print(f"  - {run.scenario.name}: {'; '.join(run.issues)}")
+        if failed:
+            print(f"FAILED SCENARIOS ({len(failed)}):")
+            for run in failed:
+                print(f"  - {run.scenario.name}: {'; '.join(run.issues)}")
         sys.exit(1)
 
     print("\nAll scenarios passed.")

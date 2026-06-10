@@ -24,12 +24,15 @@ from app.dialog.states import DialogueState
 from app.documents.extraction import DocumentExtractionService, normalize_extracted_fields
 from app.documents.registration_flow import (
     DOCUMENT_TYPE_LABELS,
+    MANUAL_DATA_ENTRY_REPLY,
     build_recognition_reply,
     expand_uploaded_document_types,
+    is_expecting_data_document,
     is_registration_collecting_state,
     next_registration_state,
     prompt_for_state,
     resolve_document_type_for_upload,
+    skip_data_documents_for_manual_entry,
 )
 from app.documents.service import upsert_document
 from app.drivers.models import Driver
@@ -46,8 +49,14 @@ from app.integrations.yandex.messages import (
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.service import create_message
 from app.utils.logger import get_logger
-from app.utils.validators import normalize_plate_number, normalize_registration_certificate, normalize_text_token
-from app.utils.validators import normalize_car_brand, normalize_car_model
+from app.utils.validators import (
+    looks_like_manual_data_entry,
+    normalize_car_brand,
+    normalize_car_model,
+    normalize_plate_number,
+    normalize_registration_certificate,
+    normalize_text_token,
+)
 from app.vehicles.service import find_vehicle_by_plate_number, get_or_create_vehicle
 from app.whatsapp.media import WhatsAppMediaClient
 from app.whatsapp.parser import ParsedWhatsAppMessage
@@ -166,6 +175,16 @@ class DialogueEngine:
                 reasoning_summary="special_command",
             )
             return self._respond(db, driver, application, command_reply)
+
+        if looks_like_manual_data_entry(incoming.text or "") and is_expecting_data_document(driver, state):
+            return self._handle_manual_data_entry(
+                db,
+                driver,
+                application,
+                state,
+                incoming.text or "",
+                incoming_message.id,
+            )
 
         pending_field = self._get_pending_field_edit(driver)
         if pending_field and state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
@@ -589,6 +608,44 @@ class DialogueEngine:
                 return reply
 
         return None
+
+    def _handle_manual_data_entry(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+        incoming_message_id: int | None = None,
+    ) -> str:
+        skipped = skip_data_documents_for_manual_entry(db, driver)
+        vehicle = get_or_create_vehicle(db, driver)
+        next_state = next_registration_state(driver, vehicle)
+        update_driver_state(db, driver, next_state.value)
+        set_application_status(db, application, _application_status_from_state(next_state))
+        create_conversation_event(
+            db,
+            driver,
+            "manual_data_entry_selected",
+            {"from_state": state.value, "skipped_documents": skipped},
+        )
+        next_prompt = (
+            self._build_confirmation(driver)
+            if next_state == DialogueState.CONFIRM_DATA
+            else PROMPTS[next_state]
+        )
+        reply = f"{MANUAL_DATA_ENTRY_REPLY}\n\n📋 Следующий шаг:\n{next_prompt}"
+        self._record_system_trace(
+            db,
+            incoming_message_id,
+            driver,
+            state.value,
+            message_text,
+            intent="manual_data_entry",
+            reply=reply,
+            reasoning_summary="manual_data_entry",
+        )
+        return self._respond(db, driver, application, reply)
 
     def _handle_field_edit(self, db: Session, driver: Driver, application, state: DialogueState, ai_result: AIResult) -> str:
         if state not in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:

@@ -690,6 +690,47 @@ _CONFIRMATION_EXACT = {
 }
 
 
+def looks_like_manual_data_entry(value: str) -> bool:
+    normalized = normalize_text_token(value)
+    if not normalized:
+        return False
+    if "самозанят" in normalized:
+        return False
+    direct_markers = (
+        "вручную",
+        "ручной ввод",
+        "ручным способом",
+        "без фото",
+        "без фот",
+        "без документов",
+        "текстом",
+        "сам напишу",
+        "сама напишу",
+        "заполню сам",
+        "заполню сама",
+        "напишу сам",
+        "напишу сама",
+        "сам заполню",
+        "сама заполню",
+        "данные вручную",
+        "ввести данные",
+        "введу данные",
+        "хочу вручную",
+        "буду вручную",
+    )
+    if any(marker in normalized for marker in direct_markers):
+        return True
+    if re.search(r"\b(сам|сама)\b", normalized) and any(
+        marker in normalized for marker in ("заполн", "напиш", "введ", "укаж", "данн", "вручную")
+    ):
+        return True
+    if any(marker in normalized for marker in ("хочу", "буду", "можно", "давай", "лучше")) and any(
+        marker in normalized for marker in ("вручную", "текстом", "без фото", "без фот", "сам", "сама")
+    ):
+        return True
+    return False
+
+
 def parse_confirmation(value: str) -> bool:
     normalized = normalize_text_token(value).strip(".,!?")
     if normalized in _CONFIRMATION_EXACT:
