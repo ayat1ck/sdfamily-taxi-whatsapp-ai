@@ -23,7 +23,7 @@ from app.dialog.llm_prompt import (
     build_system_prompt,
     build_user_prompt,
 )
-from app.dialog.prompts import CAR_MODEL_PROMPT, PROMPTS, format_in_flow_reply
+from app.dialog.prompts import CAR_MODEL_PROMPT, PROMPTS, REGISTRATION_START_CTA, format_in_flow_reply
 from app.dialog.states import DialogueState
 from app.drivers.models import Driver
 from app.integrations.yandex.catalog import (
@@ -434,7 +434,7 @@ class DeterministicAIProvider:
                     suggested_next_action=DialogueState.ASK_PHONE.value,
                 )
             return AIResult(
-                "Здравствуйте. Я могу рассказать об условиях парка и помочь пройти регистрацию. Если хотите начать, напишите ваше ФИО полностью.",
+                f"Здравствуйте! SD Family Taxi — подключим к парку. {REGISTRATION_START_CTA}",
                 "clarification",
                 {},
                 DialogueState.NEW.value,
@@ -1258,12 +1258,17 @@ def _reply_is_bare_step_prompt(reply: str, state_value: str) -> bool:
 
 def _unsupported_message_reply(current_state: DialogueState, text: str) -> str:
     if looks_like_support_question(text):
-        return build_office_invite_reply(get_settings().public_site_address)
+        reply = build_office_invite_reply(get_settings().public_site_address)
+        if current_state == DialogueState.NEW:
+            return f"{reply}\n\n{REGISTRATION_START_CTA}"
+        return reply
     return _clarification_reply(current_state)
 
 
 def _office_fallback_result(state: str, _message: str) -> AIResult:
     reply = build_office_invite_reply(get_settings().public_site_address)
+    if state == DialogueState.NEW.value:
+        reply = f"{reply}\n\n{REGISTRATION_START_CTA}"
     return AIResult(
         reply,
         "help",
@@ -1281,9 +1286,8 @@ def _build_greeting_reply(current_state: DialogueState, text: str) -> str | None
         return None
     if current_state == DialogueState.NEW:
         return (
-            "Здравствуйте! Я помогу подключиться к таксопарку SD Family Taxi. "
-            "Могу рассказать об условиях, офисе и регистрации. "
-            "Если готовы начать — напишите ФИО полностью."
+            "Здравствуйте! SD Family Taxi — комиссия 2%, выплаты 24/7, бонусы для водителей. "
+            f"{REGISTRATION_START_CTA}"
         )
     if current_state in {
         DialogueState.CONFIRM_DATA,
@@ -1319,7 +1323,8 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
 
     if any(marker in normalized for marker in ("можно по другому", "другой вопрос", "не про это", "потом ответ")):
         return (
-            "Конечно, можете спросить про условия парка, офис, документы или Яндекс Про — отвечу."
+            "Спросите про условия парка, офис, документы или Яндекс Про — отвечу. "
+            "Продолжаем регистрацию с текущего шага."
         )
 
     step_help = _build_step_help_reply(current_state, text)

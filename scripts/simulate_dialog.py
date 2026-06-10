@@ -54,7 +54,7 @@ def truncate(text: str, limit: int = 280) -> str:
 
 
 def office_marker() -> str:
-    return "нет готового ответа"
+    return "захотите"
 
 
 SCENARIOS: list[Scenario] = [

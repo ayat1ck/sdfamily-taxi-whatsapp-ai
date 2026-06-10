@@ -630,8 +630,7 @@ def looks_like_support_question(message: str) -> bool:
 
 def build_office_invite_reply(office_address: str) -> str:
     return (
-        "По этому вопросу в чате нет готового ответа. "
-        "Приходите в офис SD Family Taxi — менеджер подскажет на месте.\n"
+        "Уточните этот вопрос у менеджера в офисе SD Family Taxi.\n"
         f"Адрес: {office_address}"
     )
 

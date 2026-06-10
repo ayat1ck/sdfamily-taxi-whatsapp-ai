@@ -16,6 +16,7 @@ from app.dialog.prompts import (
     STATUS_REPLIES,
     YANDEX_PRO_INSTALL_TEMPLATE,
     YANDEX_PRO_START_TEMPLATE,
+    REGISTRATION_START_CTA,
     format_in_flow_reply,
 )
 from app.dialog.states import DialogueState
@@ -778,7 +779,7 @@ class DialogueEngine:
                 driver,
                 application,
                 (
-                    "Отлично, вход в Яндекс Про зафиксировал. Вы уже можете выходить на линию.\n"
+                    "Отлично, вход в Яндекс Про зафиксировал. Выходите на линию.\n"
                     "Если нужен совет по работе, заявке или приложению, пишите сюда. Мы на связи.\n"
                     f"Адрес офиса: {self.settings.public_site_address}"
                 ),
@@ -1089,10 +1090,9 @@ class DialogueEngine:
         return YANDEX_PRO_INSTALL_TEMPLATE.format(phone=contact_phone)
 
     def _format_new_state_assistant_reply(self, base_reply: str) -> str:
-        return (
-            f"{base_reply}\n\n"
-            "Если захотите сразу начать регистрацию, напишите ваше ФИО полностью."
-        )
+        if REGISTRATION_START_CTA in base_reply:
+            return base_reply
+        return f"{base_reply}\n\n{REGISTRATION_START_CTA}"
 
     def _format_in_flow_assistant_reply(self, state: DialogueState, base_reply: str) -> str:
         return format_in_flow_reply(base_reply, state)

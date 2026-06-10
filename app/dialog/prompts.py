@@ -1,6 +1,9 @@
 from app.dialog.states import DialogueState
 
 
+REGISTRATION_START_CTA = "Для подключения напишите ФИО полностью."
+
+
 CAR_MODEL_PROMPT = (
     "Напишите модель автомобиля, как в документах или техпаспорте "
     "(Camry, Rio, S-Class, X5 и т.п.). "
@@ -9,7 +12,7 @@ CAR_MODEL_PROMPT = (
 
 
 PROMPTS: dict[DialogueState, str] = {
-    DialogueState.NEW: "Здравствуйте. Я помогу подключиться к таксопарку SD Family Taxi и пройти регистрацию. Если готовы начать, напишите ваше ФИО полностью.",
+    DialogueState.NEW: "Здравствуйте! SD Family Taxi — подключим к парку. Напишите ФИО полностью.",
     DialogueState.ASK_FULL_NAME: "Напишите ваше ФИО полностью.",
     DialogueState.ASK_EXECUTOR_TYPE: "Переходим к анкете. Укажите ваш контактный номер телефона.",
     DialogueState.ASK_PHONE: "Укажите ваш контактный номер телефона.",
