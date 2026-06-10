@@ -11,9 +11,10 @@ from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.dialog.faq import (
     build_office_invite_reply,
-    find_faq_answer,
     load_knowledge_base,
     looks_like_support_question,
+    resolve_faq_replies,
+    split_field_and_support,
 )
 from app.dialog.llm_prompt import (
     build_faq_assist_system_prompt,
@@ -325,18 +326,6 @@ class DeterministicAIProvider:
         self.knowledge_base = knowledge_base
 
     def respond(self, state: str, message: str, driver: Driver) -> AIResult:
-        faq_answer = _match_faq(message, self.knowledge_base)
-        if faq_answer:
-            return AIResult(
-                faq_answer,
-                "faq",
-                {},
-                state,
-                0.9,
-                reasoning_summary="matched_kb:faq",
-                suggested_next_action=state,
-            )
-
         current_state = DialogueState(state)
         text = message.strip()
 
@@ -348,6 +337,22 @@ class DeterministicAIProvider:
                 state,
                 0.4,
                 reasoning_summary="clarification:empty_message",
+                suggested_next_action=state,
+            )
+
+        mixed = _try_mixed_field_and_support(current_state, text, driver, self.knowledge_base)
+        if mixed:
+            return mixed
+
+        faq_answer = _match_faq(message, self.knowledge_base)
+        if faq_answer:
+            return AIResult(
+                faq_answer,
+                "faq",
+                {},
+                state,
+                0.9,
+                reasoning_summary="matched_kb:faq",
                 suggested_next_action=state,
             )
 
@@ -459,197 +464,9 @@ class DeterministicAIProvider:
                 suggested_next_action=state,
             )
 
-        if current_state == DialogueState.ASK_PHONE and looks_like_phone(text):
-            return AIResult(
-                "",
-                "registration",
-                {"phone": normalize_phone(text)},
-                DialogueState.ASK_CITY.value,
-                0.95,
-                normalized_fields={"phone": normalize_phone(text)},
-                reasoning_summary="registration_extract:phone",
-                suggested_next_action=DialogueState.ASK_CITY.value,
-            )
-        if current_state == DialogueState.ASK_IIN and looks_like_iin(text):
-            normalized_iin = re.sub(r"\D+", "", text)
-            iin_errors = validate_kz_iin(normalized_iin)
-            if iin_errors:
-                return AIResult(
-                    "ИИН выглядит некорректным. Проверьте 12 цифр и дату рождения, зашитую в ИИН, затем отправьте ИИН еще раз.",
-                    "clarification",
-                    {},
-                    state,
-                    0.7,
-                    reasoning_summary="validation:iin_impossible",
-                    validation_errors=iin_errors,
-                    suggested_next_action=state,
-                )
-            return AIResult(
-                "",
-                "registration",
-                {"iin": normalized_iin},
-                DialogueState.ASK_BIRTH_DATE.value,
-                0.95,
-                normalized_fields={"iin": normalized_iin},
-                reasoning_summary="registration_extract:iin",
-                suggested_next_action=DialogueState.ASK_BIRTH_DATE.value,
-            )
-        if current_state == DialogueState.ASK_CAR_YEAR:
-            year = parse_year(text)
-            if year:
-                return AIResult(
-                    "",
-                    "registration",
-                    {"year": str(year)},
-                    DialogueState.ASK_CAR_PLATE.value,
-                    0.9,
-                    normalized_fields={"year": str(year)},
-                    reasoning_summary="registration_extract:year",
-                    suggested_next_action=DialogueState.ASK_CAR_PLATE.value,
-                )
-
-        date_steps = {
-            DialogueState.ASK_BIRTH_DATE: ("birth_date", DialogueState.ASK_DRIVING_EXPERIENCE_SINCE.value),
-            DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: ("driving_experience_since", DialogueState.ASK_CAR_BRAND.value),
-            DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: (
-                "driver_license_issue_date",
-                DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT.value,
-            ),
-            DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: (
-                "driver_license_expires_at",
-                DialogueState.ASK_EMPLOYMENT_TYPE.value,
-            ),
-            DialogueState.ASK_HIRED_AT: ("hired_at", DialogueState.ASK_HEARING_IMPAIRED.value),
-        }
-        if current_state in date_steps:
-            parsed_date = parse_date(text)
-            if parsed_date:
-                field_name, next_state = date_steps[current_state]
-                validation_errors: list[str] = []
-                if current_state == DialogueState.ASK_BIRTH_DATE:
-                    validation_errors = validate_birth_date(parsed_date)
-                elif current_state == DialogueState.ASK_DRIVING_EXPERIENCE_SINCE:
-                    validation_errors = validate_driver_dates(
-                        birth_date=getattr(driver, "birth_date", None),
-                        driving_experience_since=parsed_date,
-                    )
-                    if not validation_errors and getattr(driver, "birth_date", None) == parsed_date:
-                        validation_errors.append("driving_experience_same_as_birth")
-                elif current_state == DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE:
-                    validation_errors = validate_driver_dates(
-                        birth_date=getattr(driver, "birth_date", None),
-                        driver_license_issue_date=parsed_date,
-                    )
-                elif current_state == DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT:
-                    validation_errors = validate_driver_dates(
-                        birth_date=getattr(driver, "birth_date", None),
-                        driver_license_issue_date=getattr(driver, "driver_license_issue_date", None),
-                        driver_license_expires_at=parsed_date,
-                    )
-                elif current_state == DialogueState.ASK_HIRED_AT:
-                    validation_errors = validate_hired_at(parsed_date)
-                    if (
-                        not validation_errors
-                        and getattr(driver, "driver_license_expires_at", None) == parsed_date
-                    ):
-                        validation_errors.append("hired_at_same_as_license_expiry")
-
-                if validation_errors:
-                    return AIResult(
-                        _validation_error_reply(current_state, validation_errors),
-                        "clarification",
-                        {},
-                        state,
-                        0.72,
-                        reasoning_summary=f"validation:{field_name}",
-                        validation_errors=validation_errors,
-                        suggested_next_action=state,
-                    )
-                return AIResult(
-                    "",
-                    "registration",
-                    {field_name: parsed_date},
-                    next_state,
-                    0.9,
-                    normalized_fields={field_name: parsed_date},
-                    reasoning_summary=f"registration_extract:{field_name}",
-                    suggested_next_action=next_state,
-                )
-
-        if current_state == DialogueState.ASK_HEARING_IMPAIRED:
-            parsed = parse_yes_no(text)
-            if parsed is not None:
-                value = str(parsed).lower()
-                return AIResult(
-                    "",
-                    "registration",
-                    {"is_hearing_impaired": value},
-                    DialogueState.ASK_DRIVER_LICENSE_FRONT.value,
-                    0.9,
-                    normalized_fields={"is_hearing_impaired": value},
-                    reasoning_summary="registration_extract:is_hearing_impaired",
-                    suggested_next_action=DialogueState.ASK_DRIVER_LICENSE_FRONT.value,
-                )
-
-        if current_state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR} and parse_confirmation(text):
-            return AIResult(
-                "",
-                "confirmation",
-                {},
-                DialogueState.READY_TO_SEND_YANDEX.value,
-                0.99,
-                reasoning_summary=f"confirmation:{current_state.value}",
-                suggested_next_action=DialogueState.READY_TO_SEND_YANDEX.value,
-            )
-
-        if current_state == DialogueState.ASK_CAR_BRAND and _looks_like_short_entity_answer(text):
-            brand, errors = resolve_brand_input(text)
-            if brand:
-                return AIResult(
-                    "",
-                    "registration",
-                    {"brand": brand},
-                    DialogueState.ASK_CAR_MODEL.value,
-                    0.9,
-                    normalized_fields={"brand": brand},
-                    reasoning_summary="registration_extract:brand",
-                    suggested_next_action=DialogueState.ASK_CAR_MODEL.value,
-                )
-            if errors:
-                return AIResult(
-                    catalog_validation_error_message(errors),
-                    "clarification",
-                    {},
-                    state,
-                    0.72,
-                    reasoning_summary="validation:car_brand_catalog",
-                    validation_errors=errors,
-                    suggested_next_action=state,
-                )
-
-        if current_state == DialogueState.ASK_CAR_MODEL:
-            car_model_result = _process_car_model_answer(text, driver)
-            if car_model_result is not None:
-                return car_model_result
-
-        if current_state == DialogueState.ASK_DRIVER_LICENSE_NUMBER:
-            license_result = _process_driver_license_answer(text)
-            if license_result is not None:
-                return license_result
-
-        extracted = _extract_safe_field_answer(current_state, text, driver)
-        if extracted:
-            next_state = _default_next_state(current_state).value
-            return AIResult(
-                "",
-                "registration",
-                extracted,
-                next_state,
-                0.8,
-                normalized_fields=extracted.copy(),
-                reasoning_summary=f"registration_extract:{','.join(sorted(extracted))}",
-                suggested_next_action=next_state,
-            )
+        field_extract = _try_registration_field_extract(current_state, text, driver, state)
+        if field_extract is not None:
+            return field_extract
 
         return AIResult(
             _unsupported_message_reply(current_state, text),
@@ -905,7 +722,327 @@ def _looks_like_onboarding_intent(value: str) -> bool:
 
 
 def _match_faq(message: str, knowledge_base: dict[str, str]) -> str | None:
-    return find_faq_answer(message, knowledge_base)
+    return resolve_faq_replies(message, knowledge_base, office_address=get_settings().public_site_address)
+
+
+_MIXED_INELIGIBLE_STATES = {
+    DialogueState.NEW,
+    DialogueState.CONFIRM_DATA,
+    DialogueState.READY_TO_SEND_YANDEX,
+    DialogueState.SENDING_TO_YANDEX,
+    DialogueState.YANDEX_ERROR,
+    DialogueState.COMPLETED,
+    DialogueState.DUPLICATE_REJECTED,
+}
+
+
+def _resolve_support_during_registration(
+    current_state: DialogueState,
+    text: str,
+    knowledge_base: dict[str, str],
+) -> str | None:
+    faq_reply = resolve_faq_replies(text, knowledge_base, office_address=get_settings().public_site_address)
+    if faq_reply:
+        return faq_reply
+
+    step_help = _build_step_help_reply(current_state, text)
+    if step_help:
+        return step_help
+
+    if looks_like_support_question(text):
+        return build_office_invite_reply(get_settings().public_site_address)
+    return None
+
+
+def _try_registration_field_extract(
+    current_state: DialogueState,
+    text: str,
+    driver: Driver,
+    state_value: str,
+    *,
+    allow_clarification: bool = True,
+) -> AIResult | None:
+    if current_state == DialogueState.ASK_FULL_NAME:
+        if _looks_like_full_name(text):
+            last_name, first_name, middle_name = split_full_name(text)
+            extracted = {"full_name": text}
+            if last_name:
+                extracted["last_name"] = last_name
+            if first_name:
+                extracted["first_name"] = first_name
+            if middle_name:
+                extracted["middle_name"] = middle_name
+            return AIResult(
+                "",
+                "registration",
+                extracted,
+                DialogueState.ASK_PHONE.value,
+                0.9,
+                reasoning_summary="registration_extract:full_name",
+                suggested_next_action=DialogueState.ASK_PHONE.value,
+            )
+        if allow_clarification:
+            return AIResult(
+                _clarification_reply(current_state),
+                "clarification",
+                {},
+                state_value,
+                0.45,
+                reasoning_summary="clarification:full_name",
+                suggested_next_action=state_value,
+            )
+        return None
+
+    if current_state == DialogueState.ASK_PHONE and looks_like_phone(text):
+        return AIResult(
+            "",
+            "registration",
+            {"phone": normalize_phone(text)},
+            DialogueState.ASK_CITY.value,
+            0.95,
+            normalized_fields={"phone": normalize_phone(text)},
+            reasoning_summary="registration_extract:phone",
+            suggested_next_action=DialogueState.ASK_CITY.value,
+        )
+    if current_state == DialogueState.ASK_IIN and looks_like_iin(text):
+        normalized_iin = re.sub(r"\D+", "", text)
+        iin_errors = validate_kz_iin(normalized_iin)
+        if iin_errors:
+            return AIResult(
+                "ИИН выглядит некорректным. Проверьте 12 цифр и дату рождения, зашитую в ИИН, затем отправьте ИИН еще раз.",
+                "clarification",
+                {},
+                state_value,
+                0.7,
+                reasoning_summary="validation:iin_impossible",
+                validation_errors=iin_errors,
+                suggested_next_action=state_value,
+            )
+        return AIResult(
+            "",
+            "registration",
+            {"iin": normalized_iin},
+            DialogueState.ASK_BIRTH_DATE.value,
+            0.95,
+            normalized_fields={"iin": normalized_iin},
+            reasoning_summary="registration_extract:iin",
+            suggested_next_action=DialogueState.ASK_BIRTH_DATE.value,
+        )
+    if current_state == DialogueState.ASK_CAR_YEAR:
+        year = parse_year(text)
+        if year:
+            return AIResult(
+                "",
+                "registration",
+                {"year": str(year)},
+                DialogueState.ASK_CAR_PLATE.value,
+                0.9,
+                normalized_fields={"year": str(year)},
+                reasoning_summary="registration_extract:year",
+                suggested_next_action=DialogueState.ASK_CAR_PLATE.value,
+            )
+
+    date_steps = {
+        DialogueState.ASK_BIRTH_DATE: ("birth_date", DialogueState.ASK_DRIVING_EXPERIENCE_SINCE.value),
+        DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: ("driving_experience_since", DialogueState.ASK_CAR_BRAND.value),
+        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: (
+            "driver_license_issue_date",
+            DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT.value,
+        ),
+        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: (
+            "driver_license_expires_at",
+            DialogueState.ASK_EMPLOYMENT_TYPE.value,
+        ),
+        DialogueState.ASK_HIRED_AT: ("hired_at", DialogueState.ASK_HEARING_IMPAIRED.value),
+    }
+    if current_state in date_steps:
+        parsed_date = parse_date(text)
+        if parsed_date:
+            field_name, next_state = date_steps[current_state]
+            validation_errors: list[str] = []
+            if current_state == DialogueState.ASK_BIRTH_DATE:
+                validation_errors = validate_birth_date(parsed_date)
+            elif current_state == DialogueState.ASK_DRIVING_EXPERIENCE_SINCE:
+                validation_errors = validate_driver_dates(
+                    birth_date=getattr(driver, "birth_date", None),
+                    driving_experience_since=parsed_date,
+                )
+                if not validation_errors and getattr(driver, "birth_date", None) == parsed_date:
+                    validation_errors.append("driving_experience_same_as_birth")
+            elif current_state == DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE:
+                validation_errors = validate_driver_dates(
+                    birth_date=getattr(driver, "birth_date", None),
+                    driver_license_issue_date=parsed_date,
+                )
+            elif current_state == DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT:
+                validation_errors = validate_driver_dates(
+                    birth_date=getattr(driver, "birth_date", None),
+                    driver_license_issue_date=getattr(driver, "driver_license_issue_date", None),
+                    driver_license_expires_at=parsed_date,
+                )
+            elif current_state == DialogueState.ASK_HIRED_AT:
+                validation_errors = validate_hired_at(parsed_date)
+                if (
+                    not validation_errors
+                    and getattr(driver, "driver_license_expires_at", None) == parsed_date
+                ):
+                    validation_errors.append("hired_at_same_as_license_expiry")
+
+            if validation_errors:
+                return AIResult(
+                    _validation_error_reply(current_state, validation_errors),
+                    "clarification",
+                    {},
+                    state_value,
+                    0.72,
+                    reasoning_summary=f"validation:{field_name}",
+                    validation_errors=validation_errors,
+                    suggested_next_action=state_value,
+                )
+            return AIResult(
+                "",
+                "registration",
+                {field_name: parsed_date},
+                next_state,
+                0.9,
+                normalized_fields={field_name: parsed_date},
+                reasoning_summary=f"registration_extract:{field_name}",
+                suggested_next_action=next_state,
+            )
+
+    if current_state == DialogueState.ASK_HEARING_IMPAIRED:
+        parsed = parse_yes_no(text)
+        if parsed is not None:
+            value = str(parsed).lower()
+            return AIResult(
+                "",
+                "registration",
+                {"is_hearing_impaired": value},
+                DialogueState.ASK_DRIVER_LICENSE_FRONT.value,
+                0.9,
+                normalized_fields={"is_hearing_impaired": value},
+                reasoning_summary="registration_extract:is_hearing_impaired",
+                suggested_next_action=DialogueState.ASK_DRIVER_LICENSE_FRONT.value,
+            )
+
+    if current_state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR} and parse_confirmation(text):
+        return AIResult(
+            "",
+            "confirmation",
+            {},
+            DialogueState.READY_TO_SEND_YANDEX.value,
+            0.99,
+            reasoning_summary=f"confirmation:{current_state.value}",
+            suggested_next_action=DialogueState.READY_TO_SEND_YANDEX.value,
+        )
+
+    if current_state == DialogueState.ASK_CAR_BRAND and _looks_like_short_entity_answer(text):
+        brand, errors = resolve_brand_input(text)
+        if brand:
+            return AIResult(
+                "",
+                "registration",
+                {"brand": brand},
+                DialogueState.ASK_CAR_MODEL.value,
+                0.9,
+                normalized_fields={"brand": brand},
+                reasoning_summary="registration_extract:brand",
+                suggested_next_action=DialogueState.ASK_CAR_MODEL.value,
+            )
+        if errors:
+            return AIResult(
+                catalog_validation_error_message(errors),
+                "clarification",
+                {},
+                state_value,
+                0.72,
+                reasoning_summary="validation:car_brand_catalog",
+                validation_errors=errors,
+                suggested_next_action=state_value,
+            )
+
+    if current_state == DialogueState.ASK_CAR_MODEL:
+        car_model_result = _process_car_model_answer(text, driver)
+        if car_model_result is not None:
+            return car_model_result
+
+    if current_state == DialogueState.ASK_DRIVER_LICENSE_NUMBER:
+        license_result = _process_driver_license_answer(text)
+        if license_result is not None:
+            return license_result
+
+    extracted = _extract_safe_field_answer(current_state, text, driver)
+    if extracted:
+        next_state = _default_next_state(current_state).value
+        return AIResult(
+            "",
+            "registration",
+            extracted,
+            next_state,
+            0.8,
+            normalized_fields=extracted.copy(),
+            reasoning_summary=f"registration_extract:{','.join(sorted(extracted))}",
+            suggested_next_action=next_state,
+        )
+
+    return None
+
+
+def _try_mixed_field_and_support(
+    current_state: DialogueState,
+    text: str,
+    driver: Driver,
+    knowledge_base: dict[str, str],
+) -> AIResult | None:
+    if current_state in _MIXED_INELIGIBLE_STATES:
+        return None
+
+    field_part, support_parts = split_field_and_support(text)
+    if not field_part or not support_parts:
+        return None
+
+    field_extract = _try_registration_field_extract(
+        current_state,
+        field_part,
+        driver,
+        current_state.value,
+        allow_clarification=True,
+    )
+    if field_extract is None:
+        return None
+
+    support_text = " ".join(support_parts)
+    support_reply = _resolve_support_during_registration(current_state, support_text, knowledge_base)
+    if not support_reply:
+        return None
+
+    if field_extract.intent == "clarification":
+        return AIResult(
+            f"{support_reply}\n\n{field_extract.reply}",
+            "clarification",
+            {},
+            current_state.value,
+            0.82,
+            reasoning_summary="mixed:field_validation_and_support",
+            validation_errors=field_extract.validation_errors,
+            suggested_next_action=current_state.value,
+        )
+
+    if field_extract.intent != "registration" or not field_extract.extracted_fields:
+        return None
+
+    next_state = DialogueState(field_extract.next_state or current_state.value)
+    reply = f"{support_reply}\n\nКогда будете готовы продолжить: {PROMPTS[next_state]}"
+    return AIResult(
+        reply,
+        "registration",
+        field_extract.extracted_fields,
+        field_extract.next_state,
+        0.92,
+        normalized_fields=field_extract.normalized_fields or field_extract.extracted_fields,
+        reasoning_summary="mixed:field_and_support",
+        suggested_next_action=field_extract.next_state,
+    )
 
 
 def _is_safe_registration_result(result: AIResult, current_state: DialogueState) -> bool:
@@ -1113,7 +1250,7 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
             f"Когда будете готовы продолжить регистрацию: {PROMPTS[current_state]}"
         )
 
-    faq_answer = find_faq_answer(text, knowledge_base)
+    faq_answer = resolve_faq_replies(text, knowledge_base, office_address=get_settings().public_site_address)
     if faq_answer:
         return faq_answer
 
@@ -1289,6 +1426,9 @@ def _validate_registration_date_field(field_name: str, parsed_date: str, driver:
 
 
 def _looks_like_non_field_message(text: str) -> bool:
+    field_part, support_parts = split_field_and_support(text)
+    if field_part and support_parts:
+        return False
     if looks_like_support_question(text):
         return True
     normalized = normalize_text_token(text)
