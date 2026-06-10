@@ -23,7 +23,7 @@ from app.dialog.llm_prompt import (
     build_system_prompt,
     build_user_prompt,
 )
-from app.dialog.prompts import CAR_MODEL_PROMPT, PROMPTS
+from app.dialog.prompts import CAR_MODEL_PROMPT, PROMPTS, format_in_flow_reply
 from app.dialog.states import DialogueState
 from app.drivers.models import Driver
 from app.integrations.yandex.catalog import (
@@ -1079,7 +1079,7 @@ def _try_mixed_field_and_support(
         return None
 
     next_state = DialogueState(field_extract.next_state or current_state.value)
-    reply = f"{support_reply}\n\nКогда будете готовы продолжить: {PROMPTS[next_state]}"
+    reply = format_in_flow_reply(support_reply, next_state)
     return AIResult(
         reply,
         "registration",
@@ -1288,7 +1288,7 @@ def _build_greeting_reply(current_state: DialogueState, text: str) -> str | None
         DialogueState.COMPLETED,
     }:
         return None
-    return f"Здравствуйте! Я на связи и помогу с регистрацией.\n\n{PROMPTS[current_state]}"
+    return "Здравствуйте! Я на связи и помогу с регистрацией."
 
 
 def _registration_side_reply(current_state: DialogueState, text: str, knowledge_base: dict[str, str]) -> str | None:
@@ -1314,8 +1314,7 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
 
     if any(marker in normalized for marker in ("можно по другому", "другой вопрос", "не про это", "потом ответ")):
         return (
-            "Конечно, можете спросить про условия парка, офис, документы или Яндекс Про — отвечу. "
-            f"Когда будете готовы продолжить регистрацию: {PROMPTS[current_state]}"
+            "Конечно, можете спросить про условия парка, офис, документы или Яндекс Про — отвечу."
         )
 
     step_help = _build_step_help_reply(current_state, text)
@@ -1399,8 +1398,7 @@ def _build_step_help_reply(current_state: DialogueState, text: str) -> str | Non
     explanation = explanations.get(current_state)
     if not explanation:
         return None
-    reminder = _clarification_reply(current_state)
-    return f"{explanation}\n\n{reminder}"
+    return explanation
 
 
 def _validation_error_reply(current_state: DialogueState, errors: list[str]) -> str:

@@ -10,6 +10,7 @@ from typing import Any
 
 from app.dialog.ai import AIService, AIResult
 from app.dialog.faq import load_knowledge_base, resolve_faq_replies
+from app.dialog.prompts import format_in_flow_reply
 from app.dialog.states import DialogueState
 
 
@@ -124,6 +125,9 @@ SCENARIOS: list[Scenario] = [
     Scenario("NEW: комиссия", DialogueState.NEW.value, "Какая комиссия?", expect_intent="faq", must_contain=("2%",)),
     Scenario("ASK_ADDRESS: адрес", DialogueState.ASK_ADDRESS.value, "Балкантау 117, Астана", expect_intent="registration", expect_fields=("address",)),
     Scenario("ASK_IIN: смешанный bad+office", DialogueState.ASK_IIN.value, "123 и где офис?", expect_intent="faq", must_contain=("Балкантау",)),
+    Scenario("ASK_IIN: где офис mid-flow", DialogueState.ASK_IIN.value, "Где ваш офис находится?", expect_intent="faq", must_contain=("Балкантау",)),
+    Scenario("ASK_IIN: условия mid-flow", DialogueState.ASK_IIN.value, "А какие у вас условия?", expect_intent="faq", must_contain=("2%",)),
+    Scenario("ASK_IIN: другой вопрос", DialogueState.ASK_IIN.value, "А можно по другому вопросу?", expect_intent="help", must_contain=("условия", "офис")),
     Scenario("ASK_CAR_MODEL: Camry 35", DialogueState.ASK_CAR_MODEL.value, "Camry 35", driver={"vehicle": SimpleNamespace(brand="Toyota")}),
 ]
 
@@ -133,6 +137,16 @@ class RunResult:
     scenario: Scenario
     result: AIResult
     issues: list[str]
+
+
+def user_facing_reply(state: str, result: AIResult) -> str:
+    try:
+        dialogue_state = DialogueState(state)
+    except ValueError:
+        return result.reply or ""
+    if dialogue_state.value.startswith("ask_") and result.intent in {"faq", "help", "smalltalk", "clarification"}:
+        return format_in_flow_reply(result.reply or "", dialogue_state)
+    return result.reply or ""
 
 
 def check_scenario(scenario: Scenario, result: AIResult) -> list[str]:
@@ -198,6 +212,9 @@ def print_report(passed: list[RunResult], failed: list[RunResult]) -> None:
         print(f"  summary={r.reasoning_summary}")
         if r.reply.strip():
             print(f"  reply: {truncate(r.reply)}")
+            formatted = user_facing_reply(s.state, r)
+            if formatted.strip() and formatted.strip() != r.reply.strip():
+                print(f"  user sees: {truncate(formatted)}")
         else:
             print("  reply: (empty — engine uses next step prompt)")
         if run.issues:

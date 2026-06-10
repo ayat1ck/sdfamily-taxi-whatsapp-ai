@@ -104,3 +104,15 @@ YANDEX_PRO_INSTALL_TEMPLATE = (
     "Когда все получится, напишите: Вошел.\n"
     "Если появится ошибка, напишите: Ошибка."
 )
+
+
+def format_in_flow_reply(answer: str, state: DialogueState) -> str:
+    step_prompt = PROMPTS.get(state, "").strip()
+    cleaned = answer.strip()
+    if not step_prompt:
+        return cleaned
+    if not cleaned or cleaned == step_prompt:
+        return f"Текущий шаг регистрации: {step_prompt}"
+    if "Текущий шаг регистрации:" in cleaned or "Когда будете готовы продолжить:" in cleaned:
+        return cleaned
+    return f"{cleaned}\n\nТекущий шаг регистрации: {step_prompt}"

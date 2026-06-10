@@ -16,6 +16,7 @@ from app.dialog.prompts import (
     STATUS_REPLIES,
     YANDEX_PRO_INSTALL_TEMPLATE,
     YANDEX_PRO_START_TEMPLATE,
+    format_in_flow_reply,
 )
 from app.dialog.states import DialogueState
 from app.documents.service import upsert_document
@@ -1082,12 +1083,7 @@ class DialogueEngine:
         )
 
     def _format_in_flow_assistant_reply(self, state: DialogueState, base_reply: str) -> str:
-        reminder = PROMPTS.get(state, "")
-        if not reminder:
-            return base_reply
-        if base_reply.strip() == reminder.strip():
-            return base_reply
-        return f"{base_reply}\n\nКогда будете готовы продолжить: {reminder}"
+        return format_in_flow_reply(base_reply, state)
 
     def _format_post_yandex_reply(self, state: DialogueState, base_reply: str) -> str:
         if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS:
