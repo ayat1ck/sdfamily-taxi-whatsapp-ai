@@ -1,11 +1,124 @@
 from pathlib import Path
 import re
+from dataclasses import dataclass
 
 from app.utils.validators import normalize_text_token
 
 
 KB_DIR = Path(__file__).resolve().parents[2] / "knowledge_base"
 
+_FAQ_STOPWORDS = frozenset(
+    {
+        "что",
+        "как",
+        "где",
+        "когда",
+        "кто",
+        "какие",
+        "какой",
+        "какая",
+        "какое",
+        "каков",
+        "можно",
+        "нужно",
+        "ли",
+        "это",
+        "вас",
+        "ваш",
+        "вашей",
+        "вашего",
+        "есть",
+        "или",
+        "для",
+        "про",
+        "нас",
+        "нам",
+        "мне",
+        "меня",
+        "если",
+        "еще",
+        "ещё",
+        "у",
+        "в",
+        "на",
+        "за",
+        "по",
+        "из",
+        "от",
+        "до",
+        "не",
+        "да",
+        "а",
+        "и",
+        "the",
+        "you",
+        "your",
+    }
+)
+
+TOKEN_SYNONYMS: dict[str, frozenset[str]] = {
+    "бонус": frozenset({"бонус", "бонусы", "бонусов", "приз", "призы", "премия", "премии", "награда", "награды", "байге", "акция", "акции"}),
+    "получ": frozenset({"получу", "получить", "получает", "получите", "получаю", "дают", "дадут", "даете", "получаете", "положено", "полагается"}),
+    "дают": frozenset({"дают", "дадут", "даете", "получу", "получить", "подарок", "подарочный"}),
+    "стаж": frozenset({"стаж", "стажа", "опыт", "работаю", "работать", "водителем"}),
+    "комисс": frozenset({"комиссия", "комиссии", "процент", "проц", "проценты", "удерж", "заработок", "заработать", "зарабатываю"}),
+    "выплат": frozenset({"выплаты", "выплат", "вывод", "выводить", "моментальн"}),
+    "услов": frozenset({"условия", "условие", "условиях", "работы", "работать", "парк", "парка"}),
+    "офис": frozenset({"офис", "офиса", "адрес", "адреса", "находитесь", "находитесь", "приехать", "прийти", "локация", "балкантау"}),
+    "регистрац": frozenset({"регистрация", "регистрацию", "регистрации", "подключение", "подключиться", "подключится", "оформить", "устроиться"}),
+    "документ": frozenset({"документ", "документы", "документов", "фото", "фотограф", "скан", "копия", "справк"}),
+    "яндекс": frozenset({"яндекс", "yandex", "про", "yandexpro"}),
+    "войти": frozenset({"войти", "вход", "входа", "зайти", "заход", "логин", "авториз", "вошел", "вошёл"}),
+    "линия": frozenset({"линия", "линию", "онлайн", "заказ", "заказы", "работать", "выйти"}),
+    "машин": frozenset({"машина", "машину", "машины", "авто", "автомобил", "тачка", "тачку"}),
+    "поддерж": frozenset({"поддержка", "поддержку", "помощь", "помогите", "менеджер", "оператор"}),
+    "туман": frozenset({"туман", "тумана", "сухой"}),
+    "вод": frozenset({"вода", "воды", "блок"}),
+    "статус": frozenset({"статус", "статуса", "заявк", "заявка", "этап", "этапе"}),
+    "иин": frozenset({"иин", "инн"}),
+    "скач": frozenset({"скачать", "скачал", "установ", "install", "download"}),
+    "смс": frozenset({"смс", "sms", "код", "кода"}),
+}
+
+
+@dataclass(frozen=True)
+class FaqIntentRoute:
+    keywords: tuple[str, ...]
+    doc: str
+    question: str
+    min_hits: int = 1
+
+
+FAQ_INTENT_ROUTES: tuple[FaqIntentRoute, ...] = (
+    FaqIntentRoute(("получ", "стаж"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("получ", "бонус"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("получ", "приз"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("дают", "стаж"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("получ",), "park_info", "какие бонусы", 1),
+    FaqIntentRoute(("бонус", "приз", "премия", "награда", "байге", "акци"), "park_info", "какие бонусы"),
+    FaqIntentRoute(("подароч", "бокс"), "park_info", "что дают за регистрацию"),
+    FaqIntentRoute(("комисс", "процент", "проц", "заработ"), "park_info", "какая комиссия"),
+    FaqIntentRoute(("выплат", "вывод"), "park_info", "какие условия"),
+    FaqIntentRoute(("услов",), "park_info", "какие условия"),
+    FaqIntentRoute(("офис", "адрес", "балкантау", "приехать", "прийти", "локац"), "park_info", "где находится офис"),
+    FaqIntentRoute(("туман",), "park_info", "сухой туман"),
+    FaqIntentRoute(("поддерж",), "park_info", "есть ли поддержка"),
+    FaqIntentRoute(("кто вы", "что за парк", "о вас", "таксопарк"), "park_info", "кто вы такие"),
+    FaqIntentRoute(("регистрац", "подключ", "устроиться", "оформить"), "registration", "как подключиться"),
+    FaqIntentRoute(("сколько времен", "сколько занимает", "долго регист"), "registration", "сколько занимает"),
+    FaqIntentRoute(("статус", "заявк"), "registration", "как узнать статус"),
+    FaqIntentRoute(("иин",), "registration", "зачем нужен иин"),
+    FaqIntentRoute(("документ", "фото", "скан"), "documents", "какие документы"),
+    FaqIntentRoute(("яндекс", "yandex"), "yandex_pro", "как войти"),
+    FaqIntentRoute(("скач", "установ"), "yandex_pro", "как скачать"),
+    FaqIntentRoute(("линия", "онлайн", "заказ"), "yandex_pro", "как выйти на линию"),
+    FaqIntentRoute(("смс", "код не"), "yandex_pro_sms_issues", "смс не приходит"),
+    FaqIntentRoute(("не могу войти", "не входит", "не заходит", "не пускает"), "yandex_pro_login_errors", "не могу войти"),
+    FaqIntentRoute(("неактив", "аккаунт не"), "yandex_pro_account_inactive", "аккаунт не активен"),
+    FaqIntentRoute(("без авто", "без машин", "свой машин"), "car_requirements", "можно ли работать без"),
+    FaqIntentRoute(("машин", "авто", "kia", "toyota", "camry", "rio"), "car_requirements", "какие авто"),
+    FaqIntentRoute(("после регистрац", "после подключ"), "registered_driver_support", "что делать после регистрации"),
+)
 
 FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
     "documents": (
@@ -129,6 +242,14 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "какие бонусы",
         "призы",
         "премии",
+        "получу",
+        "получить",
+        "дадут",
+        "стаж",
+        "акци",
+        "подарок",
+        "заработ",
+        "процент",
     ),
 }
 
@@ -210,6 +331,75 @@ def _qa_pairs_from_content(content: str) -> list[tuple[str, str]]:
     return pairs
 
 
+def _tokenize_meaningful(text: str) -> set[str]:
+    normalized = normalize_text_token(text)
+    tokens = re.findall(r"[a-z0-9а-яё]+", normalized, flags=re.IGNORECASE)
+    return {token for token in tokens if len(token) >= 3 and token not in _FAQ_STOPWORDS}
+
+
+def _expand_tokens(tokens: set[str]) -> set[str]:
+    expanded = set(tokens)
+    for token in tokens:
+        for root, aliases in TOKEN_SYNONYMS.items():
+            if token.startswith(root) or root.startswith(token[: min(4, len(token))]) or token in aliases:
+                expanded |= set(aliases)
+    return expanded
+
+
+def _answer_for_question(kb: dict[str, str], doc: str, question_hint: str) -> str | None:
+    content = kb.get(doc)
+    if not content:
+        return None
+    hint = normalize_text_token(question_hint)
+    for question, answer in _qa_pairs_from_content(content):
+        if question == hint or hint in question or question in hint:
+            return answer
+    return None
+
+
+def _find_intent_route_match(lowered: str, kb: dict[str, str]) -> str | None:
+    best_score = 0
+    best_answer: str | None = None
+
+    for route in FAQ_INTENT_ROUTES:
+        hits = sum(1 for keyword in route.keywords if keyword in lowered)
+        if hits < route.min_hits:
+            continue
+        answer = _answer_for_question(kb, route.doc, route.question)
+        if not answer:
+            continue
+        score = hits * 10 + sum(len(keyword) for keyword in route.keywords if keyword in lowered)
+        if score > best_score:
+            best_score = score
+            best_answer = answer
+
+    return best_answer
+
+
+def _find_fuzzy_qa_match(lowered: str, kb: dict[str, str]) -> str | None:
+    user_tokens = _expand_tokens(_tokenize_meaningful(lowered))
+    if not user_tokens:
+        return None
+
+    best_score = 0.0
+    best_answer: str | None = None
+
+    for content in kb.values():
+        for question, answer in _qa_pairs_from_content(content):
+            question_tokens = _expand_tokens(_tokenize_meaningful(question))
+            if not question_tokens:
+                continue
+            overlap = user_tokens & question_tokens
+            if not overlap:
+                continue
+            score = (len(overlap) ** 2) + sum(len(token) for token in overlap)
+            if score > best_score:
+                best_score = score
+                best_answer = answer
+
+    return best_answer if best_score >= 2.0 else None
+
+
 def _find_qa_match(lowered: str, content: str) -> str | None:
     for question, answer in _qa_pairs_from_content(content):
         if question == lowered:
@@ -256,7 +446,15 @@ def _find_single_faq_answer(message: str, kb: dict[str, str]) -> str | None:
         if answer:
             return answer
 
-    return _find_best_trigger_match(lowered, kb)
+    trigger_answer = _find_best_trigger_match(lowered, kb)
+    if trigger_answer:
+        return trigger_answer
+
+    intent_answer = _find_intent_route_match(lowered, kb)
+    if intent_answer:
+        return intent_answer
+
+    return _find_fuzzy_qa_match(lowered, kb)
 
 
 def find_faq_answers(message: str, kb: dict[str, str]) -> list[str]:
@@ -391,7 +589,10 @@ def looks_like_support_question(message: str) -> bool:
     )
     if normalized.startswith(question_starters):
         return True
-    if any(fragment in normalized for fragment in (" условия", " офис", " комиссия", " документы", " яндекс про")):
+    if any(fragment in normalized for fragment in (
+        " условия", " офис", " комиссия", " документы", " яндекс про",
+        " бонус", " бонусы", " приз", " стаж", " выплат", " акци",
+    )):
         return True
     return False
 
