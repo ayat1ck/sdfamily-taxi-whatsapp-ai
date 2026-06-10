@@ -569,6 +569,7 @@ def normalize_car_model(value: str) -> str:
         if cleaned.startswith(f"{key} "):
             cleaned = cleaned[len(key) + 1 :].strip()
             break
+    cleaned = re.sub(r"^(?:и|a|and)\s+", "", cleaned, flags=re.IGNORECASE)
     chassis = resolve_car_chassis_model(cleaned)
     if chassis:
         return chassis

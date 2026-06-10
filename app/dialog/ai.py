@@ -403,6 +403,16 @@ class DeterministicAIProvider:
             return field_edit
 
         if current_state == DialogueState.NEW:
+            if _looks_like_onboarding_intent(text):
+                return AIResult(
+                    PROMPTS[DialogueState.NEW],
+                    "clarification",
+                    {},
+                    DialogueState.ASK_FULL_NAME.value,
+                    0.75,
+                    reasoning_summary="onboarding_intent:new",
+                    suggested_next_action=DialogueState.ASK_FULL_NAME.value,
+                )
             if _looks_like_full_name(text):
                 last_name, first_name, middle_name = split_full_name(text)
                 extracted = {"full_name": text}
@@ -420,16 +430,6 @@ class DeterministicAIProvider:
                     0.95,
                     reasoning_summary="registration_extract:full_name",
                     suggested_next_action=DialogueState.ASK_PHONE.value,
-                )
-            if _looks_like_onboarding_intent(text):
-                return AIResult(
-                    PROMPTS[DialogueState.NEW],
-                    "clarification",
-                    {},
-                    DialogueState.ASK_FULL_NAME.value,
-                    0.75,
-                    reasoning_summary="onboarding_intent:new",
-                    suggested_next_action=DialogueState.ASK_FULL_NAME.value,
                 )
             return AIResult(
                 "Здравствуйте. Я могу рассказать об условиях парка и помочь пройти регистрацию. Если хотите начать, напишите ваше ФИО полностью.",
