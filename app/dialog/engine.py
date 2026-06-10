@@ -16,6 +16,7 @@ from app.dialog.prompts import (
     STATUS_REPLIES,
     YANDEX_PRO_INSTALL_TEMPLATE,
     YANDEX_PRO_START_TEMPLATE,
+    OFFICE_HOURS,
     REGISTRATION_START_CTA,
     format_in_flow_reply,
 )
@@ -187,7 +188,7 @@ class DialogueEngine:
                 next_state = DialogueState(ai_result.next_state or DialogueState.ASK_PHONE.value)
                 update_driver_state(db, driver, next_state.value)
                 set_application_status(db, application, _application_status_from_state(next_state))
-                reply = "Здравствуйте. Начинаем регистрацию.\n\n" + PROMPTS[next_state]
+                reply = "👋 Отлично! Начинаем регистрацию.\n\n" + PROMPTS[next_state]
                 return self._respond(db, driver, application, reply)
 
             if ai_result.next_state == DialogueState.ASK_FULL_NAME.value:
@@ -544,7 +545,7 @@ class DialogueEngine:
             db,
             driver,
             application,
-            f"Готово, обновил поле «{self._field_label(ai_result.target_field)}». Проверьте данные еще раз.\n\n{self._build_confirmation(driver)}",
+            f"✅ Готово, обновил поле «{self._field_label(ai_result.target_field)}». Проверьте данные ещё раз.\n\n{self._build_confirmation(driver)}",
         )
 
     def _handle_pending_field_edit_value(
@@ -779,9 +780,11 @@ class DialogueEngine:
                 driver,
                 application,
                 (
-                    "Отлично, вход в Яндекс Про зафиксировал. Выходите на линию.\n"
-                    "Если нужен совет по работе, заявке или приложению, пишите сюда. Мы на связи.\n"
-                    f"Адрес офиса: {self.settings.public_site_address}"
+                    "🎉 Отлично, вы в Яндекс Про! Выходите на линию.\n"
+                    "💬 Вопросы по работе — пишите сюда, мы на связи.\n"
+                    f"📍 Офис: {self.settings.public_site_address}\n"
+                    f"{OFFICE_HOURS}\n"
+                    "🎁 Ждём вас в офисе за подарочным боксом!"
                 ),
             )
 
@@ -799,7 +802,8 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Понял. Напишите, что именно не получается при входе в Яндекс Про, и я передам это менеджеру. Если вы уже вошли, напишите: Вошел.",
+                "👌 Понял. Опишите, что не получается при входе в Яндекс Про — передам менеджеру.\n"
+                "Уже вошли — напишите: Вошел",
             )
 
         if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS and message_text.strip():
@@ -811,7 +815,7 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Принял описание проблемы. После успешного входа напишите: Вошел.",
+                "✅ Принял. После успешного входа напишите: Вошел.",
             )
 
         if ai_result.intent in {"faq", "help", "smalltalk", "clarification"} and ai_result.reply:
@@ -857,7 +861,7 @@ class DialogueEngine:
         if _looks_like_restart_request(normalized):
             self._reset_registration(db, driver, application)
             create_conversation_event(db, driver, "registration_restarted")
-            return "Текущая анкета сброшена. Начинаем новую регистрацию. Напишите ваше ФИО полностью."
+            return f"🔄 Анкета сброшена. Начинаем заново.\n\n{REGISTRATION_START_CTA}"
 
         if _looks_like_delete_request(normalized):
             reply = (
@@ -1074,15 +1078,13 @@ class DialogueEngine:
         office_address = self.settings.public_site_address
         greeting_name = driver.first_name or driver.full_name or "водитель"
         return (
-            f"{greeting_name}, спасибо, заявка уже отправлена в парк.\n\n"
+            f"{greeting_name}, спасибо — заявка уже в парке! 🎉\n\n"
             f"{YANDEX_PRO_START_TEMPLATE.format(phone=contact_phone)}\n\n"
-            "Когда закончите вход, напишите: Вошел.\n"
-            "Если приложение не скачалось, напишите: Не скачал.\n"
-            "Если что-то не получается, просто опишите проблему - мы поможем дальше.\n\n"
-            "После успешной регистрации приглашаем вас в офис. За регистрацию вы получите подарочный бокс: зарядку 3 в 1, держатель для телефона и салфетку.\n"
-            "Если вы работаете в бизнес-классе, раз в неделю вам полагается блок воды.\n"
-            "Наши постоянные водители могут бесплатно пользоваться сухим туманом.\n"
-            f"Адрес офиса: {office_address}"
+            "🎁 После регистрации ждём вас в офисе — подарочный бокс: зарядка 3 в 1, держатель, салфетка.\n"
+            "💧 Бизнес-класс — блок воды раз в неделю.\n"
+            "💨 Постоянным водителям — бесплатный сухой туман.\n"
+            f"📍 Офис: {office_address}\n"
+            f"{OFFICE_HOURS}"
         )
 
     def _build_yandex_pro_install_reply(self, driver: Driver) -> str:
@@ -1099,11 +1101,11 @@ class DialogueEngine:
 
     def _format_post_yandex_reply(self, state: DialogueState, base_reply: str) -> str:
         if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS:
-            reminder = "Если проблема уже решена и вы вошли в Яндекс Про, напишите: Вошел. Если нет, опишите, что именно не получается."
+            reminder = "✅ Уже вошли в Яндекс Про — напишите: Вошел. Нет — опишите, что не получается."
         else:
             reminder = (
-                "Сейчас шаг после отправки заявки в парк: нужно зайти в Яндекс Про. "
-                "Если уже вошли, напишите: Вошел. Если не получается, опишите проблему."
+                "📱 Сейчас шаг: войти в Яндекс Про. "
+                "Вошли — напишите: Вошел. Проблема — опишите в чат."
             )
         if base_reply.strip() == reminder.strip():
             return base_reply
@@ -1111,8 +1113,9 @@ class DialogueEngine:
 
     def _format_registered_driver_reply(self, base_reply: str) -> str:
         tail = (
-            "Если нужна помощь по Яндекс Про, выходу на линию, условиям парка, выплатам или офису, просто напишите вопрос. "
-            f"Адрес офиса: {self.settings.public_site_address}"
+            "💬 Вопросы по Яндекс Про, линии, условиям или офису — пишите сюда.\n"
+            f"📍 Офис: {self.settings.public_site_address}\n"
+            f"{OFFICE_HOURS}"
         )
         if tail in base_reply:
             return base_reply

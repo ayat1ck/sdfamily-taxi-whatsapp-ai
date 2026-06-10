@@ -62,9 +62,9 @@ SCENARIOS: list[Scenario] = [
     Scenario("NEW: привет", DialogueState.NEW.value, "Привет", expect_intent="help", must_contain=("Здравствуйте",), must_not_contain=(office_marker(),)),
     Scenario("NEW: алло", DialogueState.NEW.value, "алло", expect_intent="help", must_contain=("Здравствуйте",), must_not_contain=(office_marker(),)),
     Scenario("NEW: здравствуйте", DialogueState.NEW.value, "Здравствуйте", expect_intent="help", must_not_contain=(office_marker(),)),
-    Scenario("NEW: где офис", DialogueState.NEW.value, "Где офис?", expect_intent="faq", must_contain=("Балкантау",), must_not_contain=(office_marker(),)),
+    Scenario("NEW: где офис", DialogueState.NEW.value, "Где офис?", expect_intent="faq", must_contain=("Момышулы",), must_not_contain=(office_marker(),)),
     Scenario("NEW: условия", DialogueState.NEW.value, "Какие условия?", expect_intent="faq", must_contain=("2%",), must_not_contain=(office_marker(), "Кто вы такие")),
-    Scenario("NEW: два вопроса", DialogueState.NEW.value, "Где офис и какие условия?", expect_intent="faq", must_contain=("Балкантау", "2%")),
+    Scenario("NEW: два вопроса", DialogueState.NEW.value, "Где офис и какие условия?", expect_intent="faq", must_contain=("Момышулы", "2%")),
     Scenario("NEW: кто вы", DialogueState.NEW.value, "Кто вы такие?", expect_intent="faq", must_contain=("SD Family Taxi",), must_not_contain=(office_marker(),)),
     Scenario("NEW: документы", DialogueState.NEW.value, "Какие документы нужны?", expect_intent="faq", must_not_contain=(office_marker(),)),
     Scenario("NEW: яндекс про", DialogueState.NEW.value, "Как войти в Яндекс Про?", expect_intent="faq", must_not_contain=(office_marker(),)),
@@ -74,14 +74,14 @@ SCENARIOS: list[Scenario] = [
     # --- Registration flow ---
     Scenario("ASK_PHONE: номер", DialogueState.ASK_PHONE.value, "+77071234567", expect_intent="registration", expect_fields=("phone",)),
     Scenario("ASK_PHONE: алло mid-flow", DialogueState.ASK_PHONE.value, "алло", expect_intent="help", must_contain=("Здравствуйте", "телефон"), must_not_contain=(office_marker(),)),
-    Scenario("ASK_PHONE: где офис", DialogueState.ASK_PHONE.value, "Где офис?", expect_intent="faq", must_contain=("Балкантау",)),
+    Scenario("ASK_PHONE: где офис", DialogueState.ASK_PHONE.value, "Где офис?", expect_intent="faq", must_contain=("Момышулы",)),
     Scenario(
         "ASK_IIN: mixed IIN + office",
         DialogueState.ASK_IIN.value,
         f"ИИН {TEST_IIN} и где офис?",
         expect_intent="registration",
         expect_fields=("iin",),
-        must_contain=("Балкантау", "дату рождения"),
+        must_contain=("Момышулы", "дату рождения"),
     ),
     Scenario("ASK_IIN: только ИИН", DialogueState.ASK_IIN.value, TEST_IIN, expect_intent="registration", expect_fields=("iin",)),
     Scenario("ASK_IIN: bad IIN", DialogueState.ASK_IIN.value, "123", expect_intent="clarification", must_contain=("ИИН",)),
@@ -117,20 +117,20 @@ SCENARIOS: list[Scenario] = [
         expect_fields=("driver_license_number",),
     ),
     Scenario("CONFIRM: подтверждаю", DialogueState.CONFIRM_DATA.value, "Подтверждаю", expect_intent="confirmation"),
-    Scenario("CONFIRM: где офис", DialogueState.CONFIRM_DATA.value, "Где офис?", expect_intent="faq", must_contain=("Балкантау",)),
+    Scenario("CONFIRM: где офис", DialogueState.CONFIRM_DATA.value, "Где офис?", expect_intent="faq", must_contain=("Момышулы",)),
     # --- Edge / noise ---
     Scenario("ASK_CITY: город", DialogueState.ASK_CITY.value, "Астана", expect_intent="registration", expect_fields=("city",)),
     Scenario("ASK_IIN: ало без вопроса", DialogueState.ASK_IIN.value, "ало", expect_intent="help", must_not_contain=(office_marker(),)),
-    Scenario("NEW: привет где офис", DialogueState.NEW.value, "Привет, где офис?", must_contain=("Балкантау",), must_not_contain=(office_marker(),)),
+    Scenario("NEW: привет где офис", DialogueState.NEW.value, "Привет, где офис?", must_contain=("Момышулы",), must_not_contain=(office_marker(),)),
     Scenario("NEW: комиссия", DialogueState.NEW.value, "Какая комиссия?", expect_intent="faq", must_contain=("2%",)),
     Scenario("NEW: бонусы", DialogueState.NEW.value, "Какие бонусы?", expect_intent="faq", must_contain=("Байге",), must_not_contain=(office_marker(),)),
     Scenario("NEW: бонусы перефраз", DialogueState.NEW.value, "Что получу за стаж?", expect_intent="faq", must_contain=("Байге",), must_not_contain=(office_marker(),)),
     Scenario("NEW: комиссия перефраз", DialogueState.NEW.value, "Сколько процентов берете?", expect_intent="faq", must_contain=("2%",), must_not_contain=(office_marker(),)),
-    Scenario("NEW: офис перефраз", DialogueState.NEW.value, "Куда приехать?", expect_intent="faq", must_contain=("Балкантау",), must_not_contain=(office_marker(),)),
+    Scenario("NEW: офис перефраз", DialogueState.NEW.value, "Куда приехать?", expect_intent="faq", must_contain=("Момышулы",), must_not_contain=(office_marker(),)),
     Scenario("NEW: акции", DialogueState.NEW.value, "Есть акции?", expect_intent="faq", must_contain=("Байге",), must_not_contain=(office_marker(),)),
-    Scenario("ASK_ADDRESS: адрес", DialogueState.ASK_ADDRESS.value, "Балкантау 117, Астана", expect_intent="registration", expect_fields=("address",)),
-    Scenario("ASK_IIN: смешанный bad+office", DialogueState.ASK_IIN.value, "123 и где офис?", expect_intent="faq", must_contain=("Балкантау",)),
-    Scenario("ASK_IIN: где офис mid-flow", DialogueState.ASK_IIN.value, "Где ваш офис находится?", expect_intent="faq", must_contain=("Балкантау",)),
+    Scenario("ASK_ADDRESS: адрес", DialogueState.ASK_ADDRESS.value, "пр. Республики 12, Астана", expect_intent="registration", expect_fields=("address",)),
+    Scenario("ASK_IIN: смешанный bad+office", DialogueState.ASK_IIN.value, "123 и где офис?", expect_intent="faq", must_contain=("Момышулы",)),
+    Scenario("ASK_IIN: где офис mid-flow", DialogueState.ASK_IIN.value, "Где ваш офис находится?", expect_intent="faq", must_contain=("Момышулы",)),
     Scenario("ASK_IIN: условия mid-flow", DialogueState.ASK_IIN.value, "А какие у вас условия?", expect_intent="faq", must_contain=("2%",)),
     Scenario("ASK_IIN: другой вопрос", DialogueState.ASK_IIN.value, "А можно по другому вопросу?", expect_intent="help", must_contain=("условия", "офис")),
     Scenario("ASK_CAR_MODEL: Camry 35", DialogueState.ASK_CAR_MODEL.value, "Camry 35", driver={"vehicle": SimpleNamespace(brand="Toyota")}),
@@ -235,7 +235,7 @@ def print_report(passed: list[RunResult], failed: list[RunResult]) -> None:
         "Привет",
     ]
     for msg in faq_cases:
-        ans = resolve_faq_replies(msg, kb, office_address="Балкантау 117")
+        ans = resolve_faq_replies(msg, kb, office_address="Астана, Момышулы 18/1")
         print(f"\n  Q: {msg}")
         print(f"  A: {truncate(ans or '(none)')}")
 

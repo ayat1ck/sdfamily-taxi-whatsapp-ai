@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     public_site_support_email: str = "sdfamily@list.ru"
     public_site_support_phone: str = "+77071870107"
     public_site_whatsapp_phone: str = "+77766170666"
-    public_site_address: str = "Астана, Алматинский район, Балкантау 117"
+    public_site_address: str = "Астана, Момышулы 18/1"
     public_site_oked: str = "49320 Деятельность такси"
     public_site_description: str = "Подключение водителей к таксопарку и регистрация через WhatsApp."
 

@@ -23,7 +23,13 @@ from app.dialog.llm_prompt import (
     build_system_prompt,
     build_user_prompt,
 )
-from app.dialog.prompts import CAR_MODEL_PROMPT, PROMPTS, REGISTRATION_START_CTA, format_in_flow_reply
+from app.dialog.prompts import (
+    CAR_MODEL_PROMPT,
+    PROMPTS,
+    REGISTRATION_START_CTA,
+    WELCOME_GREETING,
+    format_in_flow_reply,
+)
 from app.dialog.states import DialogueState
 from app.drivers.models import Driver
 from app.integrations.yandex.catalog import (
@@ -425,7 +431,7 @@ class DeterministicAIProvider:
                 if middle_name:
                     extracted["middle_name"] = middle_name
                 return AIResult(
-                    "Здравствуйте. Начинаем регистрацию.",
+                    "👋 Отлично! Начинаем регистрацию.",
                     "registration",
                     extracted,
                     DialogueState.ASK_PHONE.value,
@@ -434,7 +440,7 @@ class DeterministicAIProvider:
                     suggested_next_action=DialogueState.ASK_PHONE.value,
                 )
             return AIResult(
-                f"Здравствуйте! SD Family Taxi — подключим к парку. {REGISTRATION_START_CTA}",
+                f"{WELCOME_GREETING}\n\n{REGISTRATION_START_CTA}",
                 "clarification",
                 {},
                 DialogueState.NEW.value,
@@ -1168,7 +1174,7 @@ def _clarification_reply(current_state: DialogueState) -> str:
         DialogueState.ASK_FULL_NAME: "Напишите ваше ФИО полностью. Например: Абай Аят Жаныбекулы.",
         DialogueState.ASK_PHONE: "Укажите контактный номер телефона в формате +7XXXXXXXXXX.",
         DialogueState.ASK_CITY: "Напишите только город, в котором будете работать. Например: Астана.",
-        DialogueState.ASK_ADDRESS: "Укажите адрес проживания или регистрации. Например: Балкантау 117, Астана.",
+        DialogueState.ASK_ADDRESS: "📍 Укажите адрес проживания или регистрации. Например: пр. Республики 12, Астана.",
         DialogueState.ASK_IIN: "Укажите ИИН из 12 цифр.",
         DialogueState.ASK_BIRTH_DATE: "Укажите дату рождения в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "Укажите дату начала водительского стажа в формате ДД.ММ.ГГГГ.",
@@ -1195,7 +1201,7 @@ def _clarification_reply(current_state: DialogueState) -> str:
         DialogueState.ASK_FULL_NAME: "Напишите ваше ФИО полностью. Например: Абай Аят Жаныбекулы.",
         DialogueState.ASK_PHONE: "Укажите контактный номер телефона в формате +7XXXXXXXXXX.",
         DialogueState.ASK_CITY: "Напишите только город, в котором будете работать. Например: Астана.",
-        DialogueState.ASK_ADDRESS: "Укажите адрес проживания или регистрации. Например: Балкантау 117, Астана.",
+        DialogueState.ASK_ADDRESS: "📍 Укажите адрес проживания или регистрации. Например: пр. Республики 12, Астана.",
         DialogueState.ASK_IIN: "Укажите ИИН из 12 цифр.",
         DialogueState.ASK_BIRTH_DATE: "Укажите дату рождения в формате ДД.ММ.ГГГГ.",
         DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "Укажите дату начала водительского стажа в формате ДД.ММ.ГГГГ.",
@@ -1285,10 +1291,7 @@ def _build_greeting_reply(current_state: DialogueState, text: str) -> str | None
     if not looks_like_greeting(text):
         return None
     if current_state == DialogueState.NEW:
-        return (
-            "Здравствуйте! SD Family Taxi — комиссия 2%, выплаты 24/7, бонусы для водителей. "
-            f"{REGISTRATION_START_CTA}"
-        )
+        return f"{WELCOME_GREETING}\n\n{REGISTRATION_START_CTA}"
     if current_state in {
         DialogueState.CONFIRM_DATA,
         DialogueState.READY_TO_SEND_YANDEX,
@@ -1297,7 +1300,7 @@ def _build_greeting_reply(current_state: DialogueState, text: str) -> str | None
         DialogueState.COMPLETED,
     }:
         return None
-    return "Здравствуйте! Я на связи и помогу с регистрацией."
+    return "👋 Здравствуйте! На связи — помогу с регистрацией."
 
 
 def _registration_side_reply(current_state: DialogueState, text: str, knowledge_base: dict[str, str]) -> str | None:
@@ -1323,7 +1326,7 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
 
     if any(marker in normalized for marker in ("можно по другому", "другой вопрос", "не про это", "потом ответ")):
         return (
-            "Спросите про условия парка, офис, документы или Яндекс Про — отвечу. "
+            "💬 Спросите про условия, офис, документы или Яндекс Про — отвечу. "
             "Продолжаем регистрацию с текущего шага."
         )
 
@@ -2041,7 +2044,7 @@ def _field_edit_error_reply(target_field: str, errors: list[str] | None = None) 
     examples = {
         "phone": "Например: исправь телефон на +77071234567.",
         "city": "Например: измени город на Алматы.",
-        "address": "Например: исправь адрес на Балкантау 117.",
+        "address": "Например: исправь адрес на пр. Республики 12, Астана.",
         "iin": "Например: исправь ИИН на 070404550345.",
         "birth_date": "Например: исправь дату рождения на 04.04.2007.",
         "driver_license_issue_date": "Например: измени дату выдачи на 17.03.2015.",

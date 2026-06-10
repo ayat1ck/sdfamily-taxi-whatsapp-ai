@@ -22,7 +22,7 @@ services:
       - key: PUBLIC_SITE_WHATSAPP_PHONE
         value: "+77766170666"
       - key: PUBLIC_SITE_ADDRESS
-        value: Астана, Алматинский район, Балкантау 117
+        value: Астана, Момышулы 18/1
       - key: PUBLIC_SITE_OKED
         value: 49320 Деятельность такси
       - key: PUBLIC_SITE_DESCRIPTION
