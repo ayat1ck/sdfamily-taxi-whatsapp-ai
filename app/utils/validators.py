@@ -588,11 +588,17 @@ def looks_like_registration_certificate(value: str) -> bool:
 
 
 def looks_like_phone(value: str) -> bool:
-    return bool(PHONE_PATTERN.search(value))
+    if PHONE_PATTERN.search(value):
+        return True
+    digits = re.sub(r"\D+", "", value)
+    return 10 <= len(digits) <= 15
 
 
 def looks_like_iin(value: str) -> bool:
-    return bool(IIN_PATTERN.search(value))
+    if IIN_PATTERN.search(value):
+        return True
+    digits = re.sub(r"\D+", "", value)
+    return len(digits) == 12
 
 
 def parse_year(value: str) -> int | None:

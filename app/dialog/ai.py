@@ -141,6 +141,9 @@ class AIService:
             except Exception as exc:
                 logger.exception("FAQ assistant failed for state %s: %s", state, exc)
 
+        if backend.intent == "clarification" and backend.reply.strip():
+            return backend
+
         if looks_like_support_question(message) and not _backend_answered_support(backend):
             if not looks_like_greeting(message):
                 return _office_fallback_result(state, message)
@@ -352,6 +355,10 @@ class DeterministicAIProvider:
         mixed = _try_mixed_field_and_support(current_state, text, driver, self.knowledge_base)
         if mixed:
             return mixed
+
+        greeting_with_support = _try_greeting_with_support(current_state, text, self.knowledge_base)
+        if greeting_with_support:
+            return greeting_with_support
 
         greeting_reply = _build_greeting_reply(current_state, text)
         if greeting_reply:
@@ -733,16 +740,39 @@ def _default_next_state(state: DialogueState, driver: Driver | None = None) -> D
 
 
 def _looks_like_full_name(value: str) -> bool:
+    if looks_like_support_question(value):
+        return False
     parts = [part for part in normalize_text_token(value).split() if part]
     if len(parts) < 2:
         return False
     if any(part.isdigit() for part in parts):
+        return False
+    question_words = {"где", "как", "что", "когда", "зачем", "почему", "сколько", "можно", "нужно"}
+    if any(part in question_words for part in parts):
         return False
     return len(parts[0]) >= 2 and len(parts[1]) >= 2
 
 
 def _looks_like_onboarding_intent(value: str) -> bool:
     normalized = normalize_text_token(value)
+    if looks_like_support_question(value) and any(
+        keyword in normalized
+        for keyword in (
+            "сколько",
+            "где",
+            "какая",
+            "какие",
+            "зачем",
+            "почему",
+            "можно",
+            "есть ли",
+            "какой",
+            "как ",
+            "что ",
+            "когда",
+        )
+    ):
+        return False
     triggers = (
         "привет",
         "здравствуйте",
@@ -856,6 +886,8 @@ def _try_registration_field_extract(
                 reasoning_summary="registration_extract:full_name",
                 suggested_next_action=DialogueState.ASK_PHONE.value,
             )
+        if looks_like_support_question(text):
+            return None
         if allow_clarification:
             return AIResult(
                 _clarification_reply(current_state),
@@ -1301,6 +1333,27 @@ def _office_fallback_result(state: str, _message: str) -> AIResult:
         reasoning_summary="office_fallback:no_kb_answer",
         suggested_next_action=state,
         provider="deterministic",
+    )
+
+
+def _try_greeting_with_support(
+    current_state: DialogueState,
+    text: str,
+    knowledge_base: dict[str, str],
+) -> AIResult | None:
+    if not looks_like_greeting(text) or not looks_like_support_question(text):
+        return None
+    faq_reply = resolve_faq_replies(text, knowledge_base, office_address=get_settings().public_site_address)
+    if not faq_reply:
+        return None
+    return AIResult(
+        faq_reply,
+        "faq",
+        {},
+        current_state.value,
+        0.9,
+        reasoning_summary="greeting_with_support:faq",
+        suggested_next_action=current_state.value,
     )
 
 
@@ -1888,6 +1941,22 @@ def _extract_raw_value(raw_tail: str) -> str:
 
 def _resolve_field_name(value: str) -> str | None:
     normalized = normalize_text_token(value)
+    for src, dst in (
+        ("марку", "марка"),
+        ("модель", "модель"),
+        ("фамилию", "фамилия"),
+        ("имя", "имя"),
+        ("отчество", "отчество"),
+        ("город", "город"),
+        ("адрес", "адрес"),
+        ("цвет", "цвет"),
+        ("телефон", "телефон"),
+        ("иин", "иин"),
+        ("госномер", "госномер"),
+        ("стс", "стс"),
+        ("техпаспорт", "техпаспорт"),
+    ):
+        normalized = normalized.replace(src, dst)
     mapping: list[tuple[tuple[str, ...], str]] = [
         (("фио", "полное имя"), "full_name"),
         (("фамилия",), "last_name"),

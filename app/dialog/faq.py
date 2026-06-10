@@ -105,7 +105,7 @@ FAQ_INTENT_ROUTES: tuple[FaqIntentRoute, ...] = (
     FaqIntentRoute(("поддерж",), "park_info", "есть ли поддержка"),
     FaqIntentRoute(("кто вы", "что за парк", "о вас", "таксопарк"), "park_info", "кто вы такие"),
     FaqIntentRoute(("регистрац", "подключ", "устроиться", "оформить"), "registration", "как подключиться"),
-    FaqIntentRoute(("сколько времен", "сколько занимает", "долго регист"), "registration", "сколько занимает"),
+    FaqIntentRoute(("сколько времени", "сколько времен", "сколько занимает", "долго регист"), "registration", "сколько занимает"),
     FaqIntentRoute(("статус", "заявк"), "registration", "как узнать статус"),
     FaqIntentRoute(("иин",), "registration", "зачем нужен иин"),
     FaqIntentRoute(("документ", "фото", "скан"), "documents", "какие документы"),
@@ -307,6 +307,16 @@ def split_support_questions(message: str) -> list[str]:
     text = message.strip()
     if not text:
         return []
+
+    compound_parts = [
+        part.strip(" ?.,")
+        for part in re.split(r"[,?]\s*|\s+и\s+", text)
+        if part.strip(" ?.,")
+    ]
+    if len(compound_parts) >= 2:
+        support_parts = [part for part in compound_parts if looks_like_support_question(part)]
+        if len(support_parts) >= 2:
+            return support_parts
 
     parts = _iter_message_parts(text)
     support_parts = [part for part in parts if looks_like_support_question(part)]
