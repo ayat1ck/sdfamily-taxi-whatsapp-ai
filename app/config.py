@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     ai_provider: str = "openai"
     llm_mode: str = "faq_only"
+    llm_faq_assist_enabled: bool = False
     openai_model: str = "gpt-4o-mini"
     gemini_model: str = "gemini-2.5-flash"
 

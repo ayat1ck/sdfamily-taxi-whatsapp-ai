@@ -9,7 +9,12 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.dialog.faq import find_faq_answer, load_knowledge_base, looks_like_support_question
+from app.dialog.faq import (
+    build_office_invite_reply,
+    find_faq_answer,
+    load_knowledge_base,
+    looks_like_support_question,
+)
 from app.dialog.llm_prompt import (
     build_faq_assist_system_prompt,
     build_faq_assist_user_prompt,
@@ -121,11 +126,14 @@ class AIService:
         if self.settings.llm_mode == "full" and current_state == DialogueState.COMPLETED:
             return self._respond_with_full_llm(state, message, driver, backend)
 
-        if self.llm and _should_use_llm_faq_assist(message, backend):
+        if self.llm and self.settings.llm_faq_assist_enabled and _should_use_llm_faq_assist(message, backend):
             try:
                 return self._respond_with_faq_assist(state, message, driver)
             except Exception as exc:
                 logger.exception("FAQ assistant failed for state %s: %s", state, exc)
+
+        if looks_like_support_question(message) and not _backend_answered_support(backend):
+            return _office_fallback_result(state, message)
 
         return backend
 
@@ -644,12 +652,16 @@ class DeterministicAIProvider:
             )
 
         return AIResult(
-            _clarification_reply(current_state),
-            "clarification",
+            _unsupported_message_reply(current_state, text),
+            "help" if looks_like_support_question(text) else "clarification",
             {},
             state,
-            0.4,
-            reasoning_summary="clarification:unrecognized_message",
+            0.55 if looks_like_support_question(text) else 0.4,
+            reasoning_summary=(
+                "office_fallback:unrecognized_support_question"
+                if looks_like_support_question(text)
+                else "clarification:unrecognized_message"
+            ),
             suggested_next_action=state,
         )
 
@@ -1031,6 +1043,50 @@ def _should_use_llm_faq_assist(message: str, backend: AIResult) -> bool:
     return True
 
 
+def _backend_answered_support(backend: AIResult) -> bool:
+    if backend.intent not in {"faq", "help"}:
+        return False
+    reply = backend.reply.strip()
+    if not reply:
+        return False
+    office_address = get_settings().public_site_address
+    if reply == build_office_invite_reply(office_address):
+        return True
+    return not _reply_is_bare_step_prompt(backend.reply, backend.next_state or "")
+
+
+def _reply_is_bare_step_prompt(reply: str, state_value: str) -> bool:
+    if not state_value:
+        return False
+    try:
+        state = DialogueState(state_value)
+    except ValueError:
+        return False
+    prompt = PROMPTS.get(state, "").strip()
+    cleaned = reply.strip()
+    return bool(prompt) and cleaned == prompt
+
+
+def _unsupported_message_reply(current_state: DialogueState, text: str) -> str:
+    if looks_like_support_question(text):
+        return build_office_invite_reply(get_settings().public_site_address)
+    return _clarification_reply(current_state)
+
+
+def _office_fallback_result(state: str, _message: str) -> AIResult:
+    reply = build_office_invite_reply(get_settings().public_site_address)
+    return AIResult(
+        reply,
+        "help",
+        {},
+        state,
+        0.72,
+        reasoning_summary="office_fallback:no_kb_answer",
+        suggested_next_action=state,
+        provider="deterministic",
+    )
+
+
 def _registration_side_reply(current_state: DialogueState, text: str, knowledge_base: dict[str, str]) -> str | None:
     if current_state in {
         DialogueState.NEW,
@@ -1066,7 +1122,7 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
         if explanation:
             return explanation
 
-    return None
+    return build_office_invite_reply(get_settings().public_site_address)
 
 
 def _build_step_help_reply(current_state: DialogueState, text: str) -> str | None:

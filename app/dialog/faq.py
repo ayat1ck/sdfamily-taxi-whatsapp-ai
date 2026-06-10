@@ -208,3 +208,12 @@ def looks_like_support_question(message: str) -> bool:
     if any(fragment in normalized for fragment in (" условия", " офис", " комиссия", " документы", " яндекс про")):
         return True
     return False
+
+
+def build_office_invite_reply(office_address: str) -> str:
+    return (
+        "По этому вопросу в чате нет готового ответа. "
+        "Приходите в офис SD Family Taxi — менеджер подскажет на месте.\n"
+        f"Адрес: {office_address}"
+    )
+
