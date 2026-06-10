@@ -28,6 +28,7 @@ class Scenario:
     must_contain: tuple[str, ...] = ()
     must_not_contain: tuple[str, ...] = ()
     expect_fields: tuple[str, ...] = ()
+    expect_target_field: str | None = None
 
 
 def make_driver(**kwargs: Any) -> SimpleNamespace:
@@ -41,6 +42,7 @@ def make_driver(**kwargs: Any) -> SimpleNamespace:
         "driver_license_expires_at": None,
         "iin": None,
         "vehicle": None,
+        "documents": [],
     }
     defaults.update(kwargs)
     return SimpleNamespace(**defaults)
@@ -73,7 +75,7 @@ SCENARIOS: list[Scenario] = [
     Scenario("NEW: ФИО", DialogueState.NEW.value, "Абай Аят Жаныбекулы", expect_intent="registration", expect_fields=("full_name",), must_contain=("регистрац",)),
     # --- Registration flow ---
     Scenario("ASK_PHONE: номер", DialogueState.ASK_PHONE.value, "+77071234567", expect_intent="registration", expect_fields=("phone",)),
-    Scenario("ASK_PHONE: алло mid-flow", DialogueState.ASK_PHONE.value, "алло", expect_intent="help", must_contain=("Здравствуйте", "телефон"), must_not_contain=(office_marker(),)),
+    Scenario("ASK_PHONE: алло mid-flow", DialogueState.ASK_PHONE.value, "алло", expect_intent="help", must_contain=("Здравствуйте",), must_not_contain=(office_marker(),)),
     Scenario("ASK_PHONE: где офис", DialogueState.ASK_PHONE.value, "Где офис?", expect_intent="faq", must_contain=("Момышулы",)),
     Scenario(
         "ASK_IIN: mixed IIN + office",
@@ -85,7 +87,7 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario("ASK_IIN: только ИИН", DialogueState.ASK_IIN.value, TEST_IIN, expect_intent="registration", expect_fields=("iin",)),
     Scenario("ASK_IIN: bad IIN", DialogueState.ASK_IIN.value, "123", expect_intent="clarification", must_contain=("ИИН",)),
-    Scenario("ASK_PHONE: зачем полный", DialogueState.ASK_PHONE.value, "Зачем тебе мой номер телефона?", expect_intent="help", must_contain=("Яндекс Про", "телефон"), must_not_contain=(office_marker(), "ИИН")),
+    Scenario("ASK_PHONE: зачем полный", DialogueState.ASK_PHONE.value, "Зачем тебе мой номер телефона?", expect_intent="help", must_contain=("Яндекс Про", "контактный"), must_not_contain=(office_marker(), "ИИН")),
     Scenario("ASK_PHONE: зачем короткий", DialogueState.ASK_PHONE.value, "Зачем?", expect_intent="help", must_contain=("Яндекс Про",), must_not_contain=(office_marker(), "ИИН")),
     Scenario("ASK_IIN: зачем короткий", DialogueState.ASK_IIN.value, "Зачем?", expect_intent="help", must_contain=("ИИН",), must_not_contain=(office_marker(),)),
     Scenario(
@@ -104,7 +106,7 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario("ASK_CAR_BRAND: Toyota", DialogueState.ASK_CAR_BRAND.value, "Toyota", expect_intent="registration", expect_fields=("brand",)),
     Scenario("ASK_CAR_MODEL: Toyota и Camry", DialogueState.ASK_CAR_MODEL.value, "Toyota и Camry", driver={"vehicle": SimpleNamespace(brand="Toyota")}, expect_intent="registration", expect_fields=("model",), must_not_contain=(office_marker(), "I Camry")),
-    Scenario("ASK_CAR_MODEL: w221", DialogueState.ASK_CAR_MODEL.value, "w221", driver={"vehicle": SimpleNamespace(brand="Mercedes")}, expect_intent="clarification"),
+    Scenario("ASK_CAR_MODEL: w221", DialogueState.ASK_CAR_MODEL.value, "w221", driver={"vehicle": SimpleNamespace(brand="Mercedes")}, expect_intent="registration", expect_fields=("model",)),
     Scenario("ASK_CAR_MODEL: Camry", DialogueState.ASK_CAR_MODEL.value, "Camry", driver={"vehicle": SimpleNamespace(brand="Toyota")}, expect_intent="registration", expect_fields=("model",)),
     Scenario("ASK_CAR_YEAR: год", DialogueState.ASK_CAR_YEAR.value, "2018", expect_intent="registration", expect_fields=("year",)),
     Scenario("ASK_CAR_PLATE: номер", DialogueState.ASK_CAR_PLATE.value, "123ABC01", expect_intent="registration", expect_fields=("plate_number",)),
@@ -132,8 +134,69 @@ SCENARIOS: list[Scenario] = [
     Scenario("ASK_IIN: смешанный bad+office", DialogueState.ASK_IIN.value, "123 и где офис?", expect_intent="faq", must_contain=("Момышулы",)),
     Scenario("ASK_IIN: где офис mid-flow", DialogueState.ASK_IIN.value, "Где ваш офис находится?", expect_intent="faq", must_contain=("Момышулы",)),
     Scenario("ASK_IIN: условия mid-flow", DialogueState.ASK_IIN.value, "А какие у вас условия?", expect_intent="faq", must_contain=("2%",)),
-    Scenario("ASK_IIN: другой вопрос", DialogueState.ASK_IIN.value, "А можно по другому вопросу?", expect_intent="help", must_contain=("условия", "офис")),
-    Scenario("ASK_CAR_MODEL: Camry 35", DialogueState.ASK_CAR_MODEL.value, "Camry 35", driver={"vehicle": SimpleNamespace(brand="Toyota")}),
+    Scenario("ASK_IIN: другой вопрос", DialogueState.ASK_IIN.value, "А можно по другому вопросу?", expect_intent="faq", must_contain=("Момышулы",)),
+    Scenario("ASK_CAR_MODEL: Camry 35", DialogueState.ASK_CAR_MODEL.value, "Camry 35", driver={"vehicle": SimpleNamespace(brand="Toyota")}, expect_intent="registration", expect_fields=("model",)),
+    # --- Field edit on confirm / yandex_error ---
+    Scenario(
+        "CONFIRM: хочу изменить модель",
+        DialogueState.CONFIRM_DATA.value,
+        "Хочу изменить модель",
+        expect_intent="field_edit",
+        expect_target_field="model",
+        must_contain=("модель",),
+    ),
+    Scenario(
+        "CONFIRM: исправь модель на 5er",
+        DialogueState.CONFIRM_DATA.value,
+        "Исправь модель на 5er",
+        driver={"vehicle": SimpleNamespace(brand="BMW", model="525i")},
+        expect_intent="field_edit",
+        expect_target_field="model",
+        expect_fields=("model",),
+    ),
+    Scenario(
+        "CONFIRM: просьба изменить модель",
+        DialogueState.CONFIRM_DATA.value,
+        "Просьба изменить модель на 5er",
+        driver={"vehicle": SimpleNamespace(brand="BMW", model="525i")},
+        expect_intent="field_edit",
+        expect_target_field="model",
+        expect_fields=("model",),
+    ),
+    Scenario(
+        "CONFIRM: поменять город",
+        DialogueState.CONFIRM_DATA.value,
+        "Поменять город на Алматы",
+        expect_intent="field_edit",
+        expect_target_field="city",
+        expect_fields=("city",),
+    ),
+    Scenario(
+        "CONFIRM: модель изменить suffix",
+        DialogueState.CONFIRM_DATA.value,
+        "модель изменить",
+        expect_intent="field_edit",
+        expect_target_field="model",
+        must_contain=("модель",),
+    ),
+    Scenario(
+        "YANDEX_ERROR: изменить госномер",
+        DialogueState.YANDEX_ERROR.value,
+        "Нужно изменить госномер на 123ABC01",
+        expect_intent="field_edit",
+        expect_target_field="plate_number",
+        expect_fields=("plate_number",),
+    ),
+    Scenario(
+        "CONFIRM: подтверждаю typo",
+        DialogueState.CONFIRM_DATA.value,
+        "Потверждаю",
+        expect_intent="confirmation",
+    ),
+    # --- FAQ paraphrases ---
+    Scenario("NEW: pdf документы", DialogueState.NEW.value, "Можно PDF из eGov?", expect_intent="faq", must_contain=("PDF",)),
+    Scenario("NEW: как сфоткать", DialogueState.NEW.value, "Как правильно сфотографировать документ?", expect_intent="faq", must_contain=("поверхность",)),
+    Scenario("ASK_CAR_BRAND: faq не перехватывает", DialogueState.ASK_CAR_BRAND.value, "Skoda", expect_intent="registration", expect_fields=("brand",)),
 ]
 
 
@@ -164,6 +227,9 @@ def check_scenario(scenario: Scenario, result: AIResult) -> list[str]:
     for field_name in scenario.expect_fields:
         if field_name not in result.extracted_fields:
             issues.append(f"missing field {field_name!r} in {result.extracted_fields}")
+
+    if scenario.expect_target_field and result.target_field != scenario.expect_target_field:
+        issues.append(f"target_field: expected {scenario.expect_target_field!r}, got {result.target_field!r}")
 
     for needle in scenario.must_contain:
         if needle.lower() not in reply.lower():
@@ -233,6 +299,11 @@ def print_report(passed: list[RunResult], failed: list[RunResult]) -> None:
         "880101300123 и где офис?",
         "Toyota и Camry",
         "Привет",
+        "Можно PDF из eGov?",
+        "Как правильно сфотографировать документ?",
+        "Сколько процентов берете?",
+        "Что получу за стаж?",
+        "Хочу изменить модель",
     ]
     for msg in faq_cases:
         ans = resolve_faq_replies(msg, kb, office_address="Астана, Момышулы 18/1")

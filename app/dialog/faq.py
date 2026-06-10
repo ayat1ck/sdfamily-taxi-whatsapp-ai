@@ -411,6 +411,37 @@ def _find_qa_match(lowered: str, content: str) -> str | None:
     return None
 
 
+def _looks_like_car_registration_answer(lowered: str) -> bool:
+    tokens = [token for token in lowered.split() if token]
+    if not tokens or len(tokens) > 4:
+        return False
+    car_tokens = {
+        "toyota",
+        "camry",
+        "rio",
+        "kia",
+        "hyundai",
+        "bmw",
+        "mercedes",
+        "nissan",
+        "honda",
+        "lexus",
+        "volkswagen",
+        "skoda",
+        "w221",
+        "w222",
+        "e90",
+        "x5",
+        "5er",
+        "3er",
+    }
+    if any(token in car_tokens for token in tokens):
+        return True
+    if len(tokens) == 1 and tokens[0].isalpha() and 2 <= len(tokens[0]) <= 12:
+        return True
+    return False
+
+
 def _find_best_trigger_match(lowered: str, kb: dict[str, str]) -> str | None:
     best_score = 0
     best_answer: str | None = None
@@ -470,6 +501,8 @@ def _find_single_faq_answer(message: str, kb: dict[str, str]) -> str | None:
     if not lowered:
         return None
     if _looks_like_registration_field_edit(message):
+        return None
+    if _looks_like_car_registration_answer(lowered):
         return None
 
     for content in kb.values():

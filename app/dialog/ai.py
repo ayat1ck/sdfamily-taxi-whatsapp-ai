@@ -374,10 +374,24 @@ class DeterministicAIProvider:
             if field_edit:
                 return field_edit
 
+        if current_state == DialogueState.NEW and _looks_like_onboarding_intent(text):
+            return AIResult(
+                PROMPTS[DialogueState.NEW],
+                "clarification",
+                {},
+                DialogueState.ASK_FULL_NAME.value,
+                0.75,
+                reasoning_summary="onboarding_intent:new",
+                suggested_next_action=DialogueState.ASK_FULL_NAME.value,
+            )
+
         if _is_in_flow_registration_state(current_state):
             step_help = _step_help_result(current_state, text, state)
             if step_help:
                 return step_help
+            field_extract = _try_registration_field_extract(current_state, text, driver, state)
+            if field_extract is not None:
+                return field_extract
 
         faq_answer = _match_faq(message, self.knowledge_base)
         if faq_answer:
@@ -1760,10 +1774,12 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         return None
 
     normalized = normalize_text_token(text)
-    if not any(marker in normalized for marker in ("исправ", "измен", "поменя", "замен", "хочу", "надо", "нужно", "можно")):
-        return None
-    if not any(marker in normalized for marker in ("исправ", "измен", "поменя", "замен")):
-        return None
+    edit_markers = ("исправ", "измен", "поменя", "замен", "неправильн", "неверн", "ошиб")
+    request_markers = ("хочу", "надо", "нужно", "можно", "просьба", "прошу", "пожалуйста")
+    has_edit_verb = any(marker in normalized for marker in edit_markers)
+    if not has_edit_verb:
+        if not (any(marker in normalized for marker in request_markers) and _resolve_field_name(normalized)):
+            return None
 
     normalized_compact = normalized.strip()
     raw_text = text.strip()
@@ -1771,7 +1787,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
     raw_tail = raw_text
 
     optional_prefix = re.match(
-        r"^(?:хочу|надо|нужно|можно|могу|мне\s+нужно)\s+(?:\w+\s+)?(?:исправить|изменить|поменять|заменить)\s+(.*)$",
+        r"^(?:хочу|надо|нужно|можно|могу|просьба|прошу|пожалуйста|мне\s+нужно)\s+(?:\w+\s+)?(?:исправить|изменить|поменять|заменить)\s+(.*)$",
         normalized_compact,
     )
     if optional_prefix:
