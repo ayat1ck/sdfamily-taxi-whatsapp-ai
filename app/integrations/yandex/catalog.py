@@ -297,7 +297,7 @@ def _model_candidates(value: str, brand: str) -> list[str]:
         cleaned = (item or "").strip()
         if not cleaned:
             continue
-        for variant in iter_car_model_normalize_candidates(cleaned):
+        for variant in iter_car_model_normalize_candidates(cleaned, brand=brand):
             if variant not in candidates:
                 candidates.append(variant)
     return candidates

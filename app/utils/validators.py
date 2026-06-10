@@ -325,9 +325,21 @@ ENGINE_TOKENS = frozenset(
 )
 NUMERIC_ENGINE_TRIM = re.compile(r"^(\d{2,4})([a-z]{1,5})$", re.IGNORECASE)
 DISPLACEMENT_TOKEN = re.compile(r"^\d(\.\d)?l?$|^\d\.\d+l?$", re.IGNORECASE)
+BMW_YANDEX_SERIES = re.compile(r"^([1357])\d{2}[a-z]{0,5}$", re.IGNORECASE)
 
 
-def iter_car_model_normalize_candidates(value: str) -> list[str]:
+def resolve_bmw_yandex_model(value: str) -> str | None:
+    """Map BMW trim codes like 525i to Yandex catalog names like 5er."""
+    compact = normalize_text_token(value).replace(" ", "")
+    if not compact:
+        return None
+    match = BMW_YANDEX_SERIES.fullmatch(compact)
+    if match:
+        return f"{match.group(1)}er"
+    return None
+
+
+def iter_car_model_normalize_candidates(value: str, *, brand: str | None = None) -> list[str]:
     """Variants for Yandex catalog lookup: original first, then without engine trim."""
     cleaned = normalize_text_token(value)
     if not cleaned:
@@ -341,6 +353,10 @@ def iter_car_model_normalize_candidates(value: str) -> list[str]:
         if token and token not in seen:
             seen.add(token)
             candidates.append(token)
+        bmw_model = resolve_bmw_yandex_model(token) if token else None
+        if bmw_model and bmw_model not in seen:
+            seen.add(bmw_model)
+            candidates.append(bmw_model)
 
     add(cleaned)
 
@@ -374,19 +390,28 @@ def iter_car_model_normalize_candidates(value: str) -> list[str]:
     return candidates
 
 
-def pick_catalog_car_model(value: str) -> str:
+def pick_catalog_car_model(value: str, *, brand: str | None = None) -> str:
     """Pick the best catalog-facing model from engine-trim variants."""
     cleaned = normalize_text_token(value)
     if not cleaned:
         return value.strip()
 
-    candidates = iter_car_model_normalize_candidates(cleaned)
+    bmw_model = resolve_bmw_yandex_model(cleaned)
+    if bmw_model and (not brand or normalize_car_brand(brand).upper() == "BMW"):
+        return bmw_model
+
+    candidates = iter_car_model_normalize_candidates(cleaned, brand=brand)
     if len(candidates) <= 1:
         return cleaned
 
     letter_candidates = [item for item in candidates[1:] if re.search(r"[a-zA-Z]", item)]
     if letter_candidates:
         return letter_candidates[-1]
+
+    for item in reversed(candidates[1:]):
+        bmw_model = resolve_bmw_yandex_model(item)
+        if bmw_model:
+            return bmw_model
 
     numeric_candidates = [item for item in candidates[1:] if item.isdigit()]
     if numeric_candidates:
@@ -463,7 +488,7 @@ def detect_car_model_clarification(value: str, brand: str | None = None) -> str 
             return CAR_MODEL_ALIASES[first]
 
     model_tail = _extract_model_tail(value, brand)
-    picked = pick_catalog_car_model(model_tail)
+    picked = pick_catalog_car_model(model_tail, brand=brand)
     if normalize_text_token(picked) != normalize_text_token(model_tail):
         return picked
 
