@@ -123,6 +123,7 @@ SCENARIOS: list[Scenario] = [
     Scenario("ASK_IIN: ало без вопроса", DialogueState.ASK_IIN.value, "ало", expect_intent="help", must_not_contain=(office_marker(),)),
     Scenario("NEW: привет где офис", DialogueState.NEW.value, "Привет, где офис?", must_contain=("Балкантау",), must_not_contain=(office_marker(),)),
     Scenario("NEW: комиссия", DialogueState.NEW.value, "Какая комиссия?", expect_intent="faq", must_contain=("2%",)),
+    Scenario("NEW: бонусы", DialogueState.NEW.value, "Какие бонусы?", expect_intent="faq", must_contain=("Байге",), must_not_contain=(office_marker(),)),
     Scenario("ASK_ADDRESS: адрес", DialogueState.ASK_ADDRESS.value, "Балкантау 117, Астана", expect_intent="registration", expect_fields=("address",)),
     Scenario("ASK_IIN: смешанный bad+office", DialogueState.ASK_IIN.value, "123 и где офис?", expect_intent="faq", must_contain=("Балкантау",)),
     Scenario("ASK_IIN: где офис mid-flow", DialogueState.ASK_IIN.value, "Где ваш офис находится?", expect_intent="faq", must_contain=("Балкантау",)),
