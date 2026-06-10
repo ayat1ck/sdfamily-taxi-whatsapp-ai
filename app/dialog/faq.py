@@ -283,6 +283,8 @@ def resolve_faq_replies(message: str, kb: dict[str, str], *, office_address: str
         if answer:
             return answer
         if looks_like_support_question(message) and office_address:
+            if looks_like_greeting(message):
+                return None
             return build_office_invite_reply(office_address)
         return None
 
@@ -301,15 +303,43 @@ def find_faq_answer(message: str, kb: dict[str, str]) -> str | None:
     return "\n\n".join(answers)
 
 
+def looks_like_greeting(message: str) -> bool:
+    normalized = normalize_text_token(message).strip(" ?!,.")
+    if not normalized:
+        return False
+
+    greeting_markers = (
+        "ало",
+        "алло",
+        "привет",
+        "здравствуйте",
+        "салам",
+        "добрый день",
+        "добрый вечер",
+        "доброе утро",
+        "hi",
+        "hello",
+        "hey",
+    )
+    if normalized in greeting_markers:
+        return True
+
+    for marker in ("ало", "алло"):
+        if normalized.startswith(marker):
+            remainder = normalized[len(marker) :].strip(" ?!,.")
+            if not remainder or len(remainder.split()) <= 2:
+                return True
+
+    return False
+
+
 def looks_like_support_question(message: str) -> bool:
     normalized = normalize_text_token(message).strip(" ?!.,")
     if not normalized:
         return False
+    if looks_like_greeting(message):
+        return False
     if "?" in message:
-        return True
-
-    greeting_markers = ("ало", "алло", "привет", "здравствуйте", "салам", "добрый день", "добрый вечер", "hi", "hello")
-    if normalized in greeting_markers or any(normalized.startswith(marker) for marker in ("ало", "алло")):
         return True
 
     help_markers = (

@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.dialog.faq import (
     build_office_invite_reply,
     load_knowledge_base,
+    looks_like_greeting,
     looks_like_support_question,
     resolve_faq_replies,
     split_field_and_support,
@@ -134,7 +135,8 @@ class AIService:
                 logger.exception("FAQ assistant failed for state %s: %s", state, exc)
 
         if looks_like_support_question(message) and not _backend_answered_support(backend):
-            return _office_fallback_result(state, message)
+            if not looks_like_greeting(message):
+                return _office_fallback_result(state, message)
 
         return backend
 
@@ -343,6 +345,22 @@ class DeterministicAIProvider:
         mixed = _try_mixed_field_and_support(current_state, text, driver, self.knowledge_base)
         if mixed:
             return mixed
+
+        greeting_reply = _build_greeting_reply(current_state, text)
+        if greeting_reply:
+            return AIResult(
+                greeting_reply,
+                "help",
+                {},
+                state,
+                0.9,
+                reasoning_summary="greeting",
+                suggested_next_action=(
+                    DialogueState.ASK_FULL_NAME.value
+                    if current_state == DialogueState.NEW
+                    else state
+                ),
+            )
 
         faq_answer = _match_faq(message, self.knowledge_base)
         if faq_answer:
@@ -1224,6 +1242,26 @@ def _office_fallback_result(state: str, _message: str) -> AIResult:
     )
 
 
+def _build_greeting_reply(current_state: DialogueState, text: str) -> str | None:
+    if not looks_like_greeting(text):
+        return None
+    if current_state == DialogueState.NEW:
+        return (
+            "Здравствуйте! Я помогу подключиться к таксопарку SD Family Taxi. "
+            "Могу рассказать об условиях, офисе и регистрации. "
+            "Если готовы начать — напишите ФИО полностью."
+        )
+    if current_state in {
+        DialogueState.CONFIRM_DATA,
+        DialogueState.READY_TO_SEND_YANDEX,
+        DialogueState.SENDING_TO_YANDEX,
+        DialogueState.YANDEX_ERROR,
+        DialogueState.COMPLETED,
+    }:
+        return None
+    return f"Здравствуйте! Я на связи и помогу с регистрацией.\n\n{PROMPTS[current_state]}"
+
+
 def _registration_side_reply(current_state: DialogueState, text: str, knowledge_base: dict[str, str]) -> str | None:
     if current_state in {
         DialogueState.NEW,
@@ -1235,14 +1273,15 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
     }:
         return None
 
-    if not looks_like_support_question(text):
+    if not looks_like_support_question(text) and not looks_like_greeting(text):
         return None
 
     normalized = normalize_text_token(text)
 
-    greeting_markers = ("ало", "алло", "привет", "здравствуйте", "салам", "добрый день", "добрый вечер", "hi", "hello")
-    if normalized in greeting_markers or any(normalized.startswith(marker) for marker in ("ало", "алло")):
-        return f"Здравствуйте! Я на связи и помогу с регистрацией.\n\n{PROMPTS[current_state]}"
+    if looks_like_greeting(text):
+        greeting = _build_greeting_reply(current_state, text)
+        if greeting:
+            return greeting
 
     if any(marker in normalized for marker in ("можно по другому", "другой вопрос", "не про это", "потом ответ")):
         return (
