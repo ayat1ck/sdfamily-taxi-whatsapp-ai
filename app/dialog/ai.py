@@ -762,50 +762,65 @@ def _looks_like_full_name(value: str) -> bool:
 def _looks_like_onboarding_intent(value: str) -> bool:
     normalized = normalize_text_token(value)
     employment_hint = normalize_employment_type(normalized)
-    if any(token in normalized for token in ('самозанят', 'смз', 'штатн', 'ип')) or employment_hint == 'самозанятый':
-        if any(
-            keyword in normalized
-            for keyword in ('зарег', 'подключ', 'устро', 'оформ', 'работ', 'парк', 'услов')
-        ):
+    work_hints = ("самозанят", "смз", "штатн", "ип", "тіркел", "керек", "қажет")
+    onboarding_keywords = ("зарег", "подключ", "устро", "оформ", "работ", "парк", "услов", "тіркел", "жұмыс", "қажет", "керек")
+
+    if any(token in normalized for token in work_hints) or employment_hint == "самозанятый":
+        if any(keyword in normalized for keyword in onboarding_keywords):
             return True
-    if looks_like_support_question(value) and not any(token in normalized for token in ('самозанят', 'смз', 'штатн', 'ип')) and any(
+        if "можно" in normalized and any(keyword in normalized for keyword in ("зарег", "подключ", "тіркел")):
+            return True
+
+    if looks_like_support_question(value) and not any(token in normalized for token in ("самозанят", "смз", "штатн", "ип", "тіркел", "керек", "қажет")) and any(
         keyword in normalized
         for keyword in (
-            'сколько',
-            'где',
-            'какая',
-            'какие',
-            'зачем',
-            'почему',
-            'можно',
-            'есть ли',
-            'какой',
-            'как ',
-            'что ',
-            'когда',
+            "сколько",
+            "где",
+            "какая",
+            "какие",
+            "зачем",
+            "почему",
+            "можно",
+            "есть ли",
+            "какой",
+            "как ",
+            "что ",
+            "когда",
+            "қалай",
+            "қайда",
+            "қашан",
+            "қандай",
+            "неше",
+            "керек",
+            "қажет",
+            "тіркел",
         )
     ):
         return False
     triggers = (
-        "РїСЂРёРІРµС‚",
-        "Р·РґСЂР°РІСЃС‚РІСѓР№С‚Рµ",
-        "РґРѕР±СЂС‹Р№ РґРµРЅСЊ",
-        "СЃР°Р»Р°Рј",
-        "С…РѕС‡Сѓ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ",
-        "С…РѕС‡Сѓ СЂР°Р±РѕС‚Р°С‚СЊ",
-        "С…РѕС‡Сѓ РІ РїР°СЂРє",
-        "С…РѕС‡Сѓ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊСЃСЏ",
-        "С…РѕС‡Сѓ СЂРµРіРёСЃС‚СЂР°С†РёСЋ",
-        "РєР°Рє РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ",
-        "РєР°Рє СѓСЃС‚СЂРѕРёС‚СЊСЃСЏ",
-        "РёРЅС‚РµСЂРµСЃСѓРµС‚ СЂР°Р±РѕС‚Р°",
-        "РЅСѓР¶РЅР° СЂР°Р±РѕС‚Р°",
-        "РїРѕРґРєР»СЋС‡РµРЅРёРµ",
-        "СЂРµРіРёСЃС‚СЂР°С†РёСЏ",
-        "РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ",
+        "привет",
+        "здравствуйте",
+        "добрый день",
+        "салам",
+        "ассаламуалейкум",
+        "сәлем",
+        "хочу подключиться",
+        "хочу работать",
+        "хочу в парк",
+        "хочу зарегистрироваться",
+        "хочу регистрацию",
+        "как подключиться",
+        "как устроиться",
+        "интересует работа",
+        "нужна работа",
+        "подключение",
+        "регистрация",
+        "подключиться",
+        "тіркелу",
+        "жұмыс керек",
+        "жұмыс қажет",
     )
     return any(trigger in normalized for trigger in triggers)
-
 
 def _match_faq(message: str, knowledge_base: dict[str, str]) -> str | None:
     return resolve_faq_replies(message, knowledge_base, office_address=get_settings().public_site_address)

@@ -80,6 +80,37 @@ TOKEN_SYNONYMS: dict[str, frozenset[str]] = {
     "смс": frozenset({"смс", "sms", "код", "кода"}),
 }
 
+KAZAKH_GREETING_MARKERS = (
+    "ассалаумағалейкум",
+    "ассалам",
+    "салам",
+    "сәлем",
+    "салем",
+    "қайырлы таң",
+    "қайырлы күн",
+    "қайырлы кеш",
+    "assalamu",
+    "salam",
+)
+
+KAZAKH_SUPPORT_MARKERS = (
+    "қажет",
+    "керек",
+    "тіркел",
+    "жұмыс",
+    "ақша",
+    "төлем",
+    "шығар",
+    "құжат",
+    "кеңсе",
+    "қалай",
+    "қайда",
+    "неге",
+    "неліктен",
+    "sms",
+    "код",
+)
+
 PAYOUT_WAITING_REPLY = (
     "По моментальным выплатам и выводу денег пока просим проявить терпение и немного подождать. "
     "Скоро это будет готово."
@@ -175,6 +206,9 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "как выйти онлайн",
         "как начать заказы",
         "не знаю как выйти на линию",
+        "қалай линияға шығам",
+        "қалай онлайн шығам",
+        "линияға шығу",
     ),
     "car_requirements": (
         "без своего авто",
@@ -182,6 +216,9 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "какие авто",
         "какая машина",
         "требования к авто",
+        "өз көліксіз",
+        "көлік керек",
+        "қандай көлік",
     ),
     "park_info": (
         "кто вы",
@@ -214,6 +251,9 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "момышулы 18/1",
         "вода",
         "поддержка",
+        "шарттар",
+        "төлемдер",
+        "кеңсе қайда",
     ),
     "registration": (
         "статус заявки",
@@ -232,6 +272,12 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "можно по другому",
         "другой вопрос",
         "можно задать",
+        "тіркелу",
+        "тіркеу",
+        "жұмысқа тұру",
+        "жұмыс керек",
+        "қажет еді",
+        "керек еді",
     ),
     "registered_driver_support": (
         "после регистрации",
@@ -255,6 +301,9 @@ FAQ_TRIGGERS: dict[str, tuple[str, ...]] = {
         "подарок",
         "заработ",
         "процент",
+        "ақша шығару",
+        "төлем шығару",
+        "қалай шығарам ақша",
     ),
 }
 
@@ -626,7 +675,7 @@ def looks_like_greeting(message: str) -> bool:
         "hello",
         "hey",
     )
-    if normalized in greeting_markers:
+    if normalized in greeting_markers or any(marker in normalized for marker in KAZAKH_GREETING_MARKERS):
         return True
 
     for marker in ("ало", "алло"):
@@ -666,6 +715,8 @@ def looks_like_support_question(message: str) -> bool:
     )
     if any(marker in normalized for marker in help_markers):
         return True
+    if any(marker in normalized for marker in KAZAKH_SUPPORT_MARKERS):
+        return True
 
     question_starters = (
         "где ",
@@ -679,12 +730,19 @@ def looks_like_support_question(message: str) -> bool:
         "а где ",
         "а как ",
         "а какие ",
+        "қалай ",
+        "қайда ",
+        "қашан ",
+        "қандай ",
+        "неше ",
     )
     if normalized.startswith(question_starters):
         return True
     if any(fragment in normalized for fragment in (
         " условия", " офис", " комиссия", " документы", " яндекс про",
         " бонус", " бонусы", " приз", " стаж", " выплат", " акци",
+        " шарт", " төлем", " ақы", " құжат", " тіркел", " тіркеу", " жүргізуші",
+        " шығарып", " кеңсе", " таксопарк",
     )):
         return True
     return False
