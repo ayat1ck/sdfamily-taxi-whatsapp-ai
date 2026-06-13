@@ -1,4 +1,5 @@
 from uuid import uuid4
+import re
 import time
 
 import httpx
@@ -327,21 +328,30 @@ class YandexFleetClient:
 
     @staticmethod
     def _normalize_vehicle_color(value: str | None) -> str | None:
-        normalized = (value or "").strip().lower()
+        raw = (value or "").strip()
+        normalized = raw.lower()
         if not normalized:
             return value
+        candidates = [part.strip() for part in re.split(r"[\/,;|]+", normalized) if part.strip()]
+        if not candidates:
+            candidates = [normalized]
         mapping = {
             "white": "Белый",
             "beliy": "Белый",
+            "ақ": "Белый",
+            "ак": "Белый",
             "белый": "Белый",
             "yellow": "Желтый",
             "zheltyi": "Желтый",
+            "сары": "Желтый",
             "желтый": "Желтый",
             "beige": "Бежевый",
             "beigee": "Бежевый",
             "бежевый": "Бежевый",
             "black": "Черный",
             "chernyi": "Черный",
+            "қара": "Черный",
+            "кара": "Черный",
             "черный": "Черный",
             "light blue": "Голубой",
             "goluboi": "Голубой",
@@ -349,21 +359,30 @@ class YandexFleetClient:
             "gray": "Серый",
             "grey": "Серый",
             "seryi": "Серый",
+            "сұр": "Серый",
+            "сур": "Серый",
             "серый": "Серый",
             "red": "Красный",
             "krasnyi": "Красный",
+            "қызыл": "Красный",
+            "кызыл": "Красный",
             "красный": "Красный",
             "orange": "Оранжевый",
             "oranzhevyi": "Оранжевый",
             "оранжевый": "Оранжевый",
             "blue": "Синий",
             "sinii": "Синий",
+            "көк": "Синий",
+            "kok": "Синий",
             "синий": "Синий",
             "green": "Зеленый",
             "zelenyi": "Зеленый",
+            "жасыл": "Зеленый",
             "зеленый": "Зеленый",
             "brown": "Коричневый",
             "korichnevyi": "Коричневый",
+            "қоңыр": "Коричневый",
+            "konyr": "Коричневый",
             "коричневый": "Коричневый",
             "purple": "Фиолетовый",
             "fioletovyi": "Фиолетовый",
@@ -372,7 +391,10 @@ class YandexFleetClient:
             "rozovyi": "Розовый",
             "розовый": "Розовый",
         }
-        return mapping.get(normalized, value)
+        for candidate in candidates:
+            if candidate in mapping:
+                return mapping[candidate]
+        return mapping.get(normalized, raw)
 
     @staticmethod
     def _map_employment_type(value: str | None) -> str:

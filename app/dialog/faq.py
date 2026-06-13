@@ -80,6 +80,11 @@ TOKEN_SYNONYMS: dict[str, frozenset[str]] = {
     "смс": frozenset({"смс", "sms", "код", "кода"}),
 }
 
+PAYOUT_WAITING_REPLY = (
+    "По моментальным выплатам и выводу денег пока просим проявить терпение и немного подождать. "
+    "Скоро это будет готово."
+)
+
 
 @dataclass(frozen=True)
 class FaqIntentRoute:
@@ -452,6 +457,24 @@ def _looks_like_car_registration_answer(lowered: str) -> bool:
     return False
 
 
+def _looks_like_payout_question(message: str) -> bool:
+    normalized = normalize_text_token(message).strip(" ?!.,")
+    if not normalized:
+        return False
+
+    payout_markers = (
+        "выплат",
+        "вывод",
+        "вывести деньги",
+        "как вывести",
+        "моментальн",
+        "деньги",
+        "когда будут выплаты",
+        "когда вывод",
+    )
+    return any(marker in normalized for marker in payout_markers)
+
+
 def _find_best_trigger_match(lowered: str, kb: dict[str, str]) -> str | None:
     best_score = 0
     best_answer: str | None = None
@@ -510,6 +533,8 @@ def _find_single_faq_answer(message: str, kb: dict[str, str]) -> str | None:
     lowered = normalize_text_token(message).strip(" ?!,.")
     if not lowered:
         return None
+    if _looks_like_payout_question(message):
+        return PAYOUT_WAITING_REPLY
     if _looks_like_registration_field_edit(message):
         return None
     if _looks_like_car_registration_answer(lowered):
@@ -568,15 +593,9 @@ def resolve_faq_replies(message: str, kb: dict[str, str], *, office_address: str
         answer = _find_single_faq_answer(message, kb)
         if answer:
             return answer
-        if looks_like_support_question(message) and office_address:
-            if looks_like_greeting(message):
-                return None
-            return build_office_invite_reply(office_address)
         return None
 
     reply = "\n\n".join(answers)
-    if unanswered_segments and office_address:
-        reply += f"\n\nПо остальному вопросу: {build_office_invite_reply(office_address)}"
     return reply
 
 

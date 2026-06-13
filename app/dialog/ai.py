@@ -26,9 +26,6 @@ from app.dialog.llm_prompt import (
 from app.dialog.prompts import (
     CAR_MODEL_PROMPT,
     PROMPTS,
-    REGISTRATION_START_CTA,
-    WELCOME_GREETING,
-    format_in_flow_reply,
 )
 from app.documents.registration_flow import next_registration_state
 from app.dialog.states import DialogueState
@@ -75,6 +72,9 @@ except ImportError:
     genai = None
 
 logger = get_logger(__name__)
+
+CASUAL_SMALLTALK_REPLY = "Здравствуйте! Я на связи."
+SHORT_SUPPORT_REPLY = "Понял. Уточните, что именно не получается — помогу по шагам."
 
 
 @dataclass
@@ -382,8 +382,14 @@ class DeterministicAIProvider:
                 return field_edit
 
         if current_state == DialogueState.NEW and _looks_like_onboarding_intent(text):
+            normalized = normalize_text_token(text)
+            onboarding_reply = PROMPTS[DialogueState.NEW]
+            if normalize_employment_type(normalized) == "самозанятый" or any(
+                token in normalized for token in ("самозанят", "смз", "штатн", "ип")
+            ):
+                onboarding_reply = "Да, самозанятый подходит. Напишите ФИО полностью."
             return AIResult(
-                PROMPTS[DialogueState.NEW],
+                onboarding_reply,
                 "clarification",
                 {},
                 DialogueState.ASK_FULL_NAME.value,
@@ -453,7 +459,7 @@ class DeterministicAIProvider:
                 if middle_name:
                     extracted["middle_name"] = middle_name
                 return AIResult(
-                    "👋 Отлично! Начинаем регистрацию.",
+                    "рџ‘‹ РћС‚Р»РёС‡РЅРѕ! РќР°С‡РёРЅР°РµРј СЂРµРіРёСЃС‚СЂР°С†РёСЋ.",
                     "registration",
                     extracted,
                     DialogueState.ASK_PHONE.value,
@@ -462,19 +468,19 @@ class DeterministicAIProvider:
                     suggested_next_action=DialogueState.ASK_PHONE.value,
                 )
             return AIResult(
-                f"{WELCOME_GREETING}\n\n{REGISTRATION_START_CTA}",
-                "clarification",
+                CASUAL_SMALLTALK_REPLY,
+                "smalltalk",
                 {},
                 DialogueState.NEW.value,
                 0.55,
-                reasoning_summary="new_state:greeting",
-                suggested_next_action=DialogueState.ASK_FULL_NAME.value,
+                reasoning_summary="new_state:smalltalk",
+                suggested_next_action=DialogueState.NEW.value,
             )
 
         correction_state = _detect_correction_state(current_state, text)
         if correction_state is not None:
             return AIResult(
-                f"Хорошо, исправим этот пункт. {PROMPTS[correction_state]}",
+                f"РҐРѕСЂРѕС€Рѕ, РёСЃРїСЂР°РІРёРј СЌС‚РѕС‚ РїСѓРЅРєС‚. {PROMPTS[correction_state]}",
                 "correction",
                 {},
                 correction_state.value,
@@ -627,7 +633,7 @@ def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallba
             return _fallback_from(fallback, result, "field_edit_invalid_value", errors)
         normalized.normalized_fields = normalized_edit
         normalized.extracted_fields = normalized_edit
-        normalized.reply = normalized.reply or "Хорошо, данные обновил. Проверьте сводку еще раз."
+        normalized.reply = normalized.reply or "РҐРѕСЂРѕС€Рѕ, РґР°РЅРЅС‹Рµ РѕР±РЅРѕРІРёР». РџСЂРѕРІРµСЂСЊС‚Рµ СЃРІРѕРґРєСѓ РµС‰Рµ СЂР°Р·."
         normalized.reasoning_summary = normalized.reasoning_summary or f"field_edit:{normalized.target_field}"
         normalized.suggested_next_action = "confirm_data"
         normalized.next_state = DialogueState.CONFIRM_DATA.value
@@ -747,7 +753,7 @@ def _looks_like_full_name(value: str) -> bool:
         return False
     if any(part.isdigit() for part in parts):
         return False
-    question_words = {"где", "как", "что", "когда", "зачем", "почему", "сколько", "можно", "нужно"}
+    question_words = {"РіРґРµ", "РєР°Рє", "С‡С‚Рѕ", "РєРѕРіРґР°", "Р·Р°С‡РµРј", "РїРѕС‡РµРјСѓ", "СЃРєРѕР»СЊРєРѕ", "РјРѕР¶РЅРѕ", "РЅСѓР¶РЅРѕ"}
     if any(part in question_words for part in parts):
         return False
     return len(parts[0]) >= 2 and len(parts[1]) >= 2
@@ -755,41 +761,48 @@ def _looks_like_full_name(value: str) -> bool:
 
 def _looks_like_onboarding_intent(value: str) -> bool:
     normalized = normalize_text_token(value)
-    if looks_like_support_question(value) and any(
+    employment_hint = normalize_employment_type(normalized)
+    if any(token in normalized for token in ('самозанят', 'смз', 'штатн', 'ип')) or employment_hint == 'самозанятый':
+        if any(
+            keyword in normalized
+            for keyword in ('зарег', 'подключ', 'устро', 'оформ', 'работ', 'парк', 'услов')
+        ):
+            return True
+    if looks_like_support_question(value) and not any(token in normalized for token in ('самозанят', 'смз', 'штатн', 'ип')) and any(
         keyword in normalized
         for keyword in (
-            "сколько",
-            "где",
-            "какая",
-            "какие",
-            "зачем",
-            "почему",
-            "можно",
-            "есть ли",
-            "какой",
-            "как ",
-            "что ",
-            "когда",
+            'сколько',
+            'где',
+            'какая',
+            'какие',
+            'зачем',
+            'почему',
+            'можно',
+            'есть ли',
+            'какой',
+            'как ',
+            'что ',
+            'когда',
         )
     ):
         return False
     triggers = (
-        "привет",
-        "здравствуйте",
-        "добрый день",
-        "салам",
-        "хочу подключиться",
-        "хочу работать",
-        "хочу в парк",
-        "хочу зарегистрироваться",
-        "хочу регистрацию",
-        "как подключиться",
-        "как устроиться",
-        "интересует работа",
-        "нужна работа",
-        "подключение",
-        "регистрация",
-        "подключиться",
+        "РїСЂРёРІРµС‚",
+        "Р·РґСЂР°РІСЃС‚РІСѓР№С‚Рµ",
+        "РґРѕР±СЂС‹Р№ РґРµРЅСЊ",
+        "СЃР°Р»Р°Рј",
+        "С…РѕС‡Сѓ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ",
+        "С…РѕС‡Сѓ СЂР°Р±РѕС‚Р°С‚СЊ",
+        "С…РѕС‡Сѓ РІ РїР°СЂРє",
+        "С…РѕС‡Сѓ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊСЃСЏ",
+        "С…РѕС‡Сѓ СЂРµРіРёСЃС‚СЂР°С†РёСЋ",
+        "РєР°Рє РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ",
+        "РєР°Рє СѓСЃС‚СЂРѕРёС‚СЊСЃСЏ",
+        "РёРЅС‚РµСЂРµСЃСѓРµС‚ СЂР°Р±РѕС‚Р°",
+        "РЅСѓР¶РЅР° СЂР°Р±РѕС‚Р°",
+        "РїРѕРґРєР»СЋС‡РµРЅРёРµ",
+        "СЂРµРіРёСЃС‚СЂР°С†РёСЏ",
+        "РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ",
     )
     return any(trigger in normalized for trigger in triggers)
 
@@ -855,7 +868,7 @@ def _resolve_support_during_registration(
         return faq_reply
 
     if looks_like_support_question(text):
-        return build_office_invite_reply(get_settings().public_site_address)
+        return SHORT_SUPPORT_REPLY
     return None
 
 
@@ -916,7 +929,7 @@ def _try_registration_field_extract(
         iin_errors = validate_kz_iin(normalized_iin)
         if iin_errors:
             return AIResult(
-                "ИИН выглядит некорректным. Проверьте 12 цифр и дату рождения, зашитую в ИИН, затем отправьте ИИН еще раз.",
+                "РРРќ РІС‹РіР»СЏРґРёС‚ РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Рј. РџСЂРѕРІРµСЂСЊС‚Рµ 12 С†РёС„СЂ Рё РґР°С‚Сѓ СЂРѕР¶РґРµРЅРёСЏ, Р·Р°С€РёС‚СѓСЋ РІ РРРќ, Р·Р°С‚РµРј РѕС‚РїСЂР°РІСЊС‚Рµ РРРќ РµС‰Рµ СЂР°Р·.",
                 "clarification",
                 {},
                 state_value,
@@ -1138,10 +1151,8 @@ def _try_mixed_field_and_support(
     if field_extract.intent != "registration" or not field_extract.extracted_fields:
         return None
 
-    next_state = DialogueState(field_extract.next_state or current_state.value)
-    reply = format_in_flow_reply(support_reply, next_state)
     return AIResult(
-        reply,
+        support_reply,
         "registration",
         field_extract.extracted_fields,
         field_extract.next_state,
@@ -1213,68 +1224,68 @@ def _extract_safe_field_answer(current_state: DialogueState, text: str, driver: 
         return {"driver_license_number": text.strip()}
     if current_state == DialogueState.ASK_EMPLOYMENT_TYPE:
         normalized = normalize_employment_type(text)
-        if normalized in {"штатный", "самозанятый", "ип"} or normalized != text.strip():
+        if normalized in {"С€С‚Р°С‚РЅС‹Р№", "СЃР°РјРѕР·Р°РЅСЏС‚С‹Р№", "РёРї"} or normalized != text.strip():
             return {"employment_type": normalized}
     return {}
 
 
 def _clarification_reply(current_state: DialogueState) -> str:
     clean_custom = {
-        DialogueState.ASK_FULL_NAME: "Напишите ваше ФИО полностью. Например: Абай Аят Жаныбекулы.",
-        DialogueState.ASK_PHONE: "Укажите контактный номер телефона в формате +7XXXXXXXXXX.",
-        DialogueState.ASK_CITY: "Напишите только город, в котором будете работать. Например: Астана.",
-        DialogueState.ASK_ADDRESS: "📍 Укажите адрес проживания или регистрации. Например: пр. Республики 12, Астана.",
-        DialogueState.ASK_IIN: "Укажите ИИН из 12 цифр.",
-        DialogueState.ASK_BIRTH_DATE: "Укажите дату рождения в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "Укажите дату начала водительского стажа в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_CAR_BRAND: "Напишите точную марку автомобиля. Например: Toyota, Mercedes, Haval, Changan, Hyundai.",
+        DialogueState.ASK_FULL_NAME: "РќР°РїРёС€РёС‚Рµ РІР°С€Рµ Р¤РРћ РїРѕР»РЅРѕСЃС‚СЊСЋ. РќР°РїСЂРёРјРµСЂ: РђР±Р°Р№ РђСЏС‚ Р–Р°РЅС‹Р±РµРєСѓР»С‹.",
+        DialogueState.ASK_PHONE: "РЈРєР°Р¶РёС‚Рµ РєРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ С‚РµР»РµС„РѕРЅР° РІ С„РѕСЂРјР°С‚Рµ +7XXXXXXXXXX.",
+        DialogueState.ASK_CITY: "РќР°РїРёС€РёС‚Рµ С‚РѕР»СЊРєРѕ РіРѕСЂРѕРґ, РІ РєРѕС‚РѕСЂРѕРј Р±СѓРґРµС‚Рµ СЂР°Р±РѕС‚Р°С‚СЊ. РќР°РїСЂРёРјРµСЂ: РђСЃС‚Р°РЅР°.",
+        DialogueState.ASK_ADDRESS: "рџ“Ќ РЈРєР°Р¶РёС‚Рµ Р°РґСЂРµСЃ РїСЂРѕР¶РёРІР°РЅРёСЏ РёР»Рё СЂРµРіРёСЃС‚СЂР°С†РёРё. РќР°РїСЂРёРјРµСЂ: РїСЂ. Р РµСЃРїСѓР±Р»РёРєРё 12, РђСЃС‚Р°РЅР°.",
+        DialogueState.ASK_IIN: "РЈРєР°Р¶РёС‚Рµ РРРќ РёР· 12 С†РёС„СЂ.",
+        DialogueState.ASK_BIRTH_DATE: "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ СЂРѕР¶РґРµРЅРёСЏ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ РЅР°С‡Р°Р»Р° РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СЃС‚Р°Р¶Р° РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_CAR_BRAND: "РќР°РїРёС€РёС‚Рµ С‚РѕС‡РЅСѓСЋ РјР°СЂРєСѓ Р°РІС‚РѕРјРѕР±РёР»СЏ. РќР°РїСЂРёРјРµСЂ: Toyota, Mercedes, Haval, Changan, Hyundai.",
         DialogueState.ASK_CAR_MODEL: CAR_MODEL_PROMPT,
-        DialogueState.ASK_CAR_YEAR: "Укажите год выпуска автомобиля. Например: 2018.",
-        DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля без лишних пояснений.",
-        DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля. Например: белый.",
-        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Укажите номер техпаспорта (СТС) автомобиля, как в документе. Например: AA12345678.",
+        DialogueState.ASK_CAR_YEAR: "РЈРєР°Р¶РёС‚Рµ РіРѕРґ РІС‹РїСѓСЃРєР° Р°РІС‚РѕРјРѕР±РёР»СЏ. РќР°РїСЂРёРјРµСЂ: 2018.",
+        DialogueState.ASK_CAR_PLATE: "РЈРєР°Р¶РёС‚Рµ РіРѕСЃРЅРѕРјРµСЂ Р°РІС‚РѕРјРѕР±РёР»СЏ Р±РµР· Р»РёС€РЅРёС… РїРѕСЏСЃРЅРµРЅРёР№.",
+        DialogueState.ASK_CAR_COLOR: "РЈРєР°Р¶РёС‚Рµ С†РІРµС‚ Р°РІС‚РѕРјРѕР±РёР»СЏ. РќР°РїСЂРёРјРµСЂ: Р±РµР»С‹Р№.",
+        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "РЈРєР°Р¶РёС‚Рµ РЅРѕРјРµСЂ С‚РµС…РїР°СЃРїРѕСЂС‚Р° (РЎРўРЎ) Р°РІС‚РѕРјРѕР±РёР»СЏ, РєР°Рє РІ РґРѕРєСѓРјРµРЅС‚Рµ. РќР°РїСЂРёРјРµСЂ: AA12345678.",
         DialogueState.ASK_DRIVER_LICENSE_NUMBER: (
-            "Напишите серию и номер водительского удостоверения, как в документе "
-            "(например CQ 981709). Серию и номер можно через пробел."
+            "РќР°РїРёС€РёС‚Рµ СЃРµСЂРёСЋ Рё РЅРѕРјРµСЂ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ, РєР°Рє РІ РґРѕРєСѓРјРµРЅС‚Рµ "
+            "(РЅР°РїСЂРёРјРµСЂ CQ 981709). РЎРµСЂРёСЋ Рё РЅРѕРјРµСЂ РјРѕР¶РЅРѕ С‡РµСЂРµР· РїСЂРѕР±РµР»."
         ),
-        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_EMPLOYMENT_TYPE: "Укажите условие работы: штатный, самозанятый или ИП.",
-        DialogueState.ASK_HIRED_AT: "Укажите дату принятия в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_HEARING_IMPAIRED: "Ответьте коротко: да или нет.",
-        DialogueState.CONFIRM_DATA: "Напишите, какое поле исправить и на какое значение. Например: исправь город на Алматы.",
+        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ РІС‹РґР°С‡Рё РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "РЈРєР°Р¶РёС‚Рµ СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ РґРѕ РґР°С‚С‹ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_EMPLOYMENT_TYPE: "РЈРєР°Р¶РёС‚Рµ СѓСЃР»РѕРІРёРµ СЂР°Р±РѕС‚С‹: С€С‚Р°С‚РЅС‹Р№, СЃР°РјРѕР·Р°РЅСЏС‚С‹Р№ РёР»Рё РРџ.",
+        DialogueState.ASK_HIRED_AT: "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ РїСЂРёРЅСЏС‚РёСЏ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_HEARING_IMPAIRED: "РћС‚РІРµС‚СЊС‚Рµ РєРѕСЂРѕС‚РєРѕ: РґР° РёР»Рё РЅРµС‚.",
+        DialogueState.CONFIRM_DATA: "РќР°РїРёС€РёС‚Рµ, РєР°РєРѕРµ РїРѕР»Рµ РёСЃРїСЂР°РІРёС‚СЊ Рё РЅР° РєР°РєРѕРµ Р·РЅР°С‡РµРЅРёРµ. РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РіРѕСЂРѕРґ РЅР° РђР»РјР°С‚С‹.",
     }
     if current_state in clean_custom:
         return clean_custom[current_state]
     custom = {
-        DialogueState.ASK_FULL_NAME: "Напишите ваше ФИО полностью. Например: Абай Аят Жаныбекулы.",
-        DialogueState.ASK_PHONE: "Укажите контактный номер телефона в формате +7XXXXXXXXXX.",
-        DialogueState.ASK_CITY: "Напишите только город, в котором будете работать. Например: Астана.",
-        DialogueState.ASK_ADDRESS: "📍 Укажите адрес проживания или регистрации. Например: пр. Республики 12, Астана.",
-        DialogueState.ASK_IIN: "Укажите ИИН из 12 цифр.",
-        DialogueState.ASK_BIRTH_DATE: "Укажите дату рождения в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "Укажите дату начала водительского стажа в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_CAR_BRAND: "Напишите марку автомобиля. Например: Toyota.",
+        DialogueState.ASK_FULL_NAME: "РќР°РїРёС€РёС‚Рµ РІР°С€Рµ Р¤РРћ РїРѕР»РЅРѕСЃС‚СЊСЋ. РќР°РїСЂРёРјРµСЂ: РђР±Р°Р№ РђСЏС‚ Р–Р°РЅС‹Р±РµРєСѓР»С‹.",
+        DialogueState.ASK_PHONE: "РЈРєР°Р¶РёС‚Рµ РєРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ С‚РµР»РµС„РѕРЅР° РІ С„РѕСЂРјР°С‚Рµ +7XXXXXXXXXX.",
+        DialogueState.ASK_CITY: "РќР°РїРёС€РёС‚Рµ С‚РѕР»СЊРєРѕ РіРѕСЂРѕРґ, РІ РєРѕС‚РѕСЂРѕРј Р±СѓРґРµС‚Рµ СЂР°Р±РѕС‚Р°С‚СЊ. РќР°РїСЂРёРјРµСЂ: РђСЃС‚Р°РЅР°.",
+        DialogueState.ASK_ADDRESS: "рџ“Ќ РЈРєР°Р¶РёС‚Рµ Р°РґСЂРµСЃ РїСЂРѕР¶РёРІР°РЅРёСЏ РёР»Рё СЂРµРіРёСЃС‚СЂР°С†РёРё. РќР°РїСЂРёРјРµСЂ: РїСЂ. Р РµСЃРїСѓР±Р»РёРєРё 12, РђСЃС‚Р°РЅР°.",
+        DialogueState.ASK_IIN: "РЈРєР°Р¶РёС‚Рµ РРРќ РёР· 12 С†РёС„СЂ.",
+        DialogueState.ASK_BIRTH_DATE: "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ СЂРѕР¶РґРµРЅРёСЏ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ РЅР°С‡Р°Р»Р° РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СЃС‚Р°Р¶Р° РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_CAR_BRAND: "РќР°РїРёС€РёС‚Рµ РјР°СЂРєСѓ Р°РІС‚РѕРјРѕР±РёР»СЏ. РќР°РїСЂРёРјРµСЂ: Toyota.",
         DialogueState.ASK_CAR_MODEL: (
-            "Нужно название модели из документов, как Camry, Rio, S-Class или X5. "
-            "Код кузова (w221, e90) лучше не писать — укажите модель целиком."
+            "РќСѓР¶РЅРѕ РЅР°Р·РІР°РЅРёРµ РјРѕРґРµР»Рё РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ, РєР°Рє Camry, Rio, S-Class РёР»Рё X5. "
+            "РљРѕРґ РєСѓР·РѕРІР° (w221, e90) Р»СѓС‡С€Рµ РЅРµ РїРёСЃР°С‚СЊ вЂ” СѓРєР°Р¶РёС‚Рµ РјРѕРґРµР»СЊ С†РµР»РёРєРѕРј."
         ),
-        DialogueState.ASK_CAR_YEAR: "Укажите год выпуска автомобиля. Например: 2018.",
-        DialogueState.ASK_CAR_PLATE: "Укажите госномер автомобиля без лишних пояснений.",
-        DialogueState.ASK_CAR_COLOR: "Укажите цвет автомобиля. Например: белый.",
-        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Укажите номер техпаспорта (СТС) автомобиля, как в документе. Например: AA12345678.",
+        DialogueState.ASK_CAR_YEAR: "РЈРєР°Р¶РёС‚Рµ РіРѕРґ РІС‹РїСѓСЃРєР° Р°РІС‚РѕРјРѕР±РёР»СЏ. РќР°РїСЂРёРјРµСЂ: 2018.",
+        DialogueState.ASK_CAR_PLATE: "РЈРєР°Р¶РёС‚Рµ РіРѕСЃРЅРѕРјРµСЂ Р°РІС‚РѕРјРѕР±РёР»СЏ Р±РµР· Р»РёС€РЅРёС… РїРѕСЏСЃРЅРµРЅРёР№.",
+        DialogueState.ASK_CAR_COLOR: "РЈРєР°Р¶РёС‚Рµ С†РІРµС‚ Р°РІС‚РѕРјРѕР±РёР»СЏ. РќР°РїСЂРёРјРµСЂ: Р±РµР»С‹Р№.",
+        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "РЈРєР°Р¶РёС‚Рµ РЅРѕРјРµСЂ С‚РµС…РїР°СЃРїРѕСЂС‚Р° (РЎРўРЎ) Р°РІС‚РѕРјРѕР±РёР»СЏ, РєР°Рє РІ РґРѕРєСѓРјРµРЅС‚Рµ. РќР°РїСЂРёРјРµСЂ: AA12345678.",
         DialogueState.ASK_DRIVER_LICENSE_NUMBER: (
-            "Напишите серию и номер водительского удостоверения, как в документе "
-            "(например CQ 981709). Серию и номер можно через пробел."
+            "РќР°РїРёС€РёС‚Рµ СЃРµСЂРёСЋ Рё РЅРѕРјРµСЂ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ, РєР°Рє РІ РґРѕРєСѓРјРµРЅС‚Рµ "
+            "(РЅР°РїСЂРёРјРµСЂ CQ 981709). РЎРµСЂРёСЋ Рё РЅРѕРјРµСЂ РјРѕР¶РЅРѕ С‡РµСЂРµР· РїСЂРѕР±РµР»."
         ),
-        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Укажите дату выдачи водительского удостоверения в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Укажите срок действия водительского удостоверения до даты в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_EMPLOYMENT_TYPE: "Укажите условие работы: штатный, самозанятый или ИП.",
-        DialogueState.ASK_HIRED_AT: "Укажите дату принятия в формате ДД.ММ.ГГГГ.",
-        DialogueState.ASK_HEARING_IMPAIRED: "Ответьте коротко: да или нет.",
-        DialogueState.CONFIRM_DATA: "Напишите, какое поле исправить и на какое значение. Например: исправь город на Алматы.",
+        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ РІС‹РґР°С‡Рё РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "РЈРєР°Р¶РёС‚Рµ СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ РґРѕ РґР°С‚С‹ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_EMPLOYMENT_TYPE: "РЈРєР°Р¶РёС‚Рµ СѓСЃР»РѕРІРёРµ СЂР°Р±РѕС‚С‹: С€С‚Р°С‚РЅС‹Р№, СЃР°РјРѕР·Р°РЅСЏС‚С‹Р№ РёР»Рё РРџ.",
+        DialogueState.ASK_HIRED_AT: "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ РїСЂРёРЅСЏС‚РёСЏ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.",
+        DialogueState.ASK_HEARING_IMPAIRED: "РћС‚РІРµС‚СЊС‚Рµ РєРѕСЂРѕС‚РєРѕ: РґР° РёР»Рё РЅРµС‚.",
+        DialogueState.CONFIRM_DATA: "РќР°РїРёС€РёС‚Рµ, РєР°РєРѕРµ РїРѕР»Рµ РёСЃРїСЂР°РІРёС‚СЊ Рё РЅР° РєР°РєРѕРµ Р·РЅР°С‡РµРЅРёРµ. РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РіРѕСЂРѕРґ РЅР° РђР»РјР°С‚С‹.",
     }
-    return custom.get(current_state, PROMPTS.get(current_state, "Пожалуйста, ответьте на текущий вопрос."))
+    return custom.get(current_state, PROMPTS.get(current_state, "РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РѕС‚РІРµС‚СЊС‚Рµ РЅР° С‚РµРєСѓС‰РёР№ РІРѕРїСЂРѕСЃ."))
 
 
 def _should_use_llm_faq_assist(message: str, backend: AIResult) -> bool:
@@ -1313,17 +1324,14 @@ def _reply_is_bare_step_prompt(reply: str, state_value: str) -> bool:
 
 def _unsupported_message_reply(current_state: DialogueState, text: str) -> str:
     if looks_like_support_question(text):
-        reply = build_office_invite_reply(get_settings().public_site_address)
-        if current_state == DialogueState.NEW:
-            return f"{reply}\n\n{REGISTRATION_START_CTA}"
-        return reply
+        return SHORT_SUPPORT_REPLY
+    if current_state in {DialogueState.NEW, DialogueState.COMPLETED}:
+        return CASUAL_SMALLTALK_REPLY
     return _clarification_reply(current_state)
 
 
 def _office_fallback_result(state: str, _message: str) -> AIResult:
-    reply = build_office_invite_reply(get_settings().public_site_address)
-    if state == DialogueState.NEW.value:
-        reply = f"{reply}\n\n{REGISTRATION_START_CTA}"
+    reply = SHORT_SUPPORT_REPLY
     return AIResult(
         reply,
         "help",
@@ -1361,7 +1369,7 @@ def _build_greeting_reply(current_state: DialogueState, text: str) -> str | None
     if not looks_like_greeting(text):
         return None
     if current_state == DialogueState.NEW:
-        return f"{WELCOME_GREETING}\n\n{REGISTRATION_START_CTA}"
+        return CASUAL_SMALLTALK_REPLY
     if current_state in {
         DialogueState.CONFIRM_DATA,
         DialogueState.READY_TO_SEND_YANDEX,
@@ -1370,7 +1378,7 @@ def _build_greeting_reply(current_state: DialogueState, text: str) -> str | None
         DialogueState.COMPLETED,
     }:
         return None
-    return "👋 Здравствуйте! На связи — помогу с регистрацией."
+    return CASUAL_SMALLTALK_REPLY
 
 
 def _registration_side_reply(current_state: DialogueState, text: str, knowledge_base: dict[str, str]) -> str | None:
@@ -1394,10 +1402,10 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
         if greeting:
             return greeting
 
-    if any(marker in normalized for marker in ("можно по другому", "другой вопрос", "не про это", "потом ответ")):
+    if any(marker in normalized for marker in ("РјРѕР¶РЅРѕ РїРѕ РґСЂСѓРіРѕРјСѓ", "РґСЂСѓРіРѕР№ РІРѕРїСЂРѕСЃ", "РЅРµ РїСЂРѕ СЌС‚Рѕ", "РїРѕС‚РѕРј РѕС‚РІРµС‚")):
         return (
-            "💬 Спросите про условия, офис, документы или Яндекс Про — отвечу. "
-            "Продолжаем регистрацию с текущего шага."
+            "рџ’¬ РЎРїСЂРѕСЃРёС‚Рµ РїСЂРѕ СѓСЃР»РѕРІРёСЏ, РѕС„РёСЃ, РґРѕРєСѓРјРµРЅС‚С‹ РёР»Рё РЇРЅРґРµРєСЃ РџСЂРѕ вЂ” РѕС‚РІРµС‡Сѓ. "
+            "РџСЂРѕРґРѕР»Р¶Р°РµРј СЂРµРіРёСЃС‚СЂР°С†РёСЋ СЃ С‚РµРєСѓС‰РµРіРѕ С€Р°РіР°."
         )
 
     step_help = _build_step_help_reply(current_state, text)
@@ -1408,75 +1416,75 @@ def _registration_side_reply(current_state: DialogueState, text: str, knowledge_
     if faq_answer:
         return faq_answer
 
-    return build_office_invite_reply(get_settings().public_site_address)
+    return SHORT_SUPPORT_REPLY
 
 
 def _build_step_help_reply(current_state: DialogueState, text: str) -> str | None:
     normalized = normalize_text_token(text)
     help_markers = (
-        "зачем",
-        "почему",
-        "для чего",
-        "что такое",
-        "что это",
-        "объясни",
-        "объясните",
-        "поясни",
-        "поясните",
-        "не понял",
-        "не поняла",
-        "не понимаю",
-        "не понимаю зачем",
-        "что нужно",
-        "что писать",
-        "что указать",
-        "что вводить",
-        "какой формат",
-        "пример",
-        "помогите",
-        "помоги",
+        "Р·Р°С‡РµРј",
+        "РїРѕС‡РµРјСѓ",
+        "РґР»СЏ С‡РµРіРѕ",
+        "С‡С‚Рѕ С‚Р°РєРѕРµ",
+        "С‡С‚Рѕ СЌС‚Рѕ",
+        "РѕР±СЉСЏСЃРЅРё",
+        "РѕР±СЉСЏСЃРЅРёС‚Рµ",
+        "РїРѕСЏСЃРЅРё",
+        "РїРѕСЏСЃРЅРёС‚Рµ",
+        "РЅРµ РїРѕРЅСЏР»",
+        "РЅРµ РїРѕРЅСЏР»Р°",
+        "РЅРµ РїРѕРЅРёРјР°СЋ",
+        "РЅРµ РїРѕРЅРёРјР°СЋ Р·Р°С‡РµРј",
+        "С‡С‚Рѕ РЅСѓР¶РЅРѕ",
+        "С‡С‚Рѕ РїРёСЃР°С‚СЊ",
+        "С‡С‚Рѕ СѓРєР°Р·Р°С‚СЊ",
+        "С‡С‚Рѕ РІРІРѕРґРёС‚СЊ",
+        "РєР°РєРѕР№ С„РѕСЂРјР°С‚",
+        "РїСЂРёРјРµСЂ",
+        "РїРѕРјРѕРіРёС‚Рµ",
+        "РїРѕРјРѕРіРё",
         "help",
     )
     if not any(marker in normalized for marker in help_markers):
         return None
 
     explanations = {
-        DialogueState.ASK_FULL_NAME: "Нужно полное ФИО, как в удостоверении личности — фамилия, имя и отчество.",
-        DialogueState.ASK_PHONE: "Контактный номер нужен для связи с парком и для входа в Яндекс Про.",
-        DialogueState.ASK_CITY: "Укажите город, где планируете работать — от этого зависят условия и поддержка.",
-        DialogueState.ASK_ADDRESS: "Адрес нужен для анкеты водителя в системе парка.",
+        DialogueState.ASK_FULL_NAME: "РќСѓР¶РЅРѕ РїРѕР»РЅРѕРµ Р¤РРћ, РєР°Рє РІ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёРё Р»РёС‡РЅРѕСЃС‚Рё вЂ” С„Р°РјРёР»РёСЏ, РёРјСЏ Рё РѕС‚С‡РµСЃС‚РІРѕ.",
+        DialogueState.ASK_PHONE: "РљРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ РЅСѓР¶РµРЅ РґР»СЏ СЃРІСЏР·Рё СЃ РїР°СЂРєРѕРј Рё РґР»СЏ РІС…РѕРґР° РІ РЇРЅРґРµРєСЃ РџСЂРѕ.",
+        DialogueState.ASK_CITY: "РЈРєР°Р¶РёС‚Рµ РіРѕСЂРѕРґ, РіРґРµ РїР»Р°РЅРёСЂСѓРµС‚Рµ СЂР°Р±РѕС‚Р°С‚СЊ вЂ” РѕС‚ СЌС‚РѕРіРѕ Р·Р°РІРёСЃСЏС‚ СѓСЃР»РѕРІРёСЏ Рё РїРѕРґРґРµСЂР¶РєР°.",
+        DialogueState.ASK_ADDRESS: "РђРґСЂРµСЃ РЅСѓР¶РµРЅ РґР»СЏ Р°РЅРєРµС‚С‹ РІРѕРґРёС‚РµР»СЏ РІ СЃРёСЃС‚РµРјРµ РїР°СЂРєР°.",
         DialogueState.ASK_IIN: (
-            "ИИН нужен для регистрации в таксопарке и Яндекс Про — это стандартное требование для водителей в Казахстане. "
-            "Укажите 12 цифр с удостоверения личности."
+            "РРРќ РЅСѓР¶РµРЅ РґР»СЏ СЂРµРіРёСЃС‚СЂР°С†РёРё РІ С‚Р°РєСЃРѕРїР°СЂРєРµ Рё РЇРЅРґРµРєСЃ РџСЂРѕ вЂ” СЌС‚Рѕ СЃС‚Р°РЅРґР°СЂС‚РЅРѕРµ С‚СЂРµР±РѕРІР°РЅРёРµ РґР»СЏ РІРѕРґРёС‚РµР»РµР№ РІ РљР°Р·Р°С…СЃС‚Р°РЅРµ. "
+            "РЈРєР°Р¶РёС‚Рµ 12 С†РёС„СЂ СЃ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ Р»РёС‡РЅРѕСЃС‚Рё."
         ),
-        DialogueState.ASK_BIRTH_DATE: "Дата рождения должна совпадать с документами. Формат: ДД.ММ.ГГГГ.",
+        DialogueState.ASK_BIRTH_DATE: "Р”Р°С‚Р° СЂРѕР¶РґРµРЅРёСЏ РґРѕР»Р¶РЅР° СЃРѕРІРїР°РґР°С‚СЊ СЃ РґРѕРєСѓРјРµРЅС‚Р°РјРё. Р¤РѕСЂРјР°С‚: Р”Р”.РњРњ.Р“Р“Р“Р“.",
         DialogueState.ASK_DRIVING_EXPERIENCE_SINCE: (
-            "Укажите дату, когда начали водить — обычно это поле «стаж с» в водительском удостоверении, "
-            "а не дата рождения."
+            "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ, РєРѕРіРґР° РЅР°С‡Р°Р»Рё РІРѕРґРёС‚СЊ вЂ” РѕР±С‹С‡РЅРѕ СЌС‚Рѕ РїРѕР»Рµ В«СЃС‚Р°Р¶ СЃВ» РІ РІРѕРґРёС‚РµР»СЊСЃРєРѕРј СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёРё, "
+            "Р° РЅРµ РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ."
         ),
-        DialogueState.ASK_CAR_BRAND: "Напишите марку автомобиля, на котором будете работать.",
+        DialogueState.ASK_CAR_BRAND: "РќР°РїРёС€РёС‚Рµ РјР°СЂРєСѓ Р°РІС‚РѕРјРѕР±РёР»СЏ, РЅР° РєРѕС‚РѕСЂРѕРј Р±СѓРґРµС‚Рµ СЂР°Р±РѕС‚Р°С‚СЊ.",
         DialogueState.ASK_CAR_MODEL: CAR_MODEL_PROMPT,
-        DialogueState.ASK_CAR_YEAR: "Год выпуска автомобиля — как в техпаспорте.",
-        DialogueState.ASK_CAR_PLATE: "Госномер автомобиля без лишних слов, как на номерном знаке.",
-        DialogueState.ASK_CAR_COLOR: "Цвет автомобиля — как в документах, например белый или чёрный.",
-        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "Номер СТС (техпаспорта) — как в документе на автомобиль.",
+        DialogueState.ASK_CAR_YEAR: "Р“РѕРґ РІС‹РїСѓСЃРєР° Р°РІС‚РѕРјРѕР±РёР»СЏ вЂ” РєР°Рє РІ С‚РµС…РїР°СЃРїРѕСЂС‚Рµ.",
+        DialogueState.ASK_CAR_PLATE: "Р“РѕСЃРЅРѕРјРµСЂ Р°РІС‚РѕРјРѕР±РёР»СЏ Р±РµР· Р»РёС€РЅРёС… СЃР»РѕРІ, РєР°Рє РЅР° РЅРѕРјРµСЂРЅРѕРј Р·РЅР°РєРµ.",
+        DialogueState.ASK_CAR_COLOR: "Р¦РІРµС‚ Р°РІС‚РѕРјРѕР±РёР»СЏ вЂ” РєР°Рє РІ РґРѕРєСѓРјРµРЅС‚Р°С…, РЅР°РїСЂРёРјРµСЂ Р±РµР»С‹Р№ РёР»Рё С‡С‘СЂРЅС‹Р№.",
+        DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE: "РќРѕРјРµСЂ РЎРўРЎ (С‚РµС…РїР°СЃРїРѕСЂС‚Р°) вЂ” РєР°Рє РІ РґРѕРєСѓРјРµРЅС‚Рµ РЅР° Р°РІС‚РѕРјРѕР±РёР»СЊ.",
         DialogueState.ASK_DRIVER_LICENSE_NUMBER: (
-            "Серия и номер водительского удостоверения, как в документе. "
-            "Можно через пробел, например CQ 981709."
+            "РЎРµСЂРёСЏ Рё РЅРѕРјРµСЂ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ, РєР°Рє РІ РґРѕРєСѓРјРµРЅС‚Рµ. "
+            "РњРѕР¶РЅРѕ С‡РµСЂРµР· РїСЂРѕР±РµР», РЅР°РїСЂРёРјРµСЂ CQ 981709."
         ),
-        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Дата выдачи прав — на лицевой стороне ВУ.",
-        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "Срок действия прав — дата «действует до» на ВУ.",
-        DialogueState.ASK_EMPLOYMENT_TYPE: "Условие работы: штатный, самозанятый или ИП — как договоритесь с парком.",
+        DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE: "Р”Р°С‚Р° РІС‹РґР°С‡Рё РїСЂР°РІ вЂ” РЅР° Р»РёС†РµРІРѕР№ СЃС‚РѕСЂРѕРЅРµ Р’РЈ.",
+        DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT: "РЎСЂРѕРє РґРµР№СЃС‚РІРёСЏ РїСЂР°РІ вЂ” РґР°С‚Р° В«РґРµР№СЃС‚РІСѓРµС‚ РґРѕВ» РЅР° Р’РЈ.",
+        DialogueState.ASK_EMPLOYMENT_TYPE: "РЈСЃР»РѕРІРёРµ СЂР°Р±РѕС‚С‹: С€С‚Р°С‚РЅС‹Р№, СЃР°РјРѕР·Р°РЅСЏС‚С‹Р№ РёР»Рё РРџ вЂ” РєР°Рє РґРѕРіРѕРІРѕСЂРёС‚РµСЃСЊ СЃ РїР°СЂРєРѕРј.",
         DialogueState.ASK_HIRED_AT: (
-            "Дата принятия в парк — обычно сегодняшняя дата или день подключения. "
-            "Не путайте со сроком действия прав."
+            "Р”Р°С‚Р° РїСЂРёРЅСЏС‚РёСЏ РІ РїР°СЂРє вЂ” РѕР±С‹С‡РЅРѕ СЃРµРіРѕРґРЅСЏС€РЅСЏСЏ РґР°С‚Р° РёР»Рё РґРµРЅСЊ РїРѕРґРєР»СЋС‡РµРЅРёСЏ. "
+            "РќРµ РїСѓС‚Р°Р№С‚Рµ СЃРѕ СЃСЂРѕРєРѕРј РґРµР№СЃС‚РІРёСЏ РїСЂР°РІ."
         ),
-        DialogueState.ASK_HEARING_IMPAIRED: "Это нужно для корректной настройки профиля. Ответьте: да или нет.",
-        DialogueState.ASK_DRIVER_LICENSE_FRONT: "Отправьте чёткое фото лицевой стороны водительского удостоверения.",
-        DialogueState.ASK_DRIVER_LICENSE_BACK: "Отправьте чёткое фото обратной стороны водительского удостоверения.",
-        DialogueState.ASK_ID_CARD: "Отправьте фото удостоверения личности.",
-        DialogueState.ASK_VEHICLE_REGISTRATION_DOC: "Отправьте фото техпаспорта или СТС автомобиля.",
-        DialogueState.ASK_SELFIE_WITH_LICENSE: "Отправьте селфи с водительским удостоверением в руках.",
+        DialogueState.ASK_HEARING_IMPAIRED: "Р­С‚Рѕ РЅСѓР¶РЅРѕ РґР»СЏ РєРѕСЂСЂРµРєС‚РЅРѕР№ РЅР°СЃС‚СЂРѕР№РєРё РїСЂРѕС„РёР»СЏ. РћС‚РІРµС‚СЊС‚Рµ: РґР° РёР»Рё РЅРµС‚.",
+        DialogueState.ASK_DRIVER_LICENSE_FRONT: "РћС‚РїСЂР°РІСЊС‚Рµ С‡С‘С‚РєРѕРµ С„РѕС‚Рѕ Р»РёС†РµРІРѕР№ СЃС‚РѕСЂРѕРЅС‹ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ.",
+        DialogueState.ASK_DRIVER_LICENSE_BACK: "РћС‚РїСЂР°РІСЊС‚Рµ С‡С‘С‚РєРѕРµ С„РѕС‚Рѕ РѕР±СЂР°С‚РЅРѕР№ СЃС‚РѕСЂРѕРЅС‹ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ.",
+        DialogueState.ASK_ID_CARD: "РћС‚РїСЂР°РІСЊС‚Рµ С„РѕС‚Рѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ Р»РёС‡РЅРѕСЃС‚Рё.",
+        DialogueState.ASK_VEHICLE_REGISTRATION_DOC: "РћС‚РїСЂР°РІСЊС‚Рµ С„РѕС‚Рѕ С‚РµС…РїР°СЃРїРѕСЂС‚Р° РёР»Рё РЎРўРЎ Р°РІС‚РѕРјРѕР±РёР»СЏ.",
+        DialogueState.ASK_SELFIE_WITH_LICENSE: "РћС‚РїСЂР°РІСЊС‚Рµ СЃРµР»С„Рё СЃ РІРѕРґРёС‚РµР»СЊСЃРєРёРј СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёРµРј РІ СЂСѓРєР°С….",
     }
     explanation = explanations.get(current_state)
     if not explanation:
@@ -1486,40 +1494,40 @@ def _build_step_help_reply(current_state: DialogueState, text: str) -> str | Non
 
 def _validation_error_reply(current_state: DialogueState, errors: list[str]) -> str:
     if current_state == DialogueState.ASK_IIN or "invalid_iin_birth_date" in errors or "invalid_iin_length" in errors:
-        return "ИИН выглядит некорректным. Проверьте 12 цифр и отправьте реальный ИИН еще раз."
+        return "РРРќ РІС‹РіР»СЏРґРёС‚ РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Рј. РџСЂРѕРІРµСЂСЊС‚Рµ 12 С†РёС„СЂ Рё РѕС‚РїСЂР°РІСЊС‚Рµ СЂРµР°Р»СЊРЅС‹Р№ РРРќ РµС‰Рµ СЂР°Р·."
     if "driver_underage" in errors:
-        return "Дата рождения указывает на возраст младше 18 лет. Проверьте дату рождения и отправьте ее еще раз в формате ДД.ММ.ГГГГ."
+        return "Р”Р°С‚Р° СЂРѕР¶РґРµРЅРёСЏ СѓРєР°Р·С‹РІР°РµС‚ РЅР° РІРѕР·СЂР°СЃС‚ РјР»Р°РґС€Рµ 18 Р»РµС‚. РџСЂРѕРІРµСЂСЊС‚Рµ РґР°С‚Сѓ СЂРѕР¶РґРµРЅРёСЏ Рё РѕС‚РїСЂР°РІСЊС‚Рµ РµРµ РµС‰Рµ СЂР°Р· РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“."
     if "birth_date_in_future" in errors:
-        return "Дата рождения не может быть в будущем. Отправьте корректную дату в формате ДД.ММ.ГГГГ."
+        return "Р”Р°С‚Р° СЂРѕР¶РґРµРЅРёСЏ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РІ Р±СѓРґСѓС‰РµРј. РћС‚РїСЂР°РІСЊС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ РґР°С‚Сѓ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“."
     if "driving_experience_too_early" in errors or "driving_experience_before_birth" in errors:
         return (
-            "Дата начала стажа выглядит невозможной. "
-            "Укажите дату из водительского удостоверения, а не дату рождения."
+            "Р”Р°С‚Р° РЅР°С‡Р°Р»Р° СЃС‚Р°Р¶Р° РІС‹РіР»СЏРґРёС‚ РЅРµРІРѕР·РјРѕР¶РЅРѕР№. "
+            "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ РёР· РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ, Р° РЅРµ РґР°С‚Сѓ СЂРѕР¶РґРµРЅРёСЏ."
         )
     if "driving_experience_same_as_birth" in errors:
         return (
-            "Дата начала стажа совпадает с датой рождения. "
-            "Укажите, когда вы начали водить — обычно это дата из водительского удостоверения."
+            "Р”Р°С‚Р° РЅР°С‡Р°Р»Р° СЃС‚Р°Р¶Р° СЃРѕРІРїР°РґР°РµС‚ СЃ РґР°С‚РѕР№ СЂРѕР¶РґРµРЅРёСЏ. "
+            "РЈРєР°Р¶РёС‚Рµ, РєРѕРіРґР° РІС‹ РЅР°С‡Р°Р»Рё РІРѕРґРёС‚СЊ вЂ” РѕР±С‹С‡РЅРѕ СЌС‚Рѕ РґР°С‚Р° РёР· РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ."
         )
     if "driving_experience_in_future" in errors:
-        return "Дата начала стажа не может быть в будущем. Отправьте корректную дату в формате ДД.ММ.ГГГГ."
+        return "Р”Р°С‚Р° РЅР°С‡Р°Р»Р° СЃС‚Р°Р¶Р° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РІ Р±СѓРґСѓС‰РµРј. РћС‚РїСЂР°РІСЊС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ РґР°С‚Сѓ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“."
     if "license_issue_before_birth" in errors or "license_issue_too_early" in errors:
-        return "Дата выдачи прав выглядит невозможной. Проверьте дату выдачи и отправьте ее еще раз."
+        return "Р”Р°С‚Р° РІС‹РґР°С‡Рё РїСЂР°РІ РІС‹РіР»СЏРґРёС‚ РЅРµРІРѕР·РјРѕР¶РЅРѕР№. РџСЂРѕРІРµСЂСЊС‚Рµ РґР°С‚Сѓ РІС‹РґР°С‡Рё Рё РѕС‚РїСЂР°РІСЊС‚Рµ РµРµ РµС‰Рµ СЂР°Р·."
     if "license_issue_in_future" in errors:
-        return "Дата выдачи прав не может быть в будущем. Отправьте корректную дату в формате ДД.ММ.ГГГГ."
+        return "Р”Р°С‚Р° РІС‹РґР°С‡Рё РїСЂР°РІ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РІ Р±СѓРґСѓС‰РµРј. РћС‚РїСЂР°РІСЊС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ РґР°С‚Сѓ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“."
     if "license_expires_before_issue" in errors:
-        return "Срок действия прав не может быть раньше даты выдачи. Отправьте корректную дату окончания действия прав."
+        return "РЎСЂРѕРє РґРµР№СЃС‚РІРёСЏ РїСЂР°РІ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ СЂР°РЅСЊС€Рµ РґР°С‚С‹ РІС‹РґР°С‡Рё. РћС‚РїСЂР°РІСЊС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ РґР°С‚Сѓ РѕРєРѕРЅС‡Р°РЅРёСЏ РґРµР№СЃС‚РІРёСЏ РїСЂР°РІ."
     if "license_expired" in errors:
-        return "Срок действия прав уже истек. Проверьте дату и отправьте актуальную дату окончания действия прав."
+        return "РЎСЂРѕРє РґРµР№СЃС‚РІРёСЏ РїСЂР°РІ СѓР¶Рµ РёСЃС‚РµРє. РџСЂРѕРІРµСЂСЊС‚Рµ РґР°С‚Сѓ Рё РѕС‚РїСЂР°РІСЊС‚Рµ Р°РєС‚СѓР°Р»СЊРЅСѓСЋ РґР°С‚Сѓ РѕРєРѕРЅС‡Р°РЅРёСЏ РґРµР№СЃС‚РІРёСЏ РїСЂР°РІ."
     if "hired_at_in_future" in errors:
         return (
-            "Дата принятия не может быть в будущем. "
-            "Обычно указывают дату подключения к парку или сегодняшнюю дату."
+            "Р”Р°С‚Р° РїСЂРёРЅСЏС‚РёСЏ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РІ Р±СѓРґСѓС‰РµРј. "
+            "РћР±С‹С‡РЅРѕ СѓРєР°Р·С‹РІР°СЋС‚ РґР°С‚Сѓ РїРѕРґРєР»СЋС‡РµРЅРёСЏ Рє РїР°СЂРєСѓ РёР»Рё СЃРµРіРѕРґРЅСЏС€РЅСЋСЋ РґР°С‚Сѓ."
         )
     if "hired_at_same_as_license_expiry" in errors:
         return (
-            "Дата принятия совпадает со сроком действия прав. "
-            "Укажите дату подключения к парку, а не «действует до» из водительского удостоверения."
+            "Р”Р°С‚Р° РїСЂРёРЅСЏС‚РёСЏ СЃРѕРІРїР°РґР°РµС‚ СЃРѕ СЃСЂРѕРєРѕРј РґРµР№СЃС‚РІРёСЏ РїСЂР°РІ. "
+            "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ РїРѕРґРєР»СЋС‡РµРЅРёСЏ Рє РїР°СЂРєСѓ, Р° РЅРµ В«РґРµР№СЃС‚РІСѓРµС‚ РґРѕВ» РёР· РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ."
         )
     return _clarification_reply(current_state)
 
@@ -1596,7 +1604,7 @@ def _looks_like_city_answer(text: str) -> bool:
 def _looks_like_address_answer(text: str) -> bool:
     normalized = normalize_text_token(text)
     has_digit = any(char.isdigit() for char in normalized)
-    address_markers = ("ул", "улица", "пр", "проспект", "дом", "мкр", "микрорайон", "кв", "район")
+    address_markers = ("СѓР»", "СѓР»РёС†Р°", "РїСЂ", "РїСЂРѕСЃРїРµРєС‚", "РґРѕРј", "РјРєСЂ", "РјРёРєСЂРѕСЂР°Р№РѕРЅ", "РєРІ", "СЂР°Р№РѕРЅ")
     return len(normalized) >= 5 and (has_digit or any(marker in normalized for marker in address_markers) or len(normalized.split()) >= 2)
 
 
@@ -1627,12 +1635,12 @@ def _get_pending_car_model_suggestion(driver: Driver) -> str | None:
 
 def _looks_like_clarification_confirm(text: str) -> bool:
     normalized = normalize_text_token(text)
-    return normalized in {"да", "yes", "верно", "правильно", "именно", "ага", "ок", "ok", "угу"}
+    return normalized in {"РґР°", "yes", "РІРµСЂРЅРѕ", "РїСЂР°РІРёР»СЊРЅРѕ", "РёРјРµРЅРЅРѕ", "Р°РіР°", "РѕРє", "ok", "СѓРіСѓ"}
 
 
 def _looks_like_clarification_reject(text: str) -> bool:
     normalized = normalize_text_token(text)
-    return normalized in {"нет", "no", "неа"}
+    return normalized in {"РЅРµС‚", "no", "РЅРµР°"}
 
 
 def _car_model_registration_result(model: str) -> AIResult:
@@ -1730,8 +1738,8 @@ def _process_driver_license_answer(text: str) -> AIResult | None:
     errors = validate_driver_license_number(normalized)
     if errors:
         return AIResult(
-            "Номер водительского удостоверения выглядит некорректно. "
-            "Напишите серию и номер, как в документе — например CQ 981709 или 374653 8475853.",
+            "РќРѕРјРµСЂ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ РІС‹РіР»СЏРґРёС‚ РЅРµРєРѕСЂСЂРµРєС‚РЅРѕ. "
+            "РќР°РїРёС€РёС‚Рµ СЃРµСЂРёСЋ Рё РЅРѕРјРµСЂ, РєР°Рє РІ РґРѕРєСѓРјРµРЅС‚Рµ вЂ” РЅР°РїСЂРёРјРµСЂ CQ 981709 РёР»Рё 374653 8475853.",
             "clarification",
             {},
             DialogueState.ASK_DRIVER_LICENSE_NUMBER.value,
@@ -1788,30 +1796,30 @@ def _coerce_dict_str(value: object) -> dict[str, str]:
 
 def _detect_correction_state(current_state: DialogueState, text: str) -> DialogueState | None:
     normalized = normalize_text_token(text)
-    correction_markers = ("исправ", "измен", "ошибка", "неверно", "не правильно", "другое", "поменяй")
+    correction_markers = ("РёСЃРїСЂР°РІ", "РёР·РјРµРЅ", "РѕС€РёР±РєР°", "РЅРµРІРµСЂРЅРѕ", "РЅРµ РїСЂР°РІРёР»СЊРЅРѕ", "РґСЂСѓРіРѕРµ", "РїРѕРјРµРЅСЏР№")
     if not any(marker in normalized for marker in correction_markers):
         return None
 
     field_mapping: list[tuple[tuple[str, ...], DialogueState]] = [
-        (("фио", "полное имя"), DialogueState.ASK_FULL_NAME),
-        (("телефон", "номер"), DialogueState.ASK_PHONE),
-        (("город",), DialogueState.ASK_CITY),
-        (("адрес",), DialogueState.ASK_ADDRESS),
-        (("иин",), DialogueState.ASK_IIN),
-        (("дата рождения", "рождение"), DialogueState.ASK_BIRTH_DATE),
-        (("стаж", "опыт"), DialogueState.ASK_DRIVING_EXPERIENCE_SINCE),
-        (("марка", "бренд"), DialogueState.ASK_CAR_BRAND),
-        (("модель",), DialogueState.ASK_CAR_MODEL),
-        (("год",), DialogueState.ASK_CAR_YEAR),
-        (("госномер", "номер машины", "номер авто", "номер автомобиля"), DialogueState.ASK_CAR_PLATE),
-        (("цвет",), DialogueState.ASK_CAR_COLOR),
-        (("стс", "техпаспорт", "свидетельство", "registration certificate"), DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE),
-        (("права", "ву", "номер прав", "водительское удостоверение"), DialogueState.ASK_DRIVER_LICENSE_NUMBER),
-        (("дата выдачи", "выдано"), DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE),
-        (("срок действия", "действует до"), DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT),
-        (("условие работы", "самозанятый", "штатный"), DialogueState.ASK_EMPLOYMENT_TYPE),
-        (("дата принятия", "принятия"), DialogueState.ASK_HIRED_AT),
-        (("слабослышащий",), DialogueState.ASK_HEARING_IMPAIRED),
+        (("С„РёРѕ", "РїРѕР»РЅРѕРµ РёРјСЏ"), DialogueState.ASK_FULL_NAME),
+        (("С‚РµР»РµС„РѕРЅ", "РЅРѕРјРµСЂ"), DialogueState.ASK_PHONE),
+        (("РіРѕСЂРѕРґ",), DialogueState.ASK_CITY),
+        (("Р°РґСЂРµСЃ",), DialogueState.ASK_ADDRESS),
+        (("РёРёРЅ",), DialogueState.ASK_IIN),
+        (("РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ", "СЂРѕР¶РґРµРЅРёРµ"), DialogueState.ASK_BIRTH_DATE),
+        (("СЃС‚Р°Р¶", "РѕРїС‹С‚"), DialogueState.ASK_DRIVING_EXPERIENCE_SINCE),
+        (("РјР°СЂРєР°", "Р±СЂРµРЅРґ"), DialogueState.ASK_CAR_BRAND),
+        (("РјРѕРґРµР»СЊ",), DialogueState.ASK_CAR_MODEL),
+        (("РіРѕРґ",), DialogueState.ASK_CAR_YEAR),
+        (("РіРѕСЃРЅРѕРјРµСЂ", "РЅРѕРјРµСЂ РјР°С€РёРЅС‹", "РЅРѕРјРµСЂ Р°РІС‚Рѕ", "РЅРѕРјРµСЂ Р°РІС‚РѕРјРѕР±РёР»СЏ"), DialogueState.ASK_CAR_PLATE),
+        (("С†РІРµС‚",), DialogueState.ASK_CAR_COLOR),
+        (("СЃС‚СЃ", "С‚РµС…РїР°СЃРїРѕСЂС‚", "СЃРІРёРґРµС‚РµР»СЊСЃС‚РІРѕ", "registration certificate"), DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE),
+        (("РїСЂР°РІР°", "РІСѓ", "РЅРѕРјРµСЂ РїСЂР°РІ", "РІРѕРґРёС‚РµР»СЊСЃРєРѕРµ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёРµ"), DialogueState.ASK_DRIVER_LICENSE_NUMBER),
+        (("РґР°С‚Р° РІС‹РґР°С‡Рё", "РІС‹РґР°РЅРѕ"), DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE),
+        (("СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ", "РґРµР№СЃС‚РІСѓРµС‚ РґРѕ"), DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT),
+        (("СѓСЃР»РѕРІРёРµ СЂР°Р±РѕС‚С‹", "СЃР°РјРѕР·Р°РЅСЏС‚С‹Р№", "С€С‚Р°С‚РЅС‹Р№"), DialogueState.ASK_EMPLOYMENT_TYPE),
+        (("РґР°С‚Р° РїСЂРёРЅСЏС‚РёСЏ", "РїСЂРёРЅСЏС‚РёСЏ"), DialogueState.ASK_HIRED_AT),
+        (("СЃР»Р°Р±РѕСЃР»С‹С€Р°С‰РёР№",), DialogueState.ASK_HEARING_IMPAIRED),
     ]
     for markers, state in field_mapping:
         if any(marker in normalized for marker in markers):
@@ -1827,8 +1835,8 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         return None
 
     normalized = normalize_text_token(text)
-    edit_markers = ("исправ", "измен", "поменя", "замен", "неправильн", "неверн", "ошиб")
-    request_markers = ("хочу", "надо", "нужно", "можно", "просьба", "прошу", "пожалуйста")
+    edit_markers = ("РёСЃРїСЂР°РІ", "РёР·РјРµРЅ", "РїРѕРјРµРЅСЏ", "Р·Р°РјРµРЅ", "РЅРµРїСЂР°РІРёР»СЊРЅ", "РЅРµРІРµСЂРЅ", "РѕС€РёР±")
+    request_markers = ("С…РѕС‡Сѓ", "РЅР°РґРѕ", "РЅСѓР¶РЅРѕ", "РјРѕР¶РЅРѕ", "РїСЂРѕСЃСЊР±Р°", "РїСЂРѕС€Сѓ", "РїРѕР¶Р°Р»СѓР№СЃС‚Р°")
     has_edit_verb = any(marker in normalized for marker in edit_markers)
     if not has_edit_verb:
         if not (any(marker in normalized for marker in request_markers) and _resolve_field_name(normalized)):
@@ -1840,20 +1848,20 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
     raw_tail = raw_text
 
     optional_prefix = re.match(
-        r"^(?:хочу|надо|нужно|можно|могу|просьба|прошу|пожалуйста|мне\s+нужно)\s+(?:\w+\s+)?(?:исправить|изменить|поменять|заменить)\s+(.*)$",
+        r"^(?:С…РѕС‡Сѓ|РЅР°РґРѕ|РЅСѓР¶РЅРѕ|РјРѕР¶РЅРѕ|РјРѕРіСѓ|РїСЂРѕСЃСЊР±Р°|РїСЂРѕС€Сѓ|РїРѕР¶Р°Р»СѓР№СЃС‚Р°|РјРЅРµ\s+РЅСѓР¶РЅРѕ)\s+(?:\w+\s+)?(?:РёСЃРїСЂР°РІРёС‚СЊ|РёР·РјРµРЅРёС‚СЊ|РїРѕРјРµРЅСЏС‚СЊ|Р·Р°РјРµРЅРёС‚СЊ)\s+(.*)$",
         normalized_compact,
     )
     if optional_prefix:
         tail = optional_prefix.group(1).strip()
         raw_tail = raw_text
-        for marker in ("исправить", "изменить", "поменять", "заменить", "исправь", "измени", "поменяй", "замени"):
+        for marker in ("РёСЃРїСЂР°РІРёС‚СЊ", "РёР·РјРµРЅРёС‚СЊ", "РїРѕРјРµРЅСЏС‚СЊ", "Р·Р°РјРµРЅРёС‚СЊ", "РёСЃРїСЂР°РІСЊ", "РёР·РјРµРЅРё", "РїРѕРјРµРЅСЏР№", "Р·Р°РјРµРЅРё"):
             index = raw_text.lower().find(marker)
             if index != -1:
                 raw_tail = raw_text[index + len(marker) :].strip()
                 break
 
     prefix_match = re.match(
-        r"^(?:исправь|исправить|измени|изменить|поменяй|поменять|замени|заменить)\s+(.*)$",
+        r"^(?:РёСЃРїСЂР°РІСЊ|РёСЃРїСЂР°РІРёС‚СЊ|РёР·РјРµРЅРё|РёР·РјРµРЅРёС‚СЊ|РїРѕРјРµРЅСЏР№|РїРѕРјРµРЅСЏС‚СЊ|Р·Р°РјРµРЅРё|Р·Р°РјРµРЅРёС‚СЊ)\s+(.*)$",
         normalized_compact,
     )
     if prefix_match and not optional_prefix:
@@ -1861,7 +1869,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         raw_tail = raw_text.split(maxsplit=1)[1].strip() if len(raw_text.split(maxsplit=1)) > 1 else ""
     elif not optional_prefix:
         suffix_match = re.match(
-            r"^(.*?)\s+(?:поменять|изменить|исправить|заменить)$",
+            r"^(.*?)\s+(?:РїРѕРјРµРЅСЏС‚СЊ|РёР·РјРµРЅРёС‚СЊ|РёСЃРїСЂР°РІРёС‚СЊ|Р·Р°РјРµРЅРёС‚СЊ)$",
             normalized_compact,
         )
         if suffix_match:
@@ -1870,8 +1878,8 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
 
     target_field = None
     raw_value = ""
-    if " на " in tail:
-        field_phrase, _, _ = tail.partition(" на ")
+    if " РЅР° " in tail:
+        field_phrase, _, _ = tail.partition(" РЅР° ")
         target_field = _resolve_field_name(field_phrase)
         raw_value = _extract_raw_value(raw_tail)
     else:
@@ -1879,7 +1887,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
 
     if not target_field:
         return AIResult(
-            "Напишите, какое именно поле исправить. Например: исправь город на Алматы.",
+            "РќР°РїРёС€РёС‚Рµ, РєР°РєРѕРµ РёРјРµРЅРЅРѕ РїРѕР»Рµ РёСЃРїСЂР°РІРёС‚СЊ. РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РіРѕСЂРѕРґ РЅР° РђР»РјР°С‚С‹.",
             "clarification",
             {},
             DialogueState.CONFIRM_DATA.value,
@@ -1890,7 +1898,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
 
     if not raw_value:
         return AIResult(
-            f"Хорошо. Отправьте новое значение для поля «{_human_field_label(target_field)}» одним сообщением.",
+            f"РҐРѕСЂРѕС€Рѕ. РћС‚РїСЂР°РІСЊС‚Рµ РЅРѕРІРѕРµ Р·РЅР°С‡РµРЅРёРµ РґР»СЏ РїРѕР»СЏ В«{_human_field_label(target_field)}В» РѕРґРЅРёРј СЃРѕРѕР±С‰РµРЅРёРµРј.",
             "field_edit",
             {},
             DialogueState.CONFIRM_DATA.value,
@@ -1917,7 +1925,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         )
 
     return AIResult(
-        "Хорошо, сразу обновляю это поле.",
+        "РҐРѕСЂРѕС€Рѕ, СЃСЂР°Р·Сѓ РѕР±РЅРѕРІР»СЏСЋ СЌС‚Рѕ РїРѕР»Рµ.",
         "field_edit",
         normalized_fields,
         DialogueState.CONFIRM_DATA.value,
@@ -1932,7 +1940,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
 
 def _extract_raw_value(raw_tail: str) -> str:
     lowered = raw_tail.lower()
-    for separator in (" на ", " : ", ": "):
+    for separator in (" РЅР° ", " : ", ": "):
         index = lowered.find(separator)
         if index != -1:
             return raw_tail[index + len(separator):].strip().strip("\"' ")
@@ -1942,51 +1950,51 @@ def _extract_raw_value(raw_tail: str) -> str:
 def _resolve_field_name(value: str) -> str | None:
     normalized = normalize_text_token(value)
     for src, dst in (
-        ("марку", "марка"),
-        ("модель", "модель"),
-        ("фамилию", "фамилия"),
-        ("имя", "имя"),
-        ("отчество", "отчество"),
-        ("город", "город"),
-        ("адрес", "адрес"),
-        ("цвет", "цвет"),
-        ("телефон", "телефон"),
-        ("иин", "иин"),
-        ("госномер", "госномер"),
-        ("стс", "стс"),
-        ("техпаспорт", "техпаспорт"),
+        ("РјР°СЂРєСѓ", "РјР°СЂРєР°"),
+        ("РјРѕРґРµР»СЊ", "РјРѕРґРµР»СЊ"),
+        ("С„Р°РјРёР»РёСЋ", "С„Р°РјРёР»РёСЏ"),
+        ("РёРјСЏ", "РёРјСЏ"),
+        ("РѕС‚С‡РµСЃС‚РІРѕ", "РѕС‚С‡РµСЃС‚РІРѕ"),
+        ("РіРѕСЂРѕРґ", "РіРѕСЂРѕРґ"),
+        ("Р°РґСЂРµСЃ", "Р°РґСЂРµСЃ"),
+        ("С†РІРµС‚", "С†РІРµС‚"),
+        ("С‚РµР»РµС„РѕРЅ", "С‚РµР»РµС„РѕРЅ"),
+        ("РёРёРЅ", "РёРёРЅ"),
+        ("РіРѕСЃРЅРѕРјРµСЂ", "РіРѕСЃРЅРѕРјРµСЂ"),
+        ("СЃС‚СЃ", "СЃС‚СЃ"),
+        ("С‚РµС…РїР°СЃРїРѕСЂС‚", "С‚РµС…РїР°СЃРїРѕСЂС‚"),
     ):
         normalized = normalized.replace(src, dst)
     mapping: list[tuple[tuple[str, ...], str]] = [
-        (("фио", "полное имя"), "full_name"),
-        (("фамилия",), "last_name"),
-        (("имя",), "first_name"),
-        (("отчество",), "middle_name"),
-        (("телефон", "контактный номер", "номер телефона"), "phone"),
-        (("город",), "city"),
-        (("адрес",), "address"),
-        (("иин",), "iin"),
-        (("дата рождения", "рождение"), "birth_date"),
-        (("стаж", "водительский стаж", "опыт"), "driving_experience_since"),
-        (("номер прав", "права", "ву", "водительское удостоверение"), "driver_license_number"),
-        (("дата выдачи", "выдано"), "driver_license_issue_date"),
-        (("срок действия", "действует до"), "driver_license_expires_at"),
-        (("условие работы", "тип занятости"), "employment_type"),
-        (("дата принятия",), "hired_at"),
-        (("слабослышащий",), "is_hearing_impaired"),
-        (("марка", "бренд"), "brand"),
-        (("модель",), "model"),
-        (("год", "год выпуска"), "year"),
-        (("госномер", "номер машины", "номер авто", "номер автомобиля"), "plate_number"),
-        (("цвет",), "color"),
-        (("стс", "техпаспорт", "свидетельство"), "registration_certificate"),
-        (("vin", "вин"), "vin"),
-        (("класс", "класс авто", "тариф"), "service_class"),
+        (("С„РёРѕ", "РїРѕР»РЅРѕРµ РёРјСЏ"), "full_name"),
+        (("С„Р°РјРёР»РёСЏ",), "last_name"),
+        (("РёРјСЏ",), "first_name"),
+        (("РѕС‚С‡РµСЃС‚РІРѕ",), "middle_name"),
+        (("С‚РµР»РµС„РѕРЅ", "РєРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ", "РЅРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°"), "phone"),
+        (("РіРѕСЂРѕРґ",), "city"),
+        (("Р°РґСЂРµСЃ",), "address"),
+        (("РёРёРЅ",), "iin"),
+        (("РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ", "СЂРѕР¶РґРµРЅРёРµ"), "birth_date"),
+        (("СЃС‚Р°Р¶", "РІРѕРґРёС‚РµР»СЊСЃРєРёР№ СЃС‚Р°Р¶", "РѕРїС‹С‚"), "driving_experience_since"),
+        (("РЅРѕРјРµСЂ РїСЂР°РІ", "РїСЂР°РІР°", "РІСѓ", "РІРѕРґРёС‚РµР»СЊСЃРєРѕРµ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёРµ"), "driver_license_number"),
+        (("РґР°С‚Р° РІС‹РґР°С‡Рё", "РІС‹РґР°РЅРѕ"), "driver_license_issue_date"),
+        (("СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ", "РґРµР№СЃС‚РІСѓРµС‚ РґРѕ"), "driver_license_expires_at"),
+        (("СѓСЃР»РѕРІРёРµ СЂР°Р±РѕС‚С‹", "С‚РёРї Р·Р°РЅСЏС‚РѕСЃС‚Рё"), "employment_type"),
+        (("РґР°С‚Р° РїСЂРёРЅСЏС‚РёСЏ",), "hired_at"),
+        (("СЃР»Р°Р±РѕСЃР»С‹С€Р°С‰РёР№",), "is_hearing_impaired"),
+        (("РјР°СЂРєР°", "Р±СЂРµРЅРґ"), "brand"),
+        (("РјРѕРґРµР»СЊ",), "model"),
+        (("РіРѕРґ", "РіРѕРґ РІС‹РїСѓСЃРєР°"), "year"),
+        (("РіРѕСЃРЅРѕРјРµСЂ", "РЅРѕРјРµСЂ РјР°С€РёРЅС‹", "РЅРѕРјРµСЂ Р°РІС‚Рѕ", "РЅРѕРјРµСЂ Р°РІС‚РѕРјРѕР±РёР»СЏ"), "plate_number"),
+        (("С†РІРµС‚",), "color"),
+        (("СЃС‚СЃ", "С‚РµС…РїР°СЃРїРѕСЂС‚", "СЃРІРёРґРµС‚РµР»СЊСЃС‚РІРѕ"), "registration_certificate"),
+        (("vin", "РІРёРЅ"), "vin"),
+        (("РєР»Р°СЃСЃ", "РєР»Р°СЃСЃ Р°РІС‚Рѕ", "С‚Р°СЂРёС„"), "service_class"),
     ]
     for markers, field_name in mapping:
         if any(marker in normalized for marker in markers):
             return field_name
-    if any(marker in normalized for marker in ("авто", "машин", "автомобил")):
+    if any(marker in normalized for marker in ("Р°РІС‚Рѕ", "РјР°С€РёРЅ", "Р°РІС‚РѕРјРѕР±РёР»")):
         return "vehicle_descriptor"
     return None
 
@@ -2096,7 +2104,7 @@ def _normalize_field_edit(target_field: str, raw_value: str, *, driver: Driver |
         return {"driver_license_number": normalized}, []
     if target_field == "employment_type":
         normalized_employment = normalize_employment_type(value)
-        if normalized_employment.lower() not in {"штатный", "самозанятый", "ип"} and normalized_employment == value:
+        if normalized_employment.lower() not in {"С€С‚Р°С‚РЅС‹Р№", "СЃР°РјРѕР·Р°РЅСЏС‚С‹Р№", "РёРї"} and normalized_employment == value:
             return {}, ["invalid_employment_type"]
         return {"employment_type": normalized_employment}, []
     if target_field == "is_hearing_impaired":
@@ -2128,20 +2136,20 @@ def _field_edit_error_reply(target_field: str, errors: list[str] | None = None) 
             }
             return _validation_error_reply(state_map[target_field], errors)
     if target_field == "model" and errors and "car_model_needs_clarification" in errors:
-        return "Укажите модель из документов без поколения и кода кузова. Например: Camry вместо Camry 35."
+        return "РЈРєР°Р¶РёС‚Рµ РјРѕРґРµР»СЊ РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ Р±РµР· РїРѕРєРѕР»РµРЅРёСЏ Рё РєРѕРґР° РєСѓР·РѕРІР°. РќР°РїСЂРёРјРµСЂ: Camry РІРјРµСЃС‚Рѕ Camry 35."
     examples = {
-        "phone": "Например: исправь телефон на +77071234567.",
-        "city": "Например: измени город на Алматы.",
-        "address": "Например: исправь адрес на пр. Республики 12, Астана.",
-        "iin": "Например: исправь ИИН на 070404550345.",
-        "birth_date": "Например: исправь дату рождения на 04.04.2007.",
-        "driver_license_issue_date": "Например: измени дату выдачи на 17.03.2015.",
-        "driver_license_expires_at": "Например: измени срок действия на 17.03.2030.",
-        "plate_number": "Например: исправь госномер на 004YAT03.",
-        "registration_certificate": "Например: исправь номер СТС на AA12345678.",
-        "brand": "Например: исправь марку на Toyota.",
-        "model": "Например: измени модель авто на Camry.",
-        "vehicle_descriptor": "Например: исправь авто на Mercedes-Benz S-Class.",
+        "phone": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ С‚РµР»РµС„РѕРЅ РЅР° +77071234567.",
+        "city": "РќР°РїСЂРёРјРµСЂ: РёР·РјРµРЅРё РіРѕСЂРѕРґ РЅР° РђР»РјР°С‚С‹.",
+        "address": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ Р°РґСЂРµСЃ РЅР° РїСЂ. Р РµСЃРїСѓР±Р»РёРєРё 12, РђСЃС‚Р°РЅР°.",
+        "iin": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РРРќ РЅР° 070404550345.",
+        "birth_date": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РґР°С‚Сѓ СЂРѕР¶РґРµРЅРёСЏ РЅР° 04.04.2007.",
+        "driver_license_issue_date": "РќР°РїСЂРёРјРµСЂ: РёР·РјРµРЅРё РґР°С‚Сѓ РІС‹РґР°С‡Рё РЅР° 17.03.2015.",
+        "driver_license_expires_at": "РќР°РїСЂРёРјРµСЂ: РёР·РјРµРЅРё СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ РЅР° 17.03.2030.",
+        "plate_number": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РіРѕСЃРЅРѕРјРµСЂ РЅР° 004YAT03.",
+        "registration_certificate": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РЅРѕРјРµСЂ РЎРўРЎ РЅР° AA12345678.",
+        "brand": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РјР°СЂРєСѓ РЅР° Toyota.",
+        "model": "РќР°РїСЂРёРјРµСЂ: РёР·РјРµРЅРё РјРѕРґРµР»СЊ Р°РІС‚Рѕ РЅР° Camry.",
+        "vehicle_descriptor": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ Р°РІС‚Рѕ РЅР° Mercedes-Benz S-Class.",
     }
     if target_field in {"brand", "model", "vehicle_descriptor"} and errors and any(
         error in {"car_brand_not_in_catalog", "car_model_not_in_catalog", "car_brand_model_not_in_catalog"}
@@ -2150,36 +2158,36 @@ def _field_edit_error_reply(target_field: str, errors: list[str] | None = None) 
         for error in errors
     ):
         return catalog_validation_error_message(errors)
-    return f"Не удалось обновить поле «{_human_field_label(target_field)}». Проверьте формат. {examples.get(target_field, '')}".strip()
+    return f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РїРѕР»Рµ В«{_human_field_label(target_field)}В». РџСЂРѕРІРµСЂСЊС‚Рµ С„РѕСЂРјР°С‚. {examples.get(target_field, '')}".strip()
 
 
 def _human_field_label(target_field: str) -> str:
     return {
-        "full_name": "ФИО",
-        "last_name": "фамилия",
-        "first_name": "имя",
-        "middle_name": "отчество",
-        "phone": "телефон",
-        "city": "город",
-        "address": "адрес",
-        "iin": "ИИН",
-        "birth_date": "дата рождения",
-        "driving_experience_since": "водительский стаж",
-        "driver_license_number": "номер ВУ",
-        "driver_license_issue_date": "дата выдачи ВУ",
-        "driver_license_expires_at": "срок действия ВУ",
-        "employment_type": "условие работы",
-        "hired_at": "дата принятия",
-        "is_hearing_impaired": "слабослышащий водитель",
-        "brand": "марка авто",
-        "model": "модель авто",
-        "vehicle_descriptor": "авто",
-        "year": "год выпуска",
-        "plate_number": "госномер",
-        "color": "цвет авто",
-        "registration_certificate": "номер СТС",
+        "full_name": "Р¤РРћ",
+        "last_name": "С„Р°РјРёР»РёСЏ",
+        "first_name": "РёРјСЏ",
+        "middle_name": "РѕС‚С‡РµСЃС‚РІРѕ",
+        "phone": "С‚РµР»РµС„РѕРЅ",
+        "city": "РіРѕСЂРѕРґ",
+        "address": "Р°РґСЂРµСЃ",
+        "iin": "РРРќ",
+        "birth_date": "РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ",
+        "driving_experience_since": "РІРѕРґРёС‚РµР»СЊСЃРєРёР№ СЃС‚Р°Р¶",
+        "driver_license_number": "РЅРѕРјРµСЂ Р’РЈ",
+        "driver_license_issue_date": "РґР°С‚Р° РІС‹РґР°С‡Рё Р’РЈ",
+        "driver_license_expires_at": "СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ Р’РЈ",
+        "employment_type": "СѓСЃР»РѕРІРёРµ СЂР°Р±РѕС‚С‹",
+        "hired_at": "РґР°С‚Р° РїСЂРёРЅСЏС‚РёСЏ",
+        "is_hearing_impaired": "СЃР»Р°Р±РѕСЃР»С‹С€Р°С‰РёР№ РІРѕРґРёС‚РµР»СЊ",
+        "brand": "РјР°СЂРєР° Р°РІС‚Рѕ",
+        "model": "РјРѕРґРµР»СЊ Р°РІС‚Рѕ",
+        "vehicle_descriptor": "Р°РІС‚Рѕ",
+        "year": "РіРѕРґ РІС‹РїСѓСЃРєР°",
+        "plate_number": "РіРѕСЃРЅРѕРјРµСЂ",
+        "color": "С†РІРµС‚ Р°РІС‚Рѕ",
+        "registration_certificate": "РЅРѕРјРµСЂ РЎРўРЎ",
         "vin": "VIN",
-        "service_class": "класс авто",
+        "service_class": "РєР»Р°СЃСЃ Р°РІС‚Рѕ",
     }.get(target_field, target_field)
 
 
@@ -2242,3 +2250,4 @@ def _trace_payload(result: AIResult) -> dict[str, object]:
 @lru_cache
 def get_ai_service() -> AIService:
     return AIService()
+

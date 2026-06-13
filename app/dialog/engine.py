@@ -238,7 +238,7 @@ class DialogueEngine:
         ai_result = self.ai.respond(state.value, incoming.text or "", driver)
         self._record_ai_trace(db, incoming_message.id, driver, state.value, incoming.text or "", ai_result)
         if ai_result.intent in {"faq", "help", "smalltalk"}:
-            return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
+            return self._respond(db, driver, application, ai_result.reply.strip())
         if ai_result.intent == "clarification":
             if ai_result.clear_suggested_clarification:
                 self._clear_pending_car_model_suggestion(driver)
@@ -1232,9 +1232,7 @@ class DialogueEngine:
         return YANDEX_PRO_INSTALL_TEMPLATE.format(phone=contact_phone)
 
     def _format_new_state_assistant_reply(self, base_reply: str) -> str:
-        if REGISTRATION_START_CTA in base_reply:
-            return base_reply
-        return f"{base_reply}\n\n{REGISTRATION_START_CTA}"
+        return base_reply.strip()
 
     def _format_in_flow_assistant_reply(self, state: DialogueState, base_reply: str) -> str:
         return format_in_flow_reply(base_reply, state)
@@ -1252,14 +1250,7 @@ class DialogueEngine:
         return f"{base_reply}\n\n{reminder}"
 
     def _format_registered_driver_reply(self, base_reply: str) -> str:
-        tail = (
-            "💬 Вопросы по Яндекс Про, линии, условиям или офису — пишите сюда.\n"
-            f"📍 Офис: {self.settings.public_site_address}\n"
-            f"{OFFICE_HOURS}"
-        )
-        if tail in base_reply:
-            return base_reply
-        return f"{base_reply}\n\n{tail}"
+        return base_reply.strip()
 
     def _get_pending_field_edit(self, driver: Driver) -> str | None:
         context = driver.support_context_json or {}

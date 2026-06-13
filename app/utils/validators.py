@@ -745,6 +745,10 @@ def normalize_employment_type(value: str) -> str:
     normalized = normalize_text_token(value)
     mapping = {
         "штатный": "штатный",
+        "смз": "самозанятый",
+        "с м з": "самозанятый",
+        "самозан": "самозанятый",
+        "самозанятый": "самозанятый",
         "shtatnyi": "штатный",
         "shtatniy": "штатный",
         "shtatnyy": "штатный",
