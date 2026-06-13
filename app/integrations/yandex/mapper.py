@@ -2,6 +2,7 @@ from app.config import get_settings
 from app.drivers.models import Driver
 from app.integrations.yandex.catalog import get_yandex_car_catalog
 from app.integrations.yandex.schemas import YandexDriverPayload
+from app.utils.validators import normalize_phone
 
 
 def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
@@ -24,7 +25,7 @@ def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
         last_name=driver.last_name,
         first_name=driver.first_name,
         middle_name=driver.middle_name,
-        phone=driver.phone,
+        phone=normalize_phone(driver.phone or driver.whatsapp_phone or ""),
         city=driver.city,
         address=driver.address,
         iin=driver.iin,
