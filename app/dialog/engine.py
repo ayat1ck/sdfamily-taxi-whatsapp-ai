@@ -49,6 +49,7 @@ from app.integrations.yandex.messages import (
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.service import create_message
 from app.utils.logger import get_logger
+from app.utils.text import repair_mojibake
 from app.utils.validators import (
     looks_like_manual_data_entry,
     normalize_car_brand,
@@ -1389,6 +1390,7 @@ class DialogueEngine:
         }
 
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
+        reply = repair_mojibake(reply)
         create_message(
             db,
             driver=driver,
