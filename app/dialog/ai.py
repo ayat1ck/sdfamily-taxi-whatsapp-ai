@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.dialog.faq import (
     build_office_invite_reply,
     load_knowledge_base,
+    PAYOUT_WAITING_REPLY,
     looks_like_greeting,
     looks_like_support_question,
     resolve_faq_replies,
@@ -381,6 +382,42 @@ class DeterministicAIProvider:
             field_edit = _parse_confirm_field_edit(current_state, text, driver)
             if field_edit:
                 return field_edit
+
+        if current_state == DialogueState.NEW and _looks_like_support_only_topic(text):
+            normalized = normalize_text_token(text)
+            if any(marker in normalized for marker in ("выплат", "вывод", "моментальн")):
+                return AIResult(
+                    PAYOUT_WAITING_REPLY,
+                    "help",
+                    {},
+                    state,
+                    0.62,
+                    reasoning_summary="new_state:payout_wait",
+                    suggested_next_action=state,
+                )
+            faq_reply = _match_faq(text, self.knowledge_base)
+            if faq_reply and not any(
+                cue in normalize_text_token(faq_reply)
+                for cue in ("фио", "контактн", "документ", "офис", "приглас", "подключ", "регистрац")
+            ):
+                return AIResult(
+                    faq_reply,
+                    "faq",
+                    {},
+                    state,
+                    0.82,
+                    reasoning_summary="new_state:support_faq",
+                    suggested_next_action=state,
+                )
+            return AIResult(
+                SHORT_SUPPORT_REPLY,
+                "help",
+                {},
+                state,
+                0.62,
+                reasoning_summary="new_state:support_short",
+                suggested_next_action=state,
+            )
 
         if current_state == DialogueState.NEW and _looks_like_onboarding_intent(text):
             normalized = normalize_text_token(text)
@@ -758,6 +795,39 @@ def _looks_like_full_name(value: str) -> bool:
     if any(part in question_words for part in parts):
         return False
     return len(parts[0]) >= 2 and len(parts[1]) >= 2
+
+
+def _looks_like_support_only_topic(value: str) -> bool:
+    normalized = normalize_text_token(value)
+    if not normalized or _looks_like_onboarding_intent(value):
+        return False
+    support_markers = (
+        "тариф",
+        "услов",
+        "комис",
+        "выплат",
+        "вывод",
+        "моментальн",
+        "байге",
+        "бонус",
+        "преми",
+        "сухой туман",
+        "поддерж",
+        "офис",
+        "адрес",
+        "яндекс про",
+        "войти",
+        "линия",
+        "онлайн",
+        "смс",
+        "код",
+        "аккаунт",
+        "активен",
+        "неактив",
+    )
+    if any(marker in normalized for marker in support_markers):
+        return True
+    return looks_like_support_question(value)
 
 
 def _looks_like_onboarding_intent(value: str) -> bool:
