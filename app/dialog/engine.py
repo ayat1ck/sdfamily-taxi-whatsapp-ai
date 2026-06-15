@@ -932,11 +932,9 @@ class DialogueEngine:
                 driver,
                 application,
                 (
-                    "🎉 Отлично, вы в Яндекс Про! Выходите на линию.\n"
-                    "💬 Вопросы по работе — пишите сюда, мы на связи.\n"
-                    f"📍 Офис: {self.settings.public_site_address}\n"
-                    f"{OFFICE_HOURS}\n"
-                    "🎁 Ждём вас в офисе за подарочным боксом!"
+                    "🎉 Отлично, вы вошли в Яндекс Про! Можно выходить на линию.\n"
+                    "💬 Если по работе появятся вопросы, пишите сюда.\n\n"
+                    f"{self._build_office_bonus_block()}"
                 ),
             )
 
@@ -1215,16 +1213,11 @@ class DialogueEngine:
 
     def _build_yandex_pro_start_reply(self, driver: Driver) -> str:
         contact_phone = driver.phone or driver.whatsapp_phone
-        office_address = self.settings.public_site_address
         greeting_name = driver.first_name or driver.full_name or "водитель"
         return (
             f"{greeting_name}, спасибо — заявка уже в парке! 🎉\n\n"
             f"{YANDEX_PRO_START_TEMPLATE.format(phone=contact_phone)}\n\n"
-            "🎁 После регистрации ждём вас в офисе — подарочный бокс: зарядка 3 в 1, держатель, салфетка.\n"
-            "💧 Бизнес-класс — блок воды раз в неделю.\n"
-            "💨 Постоянным водителям — бесплатный сухой туман.\n"
-            f"📍 Офис: {office_address}\n"
-            f"{OFFICE_HOURS}"
+            f"{self._build_office_bonus_block()}"
         )
 
     def _build_yandex_pro_install_reply(self, driver: Driver) -> str:
@@ -1251,6 +1244,16 @@ class DialogueEngine:
 
     def _format_registered_driver_reply(self, base_reply: str) -> str:
         return base_reply.strip()
+
+    def _build_office_bonus_block(self) -> str:
+        office_address = self.settings.public_site_address
+        return (
+            "🎁 После регистрации можно приехать в офис и забрать приветственный бонус.\n"
+            "В бокс входят: зарядка 3 в 1, держатель для телефона, салфетка и тряпка.\n"
+            "Для бизнес-класса дополнительно выдаем блок воды.\n"
+            f"📍 Офис: {office_address}\n"
+            f"{OFFICE_HOURS}"
+        )
 
     def _get_pending_field_edit(self, driver: Driver) -> str | None:
         context = driver.support_context_json or {}
