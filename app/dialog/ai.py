@@ -27,7 +27,7 @@ from app.dialog.prompts import (
     CAR_MODEL_PROMPT,
     PROMPTS,
 )
-from app.documents.registration_flow import next_registration_state
+from app.documents.registration_flow import next_registration_state, next_text_state_after
 from app.dialog.states import DialogueState
 from app.drivers.models import Driver
 from app.integrations.yandex.catalog import (
@@ -1109,7 +1109,7 @@ def _try_registration_field_extract(
 
     extracted = _extract_safe_field_answer(current_state, text, driver)
     if extracted:
-        next_state = _default_next_state(current_state, driver).value
+        next_state = next_text_state_after(current_state).value
         return AIResult(
             "",
             "registration",

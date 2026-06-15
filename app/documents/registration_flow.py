@@ -56,6 +56,16 @@ TEXT_FIELD_SEQUENCE: list[DialogueState] = [
     DialogueState.ASK_HEARING_IMPAIRED,
 ]
 
+
+def next_text_state_after(state: DialogueState) -> DialogueState:
+    try:
+        index = TEXT_FIELD_SEQUENCE.index(state)
+    except ValueError:
+        return state
+    if index + 1 < len(TEXT_FIELD_SEQUENCE):
+        return TEXT_FIELD_SEQUENCE[index + 1]
+    return DialogueState.CONFIRM_DATA
+
 STATE_TO_DRIVER_FIELD: dict[DialogueState, str] = {
     DialogueState.ASK_FULL_NAME: "full_name",
     DialogueState.ASK_PHONE: "phone",
