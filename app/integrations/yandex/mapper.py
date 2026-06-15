@@ -45,6 +45,7 @@ def map_driver_to_yandex(driver: Driver) -> YandexDriverPayload:
         car_year=vehicle.year if vehicle else None,
         plate_number=vehicle.plate_number if vehicle else None,
         color=vehicle.color if vehicle else None,
+        service_class=vehicle.service_class if vehicle else None,
         registration_certificate=vehicle.registration_certificate if vehicle else None,
         vin=vehicle.vin if vehicle else None,
         document_refs=document_refs or None,

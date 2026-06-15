@@ -776,6 +776,44 @@ def normalize_employment_type(value: str) -> str:
     return mapping.get(normalized, value.strip())
 
 
+SERVICE_CLASS_ALIASES = {
+    "econom": "econom",
+    "economy": "econom",
+    "ekonom": "econom",
+    "comfort": "comfort",
+    "komfort": "comfort",
+    "express": "express",
+    "ekspress": "express",
+    "intercity": "intercity",
+    "mezhgorod": "intercity",
+}
+
+
+def split_service_class_values(value: str) -> list[str]:
+    normalized = normalize_text_token(value)
+    if not normalized:
+        return []
+    parts = [part.strip() for part in re.split(r"[;,/|]+", normalized) if part.strip()]
+    if not parts:
+        parts = [normalized]
+    result: list[str] = []
+    for part in parts:
+        token = transliterate_cyrillic_to_latin(part).lower()
+        token = re.sub(r"\s+", " ", token).strip().replace("-", " ")
+        token = SERVICE_CLASS_ALIASES.get(token, token)
+        token = SERVICE_CLASS_ALIASES.get(token.replace(" ", ""), token)
+        if token and token not in result:
+            result.append(token)
+    return result
+
+
+def normalize_service_class(value: str) -> str:
+    classes = split_service_class_values(value)
+    if not classes:
+        return value.strip()
+    return ", ".join(classes)
+
+
 def normalize_work_rule_id(value: str | None) -> str | None:
     if not value:
         return value

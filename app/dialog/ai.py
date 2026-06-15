@@ -52,6 +52,7 @@ from app.utils.validators import (
     normalize_phone,
     normalize_plate_number,
     normalize_registration_certificate,
+    normalize_service_class,
     normalize_text_token,
     parse_confirmation,
     parse_date,
@@ -2128,7 +2129,7 @@ def _normalize_field_edit(target_field: str, raw_value: str, *, driver: Driver |
             return {}, ["invalid_yes_no"]
         return {"is_hearing_impaired": str(parsed).lower()}, []
     if target_field == "service_class":
-        return {"service_class": normalize_text_token(value)}, []
+        return {"service_class": normalize_service_class(value)}, []
     return {}, ["unsupported_field"]
 
 

@@ -6,7 +6,7 @@ import httpx
 
 from app.config import get_settings
 from app.integrations.yandex.schemas import YandexDriverPayload
-from app.utils.validators import normalize_work_rule_id
+from app.utils.validators import normalize_work_rule_id, split_service_class_values
 
 
 class YandexPartialSubmissionError(Exception):
@@ -290,8 +290,11 @@ class YandexFleetClient:
             "comment": f"driver_phone={payload.phone}" if payload.phone else "",
             "fuel_type": self.settings.yandex_car_fuel_type,
         }
-        if self.settings.yandex_car_category:
-            park_profile["categories"] = [self.settings.yandex_car_category]
+        categories = split_service_class_values(payload.service_class or "")
+        if not categories and self.settings.yandex_car_category:
+            categories = [self.settings.yandex_car_category]
+        if categories:
+            park_profile["categories"] = categories
 
         return {
             "vehicle_specifications": vehicle_specifications,

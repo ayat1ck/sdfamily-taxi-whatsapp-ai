@@ -26,6 +26,7 @@ class YandexDriverPayload(BaseModel):
     car_year: str | None
     plate_number: str | None
     color: str | None
+    service_class: str | None = None
     registration_certificate: str | None = None
     vin: str | None = None
     document_refs: list[dict[str, str]] | None = None

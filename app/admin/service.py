@@ -24,7 +24,7 @@ from app.integrations.yandex.client import YandexPartialSubmissionError
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.models import Message
 from app.messages.service import create_message
-from app.utils.validators import normalize_plate_number
+from app.utils.validators import normalize_plate_number, normalize_service_class
 from app.vehicles.models import Vehicle
 from app.whatsapp.sender import WhatsAppSender
 
@@ -418,6 +418,8 @@ def update_application_snapshot(db: Session, application: Application, payload: 
             vehicle = Vehicle(driver_id=driver.id)
         if field_name == "plate_number" and isinstance(new_value, str):
             new_value = normalize_plate_number(new_value)
+        if field_name == "service_class" and isinstance(new_value, str):
+            new_value = normalize_service_class(new_value)
         old_value = getattr(vehicle, field_name)
         if old_value == new_value:
             continue
