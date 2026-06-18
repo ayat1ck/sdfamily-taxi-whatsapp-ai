@@ -349,6 +349,7 @@ def _layout(title: str, body: str) -> HTMLResponse:
       <div>
         <div>{settings.public_site_legal_name}</div>
         <div>{settings.public_site_support_email} · {settings.public_site_support_phone}</div>
+        <div>Менеджер: {settings.public_site_manager_phone}</div>
         <div>WhatsApp для регистрации: {settings.public_site_whatsapp_phone}</div>
         <div>{settings.public_site_address}</div>
       </div>
@@ -409,6 +410,7 @@ def home() -> HTMLResponse:
             <div class="info-row"><span class="k">Компания</span><span class="v">{settings.public_site_legal_name}</span></div>
             <div class="info-row"><span class="k">Email</span><span class="v"><a href="mailto:{settings.public_site_support_email}">{settings.public_site_support_email}</a></span></div>
             <div class="info-row"><span class="k">Контактный телефон</span><span class="v"><a href="tel:{settings.public_site_support_phone}">{settings.public_site_support_phone}</a></span></div>
+            <div class="info-row"><span class="k">Менеджер</span><span class="v"><a href="tel:{settings.public_site_manager_phone}">{settings.public_site_manager_phone}</a></span></div>
             <div class="info-row"><span class="k">WhatsApp для регистрации</span><span class="v"><a href="tel:{settings.public_site_whatsapp_phone}">{settings.public_site_whatsapp_phone}</a></span></div>
             <div class="info-row"><span class="k">Адрес</span><span class="v">{settings.public_site_address}</span></div>
             <div class="info-row"><span class="k">ОКЭД</span><span class="v">{settings.public_site_oked}</span></div>
@@ -466,6 +468,7 @@ def contacts() -> HTMLResponse:
         <div class="info-row"><span class="k">Основной ОКЭД</span><span class="v">{settings.public_site_oked}</span></div>
         <div class="info-row"><span class="k">Email</span><span class="v"><a href="mailto:{settings.public_site_support_email}">{settings.public_site_support_email}</a></span></div>
         <div class="info-row"><span class="k">Контактный телефон</span><span class="v"><a href="tel:{settings.public_site_support_phone}">{settings.public_site_support_phone}</a></span></div>
+        <div class="info-row"><span class="k">Менеджер</span><span class="v"><a href="tel:{settings.public_site_manager_phone}">{settings.public_site_manager_phone}</a></span></div>
         <div class="info-row"><span class="k">WhatsApp номер бота</span><span class="v"><a href="tel:{settings.public_site_whatsapp_phone}">{settings.public_site_whatsapp_phone}</a></span></div>
         <div class="info-row"><span class="k">Адрес</span><span class="v">{settings.public_site_address}</span></div>
       </div>

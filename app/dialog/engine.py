@@ -20,6 +20,7 @@ from app.dialog.prompts import (
     REGISTRATION_START_CTA,
     format_in_flow_reply,
 )
+from app.dialog.faq import classify_dialog_intent, resolve_faq_replies, SMALLTALK_REPLY, FALLBACK_MANAGER_REPLY
 from app.dialog.states import DialogueState
 from app.documents.extraction import DocumentExtractionService, normalize_extracted_fields
 from app.documents.registration_flow import (
@@ -65,8 +66,13 @@ from app.whatsapp.parser import ParsedWhatsAppMessage
 logger = get_logger(__name__)
 
 DUPLICATE_REJECTED_REPLY = (
-    "Похоже, такая регистрация уже существует в системе. "
-    "Повторная регистрация остановлена. Напишите менеджеру парка для проверки."
+    "Такой водитель уже зарегистрирован.\n\n"
+    "Доступные действия:\n"
+    "1. Стать самозанятым\n"
+    "2. Изменить данные\n"
+    "3. Сменить автомобиль\n"
+    "4. Помощь со входом\n"
+    "5. Связаться с менеджером"
 )
 
 YANDEX_PRO_SUCCESS_KEYWORDS = {
@@ -155,6 +161,10 @@ class DialogueEngine:
         )
         db.add(driver)
         db.flush()
+        state = DialogueState(driver.state or DialogueState.NEW.value)
+
+        if state == DialogueState.DUPLICATE_REJECTED and incoming.message_type in {"unsupported", "image", "document"}:
+            return self._respond(db, driver, application, DUPLICATE_REJECTED_REPLY)
 
         if incoming.message_type == "unsupported":
             return self._respond(db, driver, application, "Поддерживаются только текст, изображение и документ.")
@@ -162,7 +172,6 @@ class DialogueEngine:
         if incoming.message_type in {"image", "document"}:
             return self._handle_document(db, driver, application, incoming, incoming_message.id)
 
-        state = DialogueState(driver.state or DialogueState.NEW.value)
         command_reply = self._handle_special_commands(db, driver, application, incoming.text or "")
         if command_reply:
             self._record_system_trace(
@@ -176,6 +185,17 @@ class DialogueEngine:
                 reasoning_summary="special_command",
             )
             return self._respond(db, driver, application, command_reply)
+
+        priority_reply = self._handle_priority_interrupts(
+            db,
+            driver,
+            application,
+            state,
+            incoming.text or "",
+            incoming_message.id,
+        )
+        if priority_reply:
+            return self._respond(db, driver, application, priority_reply)
 
         if looks_like_manual_data_entry(incoming.text or "") and is_expecting_data_document(driver, state):
             return self._handle_manual_data_entry(
@@ -234,7 +254,7 @@ class DialogueEngine:
             state = DialogueState.ASK_PHONE
 
         if state == DialogueState.DUPLICATE_REJECTED:
-            return self._respond(db, driver, application, application.yandex_error or DUPLICATE_REJECTED_REPLY)
+            return self._respond(db, driver, application, DUPLICATE_REJECTED_REPLY)
 
         ai_result = self.ai.respond(state.value, incoming.text or "", driver)
         self._record_ai_trace(db, incoming_message.id, driver, state.value, incoming.text or "", ai_result)
@@ -1040,13 +1060,182 @@ class DialogueEngine:
 
         return None
 
+    def _handle_priority_interrupts(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+        incoming_message_id: int,
+    ) -> str | None:
+        normalized = normalize_text_token(message_text)
+        if not normalized:
+            return None
+
+        detected_intent = classify_dialog_intent(message_text, current_state=state.value)
+        if detected_intent == "smalltalk":
+            reply = SMALLTALK_REPLY
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="smalltalk",
+                reply=reply,
+                reasoning_summary="priority:smalltalk",
+            )
+            return reply
+
+        if detected_intent == "faq":
+            reply = resolve_faq_replies(message_text, self.ai.knowledge_base, office_address=self.settings.public_site_address) or FALLBACK_MANAGER_REPLY
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="faq",
+                reply=reply,
+                reasoning_summary="priority:faq",
+            )
+            return reply
+
+        if _looks_like_operator_request(normalized):
+            driver.requires_attention = True
+            driver.dialog_mode = "manual"
+            driver.active_support_topic = None
+            driver.active_support_step = None
+            driver.support_context_json = {"human_required": True, "source_state": state.value}
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="human_required")
+            create_conversation_event(db, driver, "human_required", {"message": message_text})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="human_required",
+                reply="Ваш запрос передан менеджеру. Ожидайте ответа.",
+                reasoning_summary="priority:human_required",
+            )
+            return "Ваш запрос передан менеджеру. Ожидайте ответа."
+
+        if _looks_like_existing_driver_intent(normalized):
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="existing_driver",
+                reply=_existing_driver_options_reply(),
+                reasoning_summary="priority:existing_driver",
+            )
+            return _existing_driver_options_reply()
+
+        if _looks_like_self_employed_request(normalized):
+            driver.requires_attention = True
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="self_employed_requested")
+            create_conversation_event(db, driver, "self_employed_requested", {"message": message_text})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="self_employed_request",
+                reply="Принял. Передаю менеджеру заявку на перевод в статус самозанятого.",
+                reasoning_summary="priority:self_employed_request",
+            )
+            return "Принял. Передаю менеджеру заявку на перевод в статус самозанятого."
+
+        if _looks_like_yandex_login_support(normalized):
+            support_reply = self._handle_support_flow(db, driver, application, message_text, source_state=state.value)
+            if support_reply:
+                return support_reply
+            driver.requires_attention = True
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_needs_help")
+            create_conversation_event(db, driver, "yandex_login_help_requested", {"message": message_text})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="yandex_login_support",
+                reply="Передаю информацию менеджеру для проверки входа в Яндекс Про.",
+                reasoning_summary="priority:yandex_login_support",
+            )
+            return "Передаю информацию менеджеру для проверки входа в Яндекс Про."
+
+        if _looks_like_application_status_issue(normalized):
+            reply = self._build_status_reply(driver, application)
+            if not reply or application.status in {None, "", "collecting_data"}:
+                reply = "Передаю информацию менеджеру для проверки заявки."
+                driver.requires_attention = True
+                db.add(driver)
+                set_application_status(db, application, "awaiting_manager_review", yandex_status="status_check_required")
+                create_conversation_event(db, driver, "application_status_check_requested", {"message": message_text})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="application_status",
+                reply=reply,
+                reasoning_summary="priority:application_status",
+            )
+            return reply
+
+        if _looks_like_tariff_issue(normalized):
+            driver.requires_attention = True
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="tariff_support_required")
+            create_conversation_event(db, driver, "tariff_support_requested", {"message": message_text})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="tariff_support",
+                reply="Принял. Передаю вопрос менеджеру по тарифам и доступам.",
+                reasoning_summary="priority:tariff_support",
+            )
+            return "Принял. Передаю вопрос менеджеру по тарифам и доступам."
+
+        if _looks_like_data_change_request(normalized) and state not in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
+            driver.requires_attention = True
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="data_change_requested")
+            create_conversation_event(db, driver, "data_change_requested", {"message": message_text})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="data_change_request",
+                reply="Принял. Передаю менеджеру запрос на изменение данных водителя.",
+                reasoning_summary="priority:data_change_request",
+            )
+            return "Принял. Передаю менеджеру запрос на изменение данных водителя."
+
+        return None
+
     def _build_status_reply(self, driver: Driver, application) -> str:
         status = application.status or "collecting_data"
         if status == "collecting_data":
             current_step = driver.state or DialogueState.NEW.value
             return STATUS_COLLECTING_DATA_TEMPLATE.format(state=current_step)
         if status == "duplicate_rejected":
-            return application.yandex_error or STATUS_REPLIES["duplicate_rejected"]
+            return DUPLICATE_REJECTED_REPLY
         if status == "yandex_error":
             return build_yandex_error_reply(application.yandex_error)
         return STATUS_REPLIES.get(status, STATUS_FALLBACK_TEMPLATE.format(status=status))
@@ -1186,6 +1375,10 @@ class DialogueEngine:
                 "\n\n⚠ Перед отправкой нужно исправить:\n"
                 f"{format_validation_errors_for_user(validation['errors'])}\n"
             )
+        hearing_impaired = {
+            "true": "да",
+            "false": "нет",
+        }.get((driver.is_hearing_impaired or "").strip().lower(), driver.is_hearing_impaired or "-")
         return (
             "Проверьте данные:\n\n"
             f"ФИО: {driver.full_name or '-'}\n"
@@ -1202,7 +1395,7 @@ class DialogueEngine:
             f"ВУ действует до: {driver.driver_license_expires_at or '-'}\n"
             f"Условие работы: {driver.employment_type or '-'}\n"
             f"Дата принятия: {driver.hired_at or '-'}\n"
-            f"Слабослышащий водитель: {driver.is_hearing_impaired or '-'}\n"
+            f"Слабослышащий водитель: {hearing_impaired}\n"
             f"Авто: {(vehicle.brand + ' ' + vehicle.model) if vehicle and vehicle.brand and vehicle.model else '-'}\n"
             f"Год: {vehicle.year if vehicle else '-'}\n"
             f"Госномер: {vehicle.plate_number if vehicle else '-'}\n"
@@ -1427,6 +1620,116 @@ def _looks_like_status_request(normalized: str) -> bool:
     return normalized in exact or any(token in normalized for token in contains)
 
 
+def _looks_like_operator_request(normalized: str) -> bool:
+    markers = (
+        "оператор",
+        "менеджер",
+        "живой человек",
+        "соедините",
+        "позовите человека",
+        "позовите менеджера",
+        "техподдержка",
+        "поддержка",
+        "хочу поговорить с человеком",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_existing_driver_intent(normalized: str) -> bool:
+    markers = (
+        "я уже зарегистрирован",
+        "я уже водитель",
+        "я работаю у вас",
+        "я есть в базе",
+        "я подключен",
+        "я в вашем парке",
+    )
+    if not any(marker in normalized for marker in markers):
+        return False
+    if _looks_like_self_employed_request(normalized):
+        return False
+    if _looks_like_yandex_login_support(normalized):
+        return False
+    if _looks_like_application_status_issue(normalized):
+        return False
+    if _looks_like_tariff_issue(normalized):
+        return False
+    if _looks_like_data_change_request(normalized):
+        return False
+    return True
+
+
+def _looks_like_application_status_issue(normalized: str) -> bool:
+    markers = (
+        "когда будет готово",
+        "где моя заявка",
+        "меня нет в парке",
+        "не вижу парк",
+        "не пришло приглашение",
+        "не отображается парк",
+        "заявка не обработана",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_yandex_login_support(normalized: str) -> bool:
+    markers = (
+        "не могу войти",
+        "не заходит",
+        "ошибка входа",
+        "нет парка",
+        "не вижу парк",
+        "нет аккаунта",
+        "не отображается таксопарк",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_tariff_issue(normalized: str) -> bool:
+    markers = (
+        "не могу отключить тариф",
+        "включите комфорт",
+        "включите межгород",
+        "включите экспресс",
+        "подключите тариф",
+        "почему нет комфорта",
+        "почему нет заказов",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_data_change_request(normalized: str) -> bool:
+    markers = (
+        "поменял машину",
+        "сменил номер",
+        "изменить данные",
+        "поменять иин",
+        "изменить права",
+        "обновить документы",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_self_employed_request(normalized: str) -> bool:
+    markers = (
+        "хочу стать самозанятым",
+        "сделайте смз",
+        "парковый самозанятый",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _existing_driver_options_reply() -> str:
+    return (
+        "Похоже, вы уже зарегистрированы. Чем помочь дальше?\n\n"
+        "1. Стать самозанятым\n"
+        "2. Изменить данные\n"
+        "3. Сменить автомобиль\n"
+        "4. Помощь со входом\n"
+        "5. Поддержка"
+    )
+
+
 def _looks_like_restart_request(normalized: str) -> bool:
     exact = {
         "restart",
@@ -1589,3 +1892,23 @@ def _application_status_from_state(state: DialogueState) -> str:
     if state == DialogueState.COMPLETED:
         return "completed"
     return "collecting_data"
+DUPLICATE_REJECTED_REPLY = (
+    "Такой водитель уже зарегистрирован.\n\n"
+    "Доступные действия:\n"
+    "1. Стать самозанятым\n"
+    "2. Изменить данные\n"
+    "3. Сменить автомобиль\n"
+    "4. Помощь со входом\n"
+    "5. Связаться с менеджером"
+)
+
+
+def _existing_driver_options_reply() -> str:
+    return (
+        "Похоже, вы уже зарегистрированы. Чем помочь дальше?\n\n"
+        "1. Стать самозанятым\n"
+        "2. Изменить данные\n"
+        "3. Сменить автомобиль\n"
+        "4. Помощь со входом\n"
+        "5. Поддержка"
+    )

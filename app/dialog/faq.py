@@ -2,6 +2,8 @@ from pathlib import Path
 import re
 from dataclasses import dataclass
 
+from app.dialog.states import DialogueState
+from app.utils.text import repair_mojibake
 from app.utils.validators import normalize_text_token
 
 
@@ -112,8 +114,13 @@ KAZAKH_SUPPORT_MARKERS = (
 )
 
 PAYOUT_WAITING_REPLY = (
-    "Понял. По выплатам сейчас просим немного подождать — скоро всё будет готово."
+    "Понял. По выплатам сейчас просим немного подождать — скоро всё будет готово.\n"
+    "По вопросам выплат колл-центр: +77071870107.\n"
+    "Менеджер: +77066497040."
 )
+
+SMALLTALK_REPLY = "Здравствуйте! Я на связи."
+FALLBACK_MANAGER_REPLY = "Не могу точно определить проблему. Передаю вопрос менеджеру."
 
 
 @dataclass(frozen=True)
@@ -134,6 +141,7 @@ FAQ_INTENT_ROUTES: tuple[FaqIntentRoute, ...] = (
     FaqIntentRoute(("подароч", "бокс"), "park_info", "что дают за регистрацию"),
     FaqIntentRoute(("комисс", "процент", "проц", "заработ"), "park_info", "какая комиссия"),
     FaqIntentRoute(("тариф",), "park_info", "какие условия"),
+    FaqIntentRoute(("грузов", "доставка", "экспресс", "межгород"), "cargo_tariff", "грузовой тариф"),
     FaqIntentRoute(("выплат", "вывод"), "park_info", "какие условия"),
     FaqIntentRoute(("услов",), "park_info", "какие условия"),
     FaqIntentRoute(("офис", "адрес", "момышулы", "приехать", "прийти", "локац"), "park_info", "где находится офис"),
@@ -755,3 +763,41 @@ def build_office_invite_reply(office_address: str) -> str:
         "🕘 Ежедневно с 09:00 до 18:00"
     )
 
+def classify_dialog_intent(message: str, *, current_state: str | None = None) -> str:
+    text = normalize_text_token(repair_mojibake(message)).strip(" ?!.,")
+    if not text:
+        return "smalltalk"
+
+    if any(marker in text for marker in ("оператор", "менеджер", "живой человек", "соедините", "позовите человека", "позовите менеджера", "техподдержка", "поддержка", "администратор")):
+        return "human_operator"
+    if any(marker in text for marker in ("я уже зарегистрирован", "я уже водитель", "я работаю у вас", "я есть в базе", "я подключен", "я в вашем парке", "я уже работаю", "уже зарегистрирован", "уже водитель")):
+        return "existing_driver_support"
+    if any(marker in text for marker in ("когда будет готово", "где моя заявка", "статус заявки", "проверили документы", "когда подключат", "когда появится парк", "моя заявка", "не пришло приглашение", "не отображается парк")):
+        return "application_status"
+    if any(marker in text for marker in ("не вижу парк", "нет парка", "не отображается парк", "не могу войти", "ошибка входа", "нет аккаунта", "не приходит приглашение", "нет таксопарка в яндекс про", "яндекс про")):
+        return "yandex_problem"
+    if any(marker in text for marker in ("включите комфорт", "включите бизнес", "подключите межгород", "подключите экспресс", "подключите тариф", "не могу отключить тариф", "почему нет заказов", "не открываются тарифы", "не работает тариф")):
+        return "tariff_support"
+    if any(marker in text for marker in ("поменял машину", "сменил номер", "обновить документы", "заменить права", "изменить данные", "новый автомобиль")):
+        return "driver_update_request"
+    if any(marker in text for marker in ("калай тиркелем", "кашан дайын болады", "парк коринбей тур", "кайта косып бериниз", "смз жасап бериниз", "менеджер керек", "көмек керек")):
+        if "менеджер" in text or "көмек" in text:
+            return "human_operator"
+        if "парк" in text or "коринбей" in text:
+            return "yandex_problem"
+        if "тиркел" in text or "дайын" in text:
+            return "registration"
+        return "existing_driver_support"
+    if any(marker in text for marker in ("смз", "самозанятый", "парковый самозанятый", "хочу стать смз", "сделайте самозанятым", "самозан")):
+        if "зарег" in text or "регист" in text or "подключ" in text or "тиркел" in text:
+            return "registration"
+        return "existing_driver_support"
+    if looks_like_greeting(message):
+        return "smalltalk"
+    if looks_like_support_question(message):
+        return "faq"
+    if current_state == DialogueState.NEW.value and _looks_like_car_registration_answer(text):
+        return "registration"
+    if _looks_like_registration_field_edit(message):
+        return "driver_update_request"
+    return "registration"

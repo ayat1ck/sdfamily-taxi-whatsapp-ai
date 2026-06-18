@@ -824,6 +824,10 @@ def _looks_like_support_only_topic(value: str) -> bool:
         "аккаунт",
         "активен",
         "неактив",
+        "грузов",
+        "доставка",
+        "экспресс",
+        "межгород",
     )
     if any(marker in normalized for marker in support_markers):
         return True
@@ -1921,8 +1925,8 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         return None
 
     normalized = normalize_text_token(text)
-    edit_markers = ("РёСЃРїСЂР°РІ", "РёР·РјРµРЅ", "РїРѕРјРµРЅСЏ", "Р·Р°РјРµРЅ", "РЅРµРїСЂР°РІРёР»СЊРЅ", "РЅРµРІРµСЂРЅ", "РѕС€РёР±")
-    request_markers = ("С…РѕС‡Сѓ", "РЅР°РґРѕ", "РЅСѓР¶РЅРѕ", "РјРѕР¶РЅРѕ", "РїСЂРѕСЃСЊР±Р°", "РїСЂРѕС€Сѓ", "РїРѕР¶Р°Р»СѓР№СЃС‚Р°")
+    edit_markers = ("исправ", "измен", "поменя", "замен", "неправильн", "неверн", "ошиб")
+    request_markers = ("хочу", "надо", "нужно", "можно", "просьба", "прошу", "пожалуйста")
     has_edit_verb = any(marker in normalized for marker in edit_markers)
     if not has_edit_verb:
         if not (any(marker in normalized for marker in request_markers) and _resolve_field_name(normalized)):
@@ -1934,20 +1938,20 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
     raw_tail = raw_text
 
     optional_prefix = re.match(
-        r"^(?:С…РѕС‡Сѓ|РЅР°РґРѕ|РЅСѓР¶РЅРѕ|РјРѕР¶РЅРѕ|РјРѕРіСѓ|РїСЂРѕСЃСЊР±Р°|РїСЂРѕС€Сѓ|РїРѕР¶Р°Р»СѓР№СЃС‚Р°|РјРЅРµ\s+РЅСѓР¶РЅРѕ)\s+(?:\w+\s+)?(?:РёСЃРїСЂР°РІРёС‚СЊ|РёР·РјРµРЅРёС‚СЊ|РїРѕРјРµРЅСЏС‚СЊ|Р·Р°РјРµРЅРёС‚СЊ)\s+(.*)$",
+        r"^(?:хочу|надо|нужно|можно|могу|просьба|прошу|пожалуйста|мне\s+нужно)\s+(?:\w+\s+)?(?:исправить|изменить|поменять|заменить)\s+(.*)$",
         normalized_compact,
     )
     if optional_prefix:
         tail = optional_prefix.group(1).strip()
         raw_tail = raw_text
-        for marker in ("РёСЃРїСЂР°РІРёС‚СЊ", "РёР·РјРµРЅРёС‚СЊ", "РїРѕРјРµРЅСЏС‚СЊ", "Р·Р°РјРµРЅРёС‚СЊ", "РёСЃРїСЂР°РІСЊ", "РёР·РјРµРЅРё", "РїРѕРјРµРЅСЏР№", "Р·Р°РјРµРЅРё"):
+        for marker in ("исправить", "изменить", "поменять", "заменить", "исправь", "измени", "поменяй", "замени"):
             index = raw_text.lower().find(marker)
             if index != -1:
                 raw_tail = raw_text[index + len(marker) :].strip()
                 break
 
     prefix_match = re.match(
-        r"^(?:РёСЃРїСЂР°РІСЊ|РёСЃРїСЂР°РІРёС‚СЊ|РёР·РјРµРЅРё|РёР·РјРµРЅРёС‚СЊ|РїРѕРјРµРЅСЏР№|РїРѕРјРµРЅСЏС‚СЊ|Р·Р°РјРµРЅРё|Р·Р°РјРµРЅРёС‚СЊ)\s+(.*)$",
+        r"^(?:исправь|исправить|измени|изменить|поменяй|поменять|замени|заменить)\s+(.*)$",
         normalized_compact,
     )
     if prefix_match and not optional_prefix:
@@ -1955,7 +1959,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         raw_tail = raw_text.split(maxsplit=1)[1].strip() if len(raw_text.split(maxsplit=1)) > 1 else ""
     elif not optional_prefix:
         suffix_match = re.match(
-            r"^(.*?)\s+(?:РїРѕРјРµРЅСЏС‚СЊ|РёР·РјРµРЅРёС‚СЊ|РёСЃРїСЂР°РІРёС‚СЊ|Р·Р°РјРµРЅРёС‚СЊ)$",
+            r"^(.*?)\s+(?:поменять|изменить|исправить|заменить)$",
             normalized_compact,
         )
         if suffix_match:
@@ -1964,8 +1968,8 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
 
     target_field = None
     raw_value = ""
-    if " РЅР° " in tail:
-        field_phrase, _, _ = tail.partition(" РЅР° ")
+    if " на " in tail:
+        field_phrase, _, _ = tail.partition(" на ")
         target_field = _resolve_field_name(field_phrase)
         raw_value = _extract_raw_value(raw_tail)
     else:
@@ -1973,7 +1977,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
 
     if not target_field:
         return AIResult(
-            "РќР°РїРёС€РёС‚Рµ, РєР°РєРѕРµ РёРјРµРЅРЅРѕ РїРѕР»Рµ РёСЃРїСЂР°РІРёС‚СЊ. РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РіРѕСЂРѕРґ РЅР° РђР»РјР°С‚С‹.",
+            "Напишите, какое именно поле исправить. Например: исправь город на Алматы.",
             "clarification",
             {},
             DialogueState.CONFIRM_DATA.value,
@@ -1983,8 +1987,20 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         )
 
     if not raw_value:
+        if target_field == "is_hearing_impaired":
+            return AIResult(
+                "Хорошо. Напишите одним сообщением: «слабослышащий водитель — да» или «слабослышащий водитель — нет».",
+                "field_edit",
+                {},
+                DialogueState.CONFIRM_DATA.value,
+                0.84,
+                target_field=target_field,
+                reasoning_summary=f"field_edit:{target_field}",
+                validation_errors=["missing_new_value"],
+                suggested_next_action="confirm_data",
+            )
         return AIResult(
-            f"РҐРѕСЂРѕС€Рѕ. РћС‚РїСЂР°РІСЊС‚Рµ РЅРѕРІРѕРµ Р·РЅР°С‡РµРЅРёРµ РґР»СЏ РїРѕР»СЏ В«{_human_field_label(target_field)}В» РѕРґРЅРёРј СЃРѕРѕР±С‰РµРЅРёРµРј.",
+            f"Хорошо. Отправьте новое значение для поля «{_human_field_label(target_field)}» одним сообщением.",
             "field_edit",
             {},
             DialogueState.CONFIRM_DATA.value,
@@ -2011,7 +2027,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
         )
 
     return AIResult(
-        "РҐРѕСЂРѕС€Рѕ, СЃСЂР°Р·Сѓ РѕР±РЅРѕРІР»СЏСЋ СЌС‚Рѕ РїРѕР»Рµ.",
+        "Хорошо, сразу обновляю это поле.",
         "field_edit",
         normalized_fields,
         DialogueState.CONFIRM_DATA.value,
@@ -2026,7 +2042,7 @@ def _parse_confirm_field_edit(current_state: DialogueState, text: str, driver: D
 
 def _extract_raw_value(raw_tail: str) -> str:
     lowered = raw_tail.lower()
-    for separator in (" РЅР° ", " : ", ": "):
+    for separator in (" на ", " : ", ": "):
         index = lowered.find(separator)
         if index != -1:
             return raw_tail[index + len(separator):].strip().strip("\"' ")
@@ -2035,52 +2051,54 @@ def _extract_raw_value(raw_tail: str) -> str:
 
 def _resolve_field_name(value: str) -> str | None:
     normalized = normalize_text_token(value)
+    if "слабослышащ" in normalized or "не слабослышащ" in normalized or "глух" in normalized:
+        return "is_hearing_impaired"
     for src, dst in (
-        ("РјР°СЂРєСѓ", "РјР°СЂРєР°"),
-        ("РјРѕРґРµР»СЊ", "РјРѕРґРµР»СЊ"),
-        ("С„Р°РјРёР»РёСЋ", "С„Р°РјРёР»РёСЏ"),
-        ("РёРјСЏ", "РёРјСЏ"),
-        ("РѕС‚С‡РµСЃС‚РІРѕ", "РѕС‚С‡РµСЃС‚РІРѕ"),
-        ("РіРѕСЂРѕРґ", "РіРѕСЂРѕРґ"),
-        ("Р°РґСЂРµСЃ", "Р°РґСЂРµСЃ"),
-        ("С†РІРµС‚", "С†РІРµС‚"),
-        ("С‚РµР»РµС„РѕРЅ", "С‚РµР»РµС„РѕРЅ"),
-        ("РёРёРЅ", "РёРёРЅ"),
-        ("РіРѕСЃРЅРѕРјРµСЂ", "РіРѕСЃРЅРѕРјРµСЂ"),
-        ("СЃС‚СЃ", "СЃС‚СЃ"),
-        ("С‚РµС…РїР°СЃРїРѕСЂС‚", "С‚РµС…РїР°СЃРїРѕСЂС‚"),
+        ("марку", "марка"),
+        ("модель", "модель"),
+        ("фамилию", "фамилия"),
+        ("имя", "имя"),
+        ("отчество", "отчество"),
+        ("город", "город"),
+        ("адрес", "адрес"),
+        ("цвет", "цвет"),
+        ("телефон", "телефон"),
+        ("иин", "иин"),
+        ("госномер", "госномер"),
+        ("стс", "стс"),
+        ("техпаспорт", "техпаспорт"),
     ):
         normalized = normalized.replace(src, dst)
     mapping: list[tuple[tuple[str, ...], str]] = [
-        (("С„РёРѕ", "РїРѕР»РЅРѕРµ РёРјСЏ"), "full_name"),
-        (("С„Р°РјРёР»РёСЏ",), "last_name"),
-        (("РёРјСЏ",), "first_name"),
-        (("РѕС‚С‡РµСЃС‚РІРѕ",), "middle_name"),
-        (("С‚РµР»РµС„РѕРЅ", "РєРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ", "РЅРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°"), "phone"),
-        (("РіРѕСЂРѕРґ",), "city"),
-        (("Р°РґСЂРµСЃ",), "address"),
-        (("РёРёРЅ",), "iin"),
-        (("РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ", "СЂРѕР¶РґРµРЅРёРµ"), "birth_date"),
-        (("СЃС‚Р°Р¶", "РІРѕРґРёС‚РµР»СЊСЃРєРёР№ СЃС‚Р°Р¶", "РѕРїС‹С‚"), "driving_experience_since"),
-        (("РЅРѕРјРµСЂ РїСЂР°РІ", "РїСЂР°РІР°", "РІСѓ", "РІРѕРґРёС‚РµР»СЊСЃРєРѕРµ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёРµ"), "driver_license_number"),
-        (("РґР°С‚Р° РІС‹РґР°С‡Рё", "РІС‹РґР°РЅРѕ"), "driver_license_issue_date"),
-        (("СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ", "РґРµР№СЃС‚РІСѓРµС‚ РґРѕ"), "driver_license_expires_at"),
-        (("СѓСЃР»РѕРІРёРµ СЂР°Р±РѕС‚С‹", "С‚РёРї Р·Р°РЅСЏС‚РѕСЃС‚Рё"), "employment_type"),
-        (("РґР°С‚Р° РїСЂРёРЅСЏС‚РёСЏ",), "hired_at"),
-        (("СЃР»Р°Р±РѕСЃР»С‹С€Р°С‰РёР№",), "is_hearing_impaired"),
-        (("РјР°СЂРєР°", "Р±СЂРµРЅРґ"), "brand"),
-        (("РјРѕРґРµР»СЊ",), "model"),
-        (("РіРѕРґ", "РіРѕРґ РІС‹РїСѓСЃРєР°"), "year"),
-        (("РіРѕСЃРЅРѕРјРµСЂ", "РЅРѕРјРµСЂ РјР°С€РёРЅС‹", "РЅРѕРјРµСЂ Р°РІС‚Рѕ", "РЅРѕРјРµСЂ Р°РІС‚РѕРјРѕР±РёР»СЏ"), "plate_number"),
-        (("С†РІРµС‚",), "color"),
-        (("СЃС‚СЃ", "С‚РµС…РїР°СЃРїРѕСЂС‚", "СЃРІРёРґРµС‚РµР»СЊСЃС‚РІРѕ"), "registration_certificate"),
-        (("vin", "РІРёРЅ"), "vin"),
-        (("РєР»Р°СЃСЃ", "РєР»Р°СЃСЃ Р°РІС‚Рѕ", "С‚Р°СЂРёС„"), "service_class"),
+        (("фио", "полное имя"), "full_name"),
+        (("фамилия",), "last_name"),
+        (("имя",), "first_name"),
+        (("отчество",), "middle_name"),
+        (("телефон", "контактный номер", "номер телефона"), "phone"),
+        (("город",), "city"),
+        (("адрес",), "address"),
+        (("иин",), "iin"),
+        (("дата рождения", "рождение"), "birth_date"),
+        (("стаж", "водительский стаж", "опыт"), "driving_experience_since"),
+        (("номер прав", "права", "ву", "водительское удостоверение"), "driver_license_number"),
+        (("дата выдачи", "выдано"), "driver_license_issue_date"),
+        (("срок действия", "действует до"), "driver_license_expires_at"),
+        (("условие работы", "тип занятости"), "employment_type"),
+        (("дата принятия",), "hired_at"),
+        (("слабослышащий",), "is_hearing_impaired"),
+        (("марка", "бренд"), "brand"),
+        (("модель",), "model"),
+        (("год", "год выпуска"), "year"),
+        (("госномер", "номер машины", "номер авто", "номер автомобиля"), "plate_number"),
+        (("цвет",), "color"),
+        (("стс", "техпаспорт", "свидетельство"), "registration_certificate"),
+        (("vin", "вин"), "vin"),
+        (("класс", "класс авто", "тариф"), "service_class"),
     ]
     for markers, field_name in mapping:
         if any(marker in normalized for marker in markers):
             return field_name
-    if any(marker in normalized for marker in ("Р°РІС‚Рѕ", "РјР°С€РёРЅ", "Р°РІС‚РѕРјРѕР±РёР»")):
+    if any(marker in normalized for marker in ("авто", "машин", "автомобил")):
         return "vehicle_descriptor"
     return None
 
@@ -2104,6 +2122,11 @@ def _normalize_field_edit(target_field: str, raw_value: str, *, driver: Driver |
         return payload, []
     if target_field in {"last_name", "first_name", "middle_name", "city", "address", "color", "vin"}:
         return {target_field: value}, []
+    if target_field == "is_hearing_impaired":
+        parsed = parse_yes_no(value)
+        if parsed is None:
+            return {}, ["invalid_yes_no"]
+        return {"is_hearing_impaired": "true" if parsed else "false"}, []
     if target_field == "brand":
         brand, errors = resolve_brand_input(value)
         if brand:
@@ -2222,20 +2245,20 @@ def _field_edit_error_reply(target_field: str, errors: list[str] | None = None) 
             }
             return _validation_error_reply(state_map[target_field], errors)
     if target_field == "model" and errors and "car_model_needs_clarification" in errors:
-        return "РЈРєР°Р¶РёС‚Рµ РјРѕРґРµР»СЊ РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ Р±РµР· РїРѕРєРѕР»РµРЅРёСЏ Рё РєРѕРґР° РєСѓР·РѕРІР°. РќР°РїСЂРёРјРµСЂ: Camry РІРјРµСЃС‚Рѕ Camry 35."
+        return "Укажите модель из документов без поколения и кода кузова. Например: Camry вместо Camry 35."
     examples = {
-        "phone": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ С‚РµР»РµС„РѕРЅ РЅР° +77071234567.",
-        "city": "РќР°РїСЂРёРјРµСЂ: РёР·РјРµРЅРё РіРѕСЂРѕРґ РЅР° РђР»РјР°С‚С‹.",
-        "address": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ Р°РґСЂРµСЃ РЅР° РїСЂ. Р РµСЃРїСѓР±Р»РёРєРё 12, РђСЃС‚Р°РЅР°.",
-        "iin": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РРРќ РЅР° 070404550345.",
-        "birth_date": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РґР°С‚Сѓ СЂРѕР¶РґРµРЅРёСЏ РЅР° 04.04.2007.",
-        "driver_license_issue_date": "РќР°РїСЂРёРјРµСЂ: РёР·РјРµРЅРё РґР°С‚Сѓ РІС‹РґР°С‡Рё РЅР° 17.03.2015.",
-        "driver_license_expires_at": "РќР°РїСЂРёРјРµСЂ: РёР·РјРµРЅРё СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ РЅР° 17.03.2030.",
-        "plate_number": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РіРѕСЃРЅРѕРјРµСЂ РЅР° 004YAT03.",
-        "registration_certificate": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РЅРѕРјРµСЂ РЎРўРЎ РЅР° AA12345678.",
-        "brand": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РјР°СЂРєСѓ РЅР° Toyota.",
-        "model": "РќР°РїСЂРёРјРµСЂ: РёР·РјРµРЅРё РјРѕРґРµР»СЊ Р°РІС‚Рѕ РЅР° Camry.",
-        "vehicle_descriptor": "РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ Р°РІС‚Рѕ РЅР° Mercedes-Benz S-Class.",
+        "phone": "Например: исправь телефон на +77071234567.",
+        "city": "Например: измени город на Алматы.",
+        "address": "Например: исправь адрес на пр. Республики 12, Астана.",
+        "iin": "Например: исправь ИИН на 070404550345.",
+        "birth_date": "Например: исправь дату рождения на 04.04.2007.",
+        "driver_license_issue_date": "Например: измени дату выдачи на 17.03.2015.",
+        "driver_license_expires_at": "Например: измени срок действия на 17.03.2030.",
+        "plate_number": "Например: исправь госномер на 004YAT03.",
+        "registration_certificate": "Например: исправь номер СТС на AA12345678.",
+        "brand": "Например: исправь марку на Toyota.",
+        "model": "Например: измени модель авто на Camry.",
+        "vehicle_descriptor": "Например: исправь авто на Mercedes-Benz S-Class.",
     }
     if target_field in {"brand", "model", "vehicle_descriptor"} and errors and any(
         error in {"car_brand_not_in_catalog", "car_model_not_in_catalog", "car_brand_model_not_in_catalog"}
@@ -2244,36 +2267,36 @@ def _field_edit_error_reply(target_field: str, errors: list[str] | None = None) 
         for error in errors
     ):
         return catalog_validation_error_message(errors)
-    return f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РїРѕР»Рµ В«{_human_field_label(target_field)}В». РџСЂРѕРІРµСЂСЊС‚Рµ С„РѕСЂРјР°С‚. {examples.get(target_field, '')}".strip()
+    return f"Не удалось обновить поле «{_human_field_label(target_field)}». Проверьте формат. {examples.get(target_field, '')}".strip()
 
 
 def _human_field_label(target_field: str) -> str:
     return {
-        "full_name": "Р¤РРћ",
-        "last_name": "С„Р°РјРёР»РёСЏ",
-        "first_name": "РёРјСЏ",
-        "middle_name": "РѕС‚С‡РµСЃС‚РІРѕ",
-        "phone": "С‚РµР»РµС„РѕРЅ",
-        "city": "РіРѕСЂРѕРґ",
-        "address": "Р°РґСЂРµСЃ",
-        "iin": "РРРќ",
-        "birth_date": "РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ",
-        "driving_experience_since": "РІРѕРґРёС‚РµР»СЊСЃРєРёР№ СЃС‚Р°Р¶",
-        "driver_license_number": "РЅРѕРјРµСЂ Р’РЈ",
-        "driver_license_issue_date": "РґР°С‚Р° РІС‹РґР°С‡Рё Р’РЈ",
-        "driver_license_expires_at": "СЃСЂРѕРє РґРµР№СЃС‚РІРёСЏ Р’РЈ",
-        "employment_type": "СѓСЃР»РѕРІРёРµ СЂР°Р±РѕС‚С‹",
-        "hired_at": "РґР°С‚Р° РїСЂРёРЅСЏС‚РёСЏ",
-        "is_hearing_impaired": "СЃР»Р°Р±РѕСЃР»С‹С€Р°С‰РёР№ РІРѕРґРёС‚РµР»СЊ",
-        "brand": "РјР°СЂРєР° Р°РІС‚Рѕ",
-        "model": "РјРѕРґРµР»СЊ Р°РІС‚Рѕ",
-        "vehicle_descriptor": "Р°РІС‚Рѕ",
-        "year": "РіРѕРґ РІС‹РїСѓСЃРєР°",
-        "plate_number": "РіРѕСЃРЅРѕРјРµСЂ",
-        "color": "С†РІРµС‚ Р°РІС‚Рѕ",
-        "registration_certificate": "РЅРѕРјРµСЂ РЎРўРЎ",
+        "full_name": "ФИО",
+        "last_name": "фамилия",
+        "first_name": "имя",
+        "middle_name": "отчество",
+        "phone": "телефон",
+        "city": "город",
+        "address": "адрес",
+        "iin": "ИИН",
+        "birth_date": "дата рождения",
+        "driving_experience_since": "водительский стаж",
+        "driver_license_number": "номер ВУ",
+        "driver_license_issue_date": "дата выдачи ВУ",
+        "driver_license_expires_at": "срок действия ВУ",
+        "employment_type": "условие работы",
+        "hired_at": "дата принятия",
+        "is_hearing_impaired": "слабослышащий водитель",
+        "brand": "марка авто",
+        "model": "модель авто",
+        "vehicle_descriptor": "авто",
+        "year": "год выпуска",
+        "plate_number": "госномер",
+        "color": "цвет авто",
+        "registration_certificate": "номер СТС",
         "vin": "VIN",
-        "service_class": "РєР»Р°СЃСЃ Р°РІС‚Рѕ",
+        "service_class": "класс авто",
     }.get(target_field, target_field)
 
 
