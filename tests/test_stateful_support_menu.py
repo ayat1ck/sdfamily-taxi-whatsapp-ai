@@ -82,6 +82,32 @@ class StatefulSupportMenuTests(unittest.TestCase):
         self.assertEqual(driver.support_context_json["mode"], "driver_profile_update")
         self.assertEqual(driver.support_context_json["menu"], "profile_update_menu")
 
+    def test_pending_menu_four_does_not_fall_back_to_greeting(self):
+        driver = self._driver(
+            {
+                "mode": "existing_driver_support",
+                "menu": "existing_driver_main",
+                "pending_menu": "existing_driver_main",
+                "created_at": "2026-01-01T00:00:00",
+                "expires_at": "2099-01-01T00:30:00",
+            }
+        )
+        application = SimpleNamespace(status="collecting_data")
+        with patch("app.dialog.engine.find_driver_by_whatsapp_phone", return_value=driver), patch(
+            "app.dialog.engine.create_conversation_event"
+        ):
+            reply = self.engine._handle_pending_menu(
+                DummyDB(),
+                driver,
+                application,
+                DialogueState.ASK_FULL_NAME,
+                "4",
+                2,
+            )
+        self.assertIn("Что хотите изменить?", reply)
+        self.assertNotIn("Здравствуйте", reply)
+        self.assertEqual(driver.support_context_json["mode"], "driver_profile_update")
+
     def test_direct_update_phrase_routes_to_driver_update_request(self):
         phrases = [
             "поменять машину",

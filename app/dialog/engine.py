@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.ai_traces.service import upsert_message_ai_trace
@@ -52,6 +53,7 @@ from app.integrations.yandex.messages import (
 )
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.service import create_message
+from app.messages.models import Message
 from app.utils.logger import get_logger
 from app.utils.text import repair_mojibake
 from app.utils.validators import (
@@ -175,7 +177,20 @@ class DialogueEngine:
         )
         db.add(driver)
         db.flush()
+        memory = self._load_conversation_memory(db, driver)
+        self._remember_message_context(driver, incoming, memory)
         state = DialogueState(driver.state or DialogueState.NEW.value)
+
+        pending_menu_reply = self._handle_pending_menu(
+            db,
+            driver,
+            application,
+            state,
+            incoming.text or "",
+            incoming_message.id,
+        )
+        if pending_menu_reply:
+            return self._respond(db, driver, application, pending_menu_reply)
 
         if incoming.message_type == "text" and _looks_like_operator_request(normalize_text_token(incoming.text or "")):
             priority_reply = self._handle_priority_interrupts(
@@ -1693,6 +1708,42 @@ class DialogueEngine:
             "9. Менеджер"
         )
 
+    def _load_conversation_memory(self, db: Session, driver: Driver) -> list[dict[str, object]]:
+        rows = db.scalars(
+            select(Message)
+            .where(Message.driver_id == driver.id)
+            .order_by(desc(Message.created_at), desc(Message.id))
+            .limit(5)
+        ).all()
+        memory: list[dict[str, object]] = []
+        for message in reversed(rows):
+            memory.append(
+                {
+                    "id": message.id,
+                    "direction": message.direction,
+                    "sender_type": message.sender_type,
+                    "message_type": message.message_type,
+                    "text": message.text,
+                    "created_at": message.created_at.isoformat() if message.created_at else None,
+                }
+            )
+        return memory
+
+    def _remember_message_context(self, driver: Driver, incoming: ParsedWhatsAppMessage, last_messages: list[dict[str, object]]) -> None:
+        context = dict(driver.support_context_json or {})
+        context["last_messages"] = last_messages
+        if last_messages:
+            last_bot = next((item for item in reversed(last_messages) if item.get("direction") == "outgoing"), None)
+            if last_bot:
+                context["last_bot_question"] = last_bot.get("text")
+                context["last_intent"] = context.get("last_intent") or last_bot.get("message_type")
+        if "pending_menu" not in context:
+            context["pending_menu"] = context.get("menu")
+        if incoming.message_type in {"image", "document"}:
+            context["last_intent"] = "media"
+        driver.support_context_json = context
+        driver.updated_at = datetime.utcnow()
+
     def _handle_stateful_support_menu(
         self,
         db: Session,
@@ -1882,6 +1933,25 @@ class DialogueEngine:
             }
             return prompt_map[choice]
 
+        return None
+
+    def _handle_pending_menu(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+        incoming_message_id: int,
+    ) -> str | None:
+        context = self._get_support_context(driver)
+        pending_menu = context.get("pending_menu") or context.get("menu")
+        if not pending_menu:
+            return self._handle_stateful_support_menu(db, driver, application, state, message_text, incoming_message_id)
+        if pending_menu == "existing_driver_main":
+            return self._handle_stateful_support_menu(db, driver, application, state, message_text, incoming_message_id)
+        if pending_menu == "profile_update_menu" or context.get("mode") == "driver_profile_update":
+            return self._handle_stateful_support_menu(db, driver, application, state, message_text, incoming_message_id)
         return None
 
     def _get_pending_field_edit(self, driver: Driver) -> str | None:
