@@ -874,10 +874,14 @@ class DialogueEngine:
         intent: str,
         reply: str,
         reasoning_summary: str,
+        priority_intent: str | None = None,
     ) -> None:
         incoming_message = next((message for message in driver.messages if message.id == message_id), None)
         if incoming_message is None:
             return
+        decision = {"intent": intent, "reply": reply}
+        if priority_intent:
+            decision["priority_intent"] = priority_intent
         upsert_message_ai_trace(
             db,
             message=incoming_message,
@@ -896,8 +900,8 @@ class DialogueEngine:
             fallback_reason=None,
             validation_errors_json=None,
             suggested_next_action=state_before,
-            raw_decision_json={"intent": intent, "reply": reply},
-            final_decision_json={"intent": intent, "reply": reply},
+            raw_decision_json=decision,
+            final_decision_json=decision,
         )
 
     def _handle_support_flow(
@@ -1135,6 +1139,7 @@ class DialogueEngine:
                 intent="existing_driver_support",
                 reply=reply,
                 reasoning_summary="priority:existing_driver_support",
+                priority_intent="existing_driver_support",
             )
             return reply
 
@@ -1917,6 +1922,21 @@ def _looks_like_courier_registration(normalized: str) -> bool:
 
 
 def _looks_like_existing_driver_intent(normalized: str) -> bool:
+    plain = normalize_text_token(repair_mojibake(normalized)).strip(" ?!.,")
+    strong_markers = (
+        "я уже подключен",
+        "я подключен уже",
+        "я уже зарегистрирован",
+        "я уже водитель",
+        "я уже работаю",
+        "я в вашем парке",
+        "я есть в системе",
+        "уже регался",
+        "мен тіркелгенмін",
+        "мен жүргізушімін",
+    )
+    if any(marker in plain for marker in strong_markers):
+        return True
     readable_markers = (
         "я уже зарегистрирован",
         "я уже водитель",
@@ -2018,12 +2038,12 @@ def _looks_like_self_employed_request(normalized: str) -> bool:
 
 def _existing_driver_options_reply() -> str:
     return (
-        "Похоже, вы уже зарегистрированы. Чем помочь дальше?\n\n"
-        "1. Стать самозанятым\n"
-        "2. Изменить данные\n"
-        "3. Сменить автомобиль\n"
-        "4. Помощь со входом\n"
-        "5. Поддержка"
+        "Понял, вы уже подключены. Что нужно сделать?\n"
+        "1. Вывод денег\n"
+        "2. Вход в Яндекс Про\n"
+        "3. Тарифы\n"
+        "4. Изменить авто/документы\n"
+        "5. Менеджер"
     )
 
 
@@ -2202,10 +2222,10 @@ DUPLICATE_REJECTED_REPLY = (
 
 def _existing_driver_options_reply() -> str:
     return (
-        "Похоже, вы уже зарегистрированы. Чем помочь дальше?\n\n"
-        "1. Стать самозанятым\n"
-        "2. Изменить данные\n"
-        "3. Сменить автомобиль\n"
-        "4. Помощь со входом\n"
-        "5. Поддержка"
+        "Понял, вы уже подключены. Что нужно сделать?\n"
+        "1. Вывод денег\n"
+        "2. Вход в Яндекс Про\n"
+        "3. Тарифы\n"
+        "4. Изменить авто/документы\n"
+        "5. Менеджер"
     )

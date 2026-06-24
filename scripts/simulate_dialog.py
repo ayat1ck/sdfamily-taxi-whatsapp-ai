@@ -415,6 +415,48 @@ SCENARIOS: list[Scenario] = [
 ]
 
 
+EXISTING_DRIVER_PRIORITY_STATES: tuple[DialogueState, ...] = (
+    DialogueState.ASK_FULL_NAME,
+    DialogueState.ASK_PHONE,
+    DialogueState.ASK_CITY,
+    DialogueState.ASK_ADDRESS,
+    DialogueState.ASK_IIN,
+    DialogueState.ASK_BIRTH_DATE,
+    DialogueState.ASK_DRIVING_EXPERIENCE_SINCE,
+    DialogueState.ASK_CAR_BRAND,
+    DialogueState.ASK_CAR_MODEL,
+    DialogueState.ASK_CAR_YEAR,
+    DialogueState.ASK_CAR_PLATE,
+    DialogueState.ASK_CAR_COLOR,
+    DialogueState.ASK_CAR_REGISTRATION_CERTIFICATE,
+    DialogueState.ASK_DRIVER_LICENSE_NUMBER,
+    DialogueState.ASK_DRIVER_LICENSE_ISSUE_DATE,
+    DialogueState.ASK_DRIVER_LICENSE_EXPIRES_AT,
+    DialogueState.ASK_EMPLOYMENT_TYPE,
+    DialogueState.ASK_HIRED_AT,
+    DialogueState.ASK_HEARING_IMPAIRED,
+    DialogueState.ASK_DRIVER_LICENSE_FRONT,
+    DialogueState.ASK_DRIVER_LICENSE_BACK,
+    DialogueState.ASK_ID_CARD,
+    DialogueState.ASK_VEHICLE_REGISTRATION_DOC,
+    DialogueState.ASK_SELFIE_WITH_LICENSE,
+    DialogueState.CONFIRM_DATA,
+    DialogueState.YANDEX_ERROR,
+)
+
+SCENARIOS.extend(
+    Scenario(
+        f"{state.value}: existing driver priority",
+        state.value,
+        "я уже подключен",
+        expect_intent="existing_driver_support",
+        must_contain=("Понял, вы уже подключены", "Вывод денег", "Менеджер"),
+        must_not_contain=("Напишите ФИО", "фото документов"),
+    )
+    for state in EXISTING_DRIVER_PRIORITY_STATES
+)
+
+
 @dataclass
 class ManualMarkerCase:
     message: str

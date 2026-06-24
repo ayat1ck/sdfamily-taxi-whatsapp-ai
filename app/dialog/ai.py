@@ -354,6 +354,17 @@ class DeterministicAIProvider:
                 suggested_next_action=state,
             )
 
+        if _looks_like_existing_driver_support_intent(text):
+            return AIResult(
+                _existing_driver_support_reply(),
+                "existing_driver_support",
+                {},
+                state,
+                0.98,
+                reasoning_summary="priority:existing_driver_support",
+                suggested_next_action=state,
+            )
+
         mixed = _try_mixed_field_and_support(current_state, text, driver, self.knowledge_base)
         if mixed:
             return mixed
@@ -2369,6 +2380,35 @@ def _cleanup_text(value: str | None) -> str:
     if value is None:
         return ""
     return re.sub(r"\s+", " ", value.replace("\u00a0", " ")).strip()
+
+
+def _looks_like_existing_driver_support_intent(message: str) -> bool:
+    normalized = normalize_text_token(message).strip(" ?!.,")
+    plain = normalize_text_token(_cleanup_text(message)).strip(" ?!.,")
+    markers = (
+        "я уже подключен",
+        "я подключен уже",
+        "я уже зарегистрирован",
+        "я уже водитель",
+        "я уже работаю",
+        "я в вашем парке",
+        "я есть в системе",
+        "уже регался",
+        "мен тіркелгенмін",
+        "мен жүргізушімін",
+    )
+    return any(marker in normalized or marker in plain for marker in markers)
+
+
+def _existing_driver_support_reply() -> str:
+    return (
+        "Понял, вы уже подключены. Что нужно сделать?\n"
+        "1. Вывод денег\n"
+        "2. Вход в Яндекс Про\n"
+        "3. Тарифы\n"
+        "4. Изменить авто/документы\n"
+        "5. Менеджер"
+    )
 
 
 def _trace_payload(result: AIResult) -> dict[str, object]:
