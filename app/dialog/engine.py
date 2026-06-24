@@ -494,6 +494,27 @@ class DialogueEngine:
     ) -> str:
         state = DialogueState(driver.state or DialogueState.NEW.value)
         media_context = self._classify_media_context(driver, state)
+        support_context = self._get_support_context(driver)
+        if support_context.get("mode") == "driver_profile_update":
+            driver.requires_attention = True
+            db.add(driver)
+            create_conversation_event(
+                db,
+                driver,
+                "profile_update_attachment_received",
+                {
+                    "message_type": incoming.message_type,
+                    "mime_type": incoming.mime_type,
+                    "filename": incoming.filename,
+                    "field": support_context.get("field"),
+                },
+            )
+            return self._respond(
+                db,
+                driver,
+                application,
+                "Файл получил. Использую его для обновления данных профиля. Если нужно, отправьте ещё одно фото или напишите уточнение текстом.",
+            )
         if media_context == "correction_context":
             return self._respond(
                 db,
@@ -644,6 +665,9 @@ class DialogueEngine:
             return "support_context"
         if state == DialogueState.COMPLETED:
             return "existing_driver_support_context"
+        context = self._get_support_context(driver)
+        if context.get("mode") == "driver_profile_update":
+            return "support_context"
         if self._is_yandex_pro_followup_state(state) or driver.active_support_topic:
             return "support_context"
         if self._get_pending_field_edit(driver) or state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
@@ -1654,6 +1678,21 @@ class DialogueEngine:
             "6. Менеджер"
         )
 
+    def _build_profile_update_menu(self, driver: Driver) -> str:
+        base_card = self._build_driver_profile_card(driver).split("Что хотите изменить?")[0].rstrip()
+        return base_card + (
+            "\nЧто хотите изменить?\n"
+            "1. ФИО\n"
+            "2. Телефон\n"
+            "3. Город/адрес\n"
+            "4. Автомобиль\n"
+            "5. Госномер\n"
+            "6. СТС/техпаспорт\n"
+            "7. Водительское удостоверение\n"
+            "8. СМЗ/тип сотрудничества\n"
+            "9. Менеджер"
+        )
+
     def _handle_stateful_support_menu(
         self,
         db: Session,
@@ -1714,8 +1753,8 @@ class DialogueEngine:
                     self._set_support_context(
                         driver,
                         {
-                            "mode": "driver_update",
-                            "menu": "driver_update_menu",
+                            "mode": "driver_profile_update",
+                            "menu": "profile_update_menu",
                             "driver_id": profile.id,
                             "vehicle_id": getattr(profile.vehicle, "id", None),
                             "created_at": datetime.utcnow().isoformat(),
@@ -1724,7 +1763,7 @@ class DialogueEngine:
                     )
                     db.add(driver)
                     create_conversation_event(db, driver, "driver_update_profile_found", {"driver_id": profile.id})
-                    return self._build_driver_profile_card(profile)
+                    return self._build_profile_update_menu(profile)
                 self._set_support_context(
                     driver,
                     {
@@ -1769,8 +1808,8 @@ class DialogueEngine:
                 self._set_support_context(
                     driver,
                     {
-                        "mode": "driver_update",
-                        "menu": "driver_update_menu",
+                        "mode": "driver_profile_update",
+                        "menu": "profile_update_menu",
                         "driver_id": profile.id,
                         "vehicle_id": getattr(profile.vehicle, "id", None),
                         "created_at": datetime.utcnow().isoformat(),
@@ -1779,7 +1818,7 @@ class DialogueEngine:
                 )
                 db.add(driver)
                 create_conversation_event(db, driver, "driver_update_profile_found", {"driver_id": profile.id, "lookup": lookup_value})
-                return self._build_driver_profile_card(profile)
+                return self._build_profile_update_menu(profile)
             driver.dialog_mode = "manual"
             driver.requires_attention = True
             db.add(driver)
@@ -1795,6 +1834,53 @@ class DialogueEngine:
             set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_lookup_failed")
             create_conversation_event(db, driver, "driver_update_profile_missing", {"lookup": lookup_value})
             return "Не нашёл профиль. Передаю менеджеру."
+
+        if context.get("mode") == "driver_profile_update" and context.get("menu") == "profile_update_menu":
+            menu_map = {
+                "1": "full_name",
+                "2": "phone",
+                "3": "location",
+                "4": "vehicle",
+                "5": "plate_number",
+                "6": "registration_certificate",
+                "7": "driver_license_number",
+                "8": "employment_type",
+                "9": "human_operator",
+            }
+            choice = menu_map.get(normalized)
+            if not choice:
+                return None
+            self._set_support_context(
+                driver,
+                {
+                    "mode": "driver_profile_update",
+                    "menu": f"profile_update_{choice}",
+                    "driver_id": context.get("driver_id"),
+                    "vehicle_id": context.get("vehicle_id"),
+                    "created_at": context.get("created_at") or datetime.utcnow().isoformat(),
+                    "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                    "field": choice,
+                },
+            )
+            db.add(driver)
+            if choice == "human_operator":
+                driver.dialog_mode = "manual"
+                driver.requires_attention = True
+                set_application_status(db, application, "awaiting_manager_review", yandex_status="human_required")
+                create_conversation_event(db, driver, "human_required", {"source": "profile_update_menu"})
+                return "Ваш запрос передан менеджеру. Ожидайте ответа."
+            create_conversation_event(db, driver, "driver_profile_update_requested", {"field": choice})
+            prompt_map = {
+                "full_name": "Напишите новые ФИО одним сообщением.",
+                "phone": "Напишите новый номер телефона.",
+                "location": "Напишите новый город или адрес.",
+                "vehicle": "Пришлите данные по автомобилю или фото документов.",
+                "plate_number": "Напишите новый госномер.",
+                "registration_certificate": "Пришлите фото или номер СТС/техпаспорта.",
+                "driver_license_number": "Пришлите фото или номер водительского удостоверения.",
+                "employment_type": "Напишите новый тип сотрудничества или СМЗ.",
+            }
+            return prompt_map[choice]
 
         return None
 

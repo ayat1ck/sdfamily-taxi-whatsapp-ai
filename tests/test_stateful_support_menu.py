@@ -5,9 +5,11 @@ from unittest.mock import patch
 try:
     from app.dialog.engine import DialogueEngine
     from app.dialog.states import DialogueState
+    from app.dialog.faq import classify_dialog_intent
 except ModuleNotFoundError:  # pragma: no cover - fallback for minimal runtimes
     DialogueEngine = None
     DialogueState = None
+    classify_dialog_intent = None
 
 
 class DummyDB:
@@ -54,7 +56,7 @@ class StatefulSupportMenuTests(unittest.TestCase):
         self.assertEqual(driver.support_context_json["mode"], "existing_driver_support")
         self.assertEqual(driver.support_context_json["menu"], "existing_driver_main")
 
-    def test_existing_driver_menu_option_four_requests_update(self):
+    def test_existing_driver_menu_option_four_requests_profile_update(self):
         driver = self._driver(
             {
                 "mode": "existing_driver_support",
@@ -76,14 +78,32 @@ class StatefulSupportMenuTests(unittest.TestCase):
                 2,
             )
         self.assertIn("Нашёл ваш профиль", reply)
-        self.assertEqual(driver.support_context_json["mode"], "driver_update")
-        self.assertEqual(driver.support_context_json["menu"], "driver_update_menu")
+        self.assertIn("Что хотите изменить?", reply)
+        self.assertEqual(driver.support_context_json["mode"], "driver_profile_update")
+        self.assertEqual(driver.support_context_json["menu"], "profile_update_menu")
 
     def test_direct_update_phrase_routes_to_driver_update_request(self):
-        self.assertEqual(
-            __import__("app.dialog.faq", fromlist=["classify_dialog_intent"]).classify_dialog_intent("я хочу поменять авто"),
-            "driver_update_request",
-        )
+        phrases = [
+            "поменять машину",
+            "поменять авто",
+            "изменить госномер",
+            "обновить СТС",
+            "поменять права",
+            "заменить водительское удостоверение",
+            "изменить номер телефона",
+            "поменять ФИО",
+            "исправить имя",
+            "исправить данные",
+            "поменять город",
+            "изменить адрес",
+            "обновить документы",
+            "сменить данные",
+            "данные неправильно",
+            "ошибка в данных",
+        ]
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                self.assertEqual(classify_dialog_intent(phrase), "driver_update_request")
 
     def test_driver_lookup_found_returns_profile_card(self):
         driver = self._driver(
@@ -110,7 +130,8 @@ class StatefulSupportMenuTests(unittest.TestCase):
                 3,
             )
         self.assertIn("Нашёл ваш профиль", reply)
-        self.assertEqual(driver.support_context_json["mode"], "driver_update")
+        self.assertIn("Что хотите изменить?", reply)
+        self.assertEqual(driver.support_context_json["mode"], "driver_profile_update")
 
     def test_driver_lookup_missing_asks_for_iin_or_phone(self):
         driver = self._driver(
@@ -137,6 +158,24 @@ class StatefulSupportMenuTests(unittest.TestCase):
             )
         self.assertIn("Не нашёл профиль", reply)
         self.assertEqual(driver.support_context_json["mode"], "manual")
+
+    def test_profile_update_context_handles_documents_as_correction(self):
+        driver = self._driver(
+            {
+                "mode": "driver_profile_update",
+                "menu": "profile_update_menu",
+                "driver_id": 1,
+                "vehicle_id": 7,
+                "created_at": "2026-01-01T00:00:00",
+                "expires_at": "2099-01-01T00:30:00",
+                "field": "registration_certificate",
+            }
+        )
+        application = SimpleNamespace(status="collecting_data")
+        incoming = SimpleNamespace(message_type="image", mime_type="image/jpeg", filename="photo.jpg", media_id="m1")
+        with patch("app.dialog.engine.create_conversation_event"):
+            reply = self.engine._handle_document(DummyDB(), driver, application, incoming, 5)
+        self.assertIn("обновления данных профиля", reply)
 
 
 if __name__ == "__main__":
