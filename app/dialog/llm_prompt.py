@@ -59,6 +59,10 @@ def build_system_prompt() -> str:
         "Номер ВУ возвращай с пробелом между серией и номером, как CQ 981709 или 374653 8475853 — не склеивай в одну длинную цифру. "
         "Даты возвращай в формате YYYY-MM-DD. "
         "Телефон возвращай в международном формате с плюсом. "
+        "Support intent всегда выше registration. Используй отдельные intent: existing_driver_support, human_operator, payout_support, tariff_support, yandex_problem, blocking_support, rental_car_question, courier_registration. "
+        "Примеры: 'я уже водитель', 'мен тіркелгенмін' => existing_driver_support; 'оператор', 'менеджер керек' => human_operator; 'выплата не пришла', 'ақша түспеді' => payout_support; "
+        "'включите тариф', 'тариф ашылмай тұр' => tariff_support; 'не могу войти в Яндекс Про', 'парк көрінбей тұр' => yandex_problem; "
+        "'заблокировали', 'аккаунт бұғатталды' => blocking_support; 'машина в аренду', 'көлік жалға' => rental_car_question; 'хочу курьером', 'курьер болып тіркелем' => courier_registration. "
         "Если не уверен, лучше clarification, чем ошибочное заполнение."
     )
 

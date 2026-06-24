@@ -436,6 +436,19 @@ class DeterministicAIProvider:
                 suggested_next_action=DialogueState.ASK_FULL_NAME.value,
             )
 
+        if current_state != DialogueState.NEW and looks_like_support_question(text):
+            support_reply = _resolve_support_during_registration(current_state, text, self.knowledge_base)
+            if support_reply:
+                return AIResult(
+                    support_reply,
+                    "help",
+                    {},
+                    state,
+                    0.86,
+                    reasoning_summary=f"support_before_registration:{current_state.value}",
+                    suggested_next_action=state,
+                )
+
         if _is_in_flow_registration_state(current_state):
             step_help = _step_help_result(current_state, text, state)
             if step_help:
@@ -599,7 +612,24 @@ def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallba
     normalized.reasoning_summary = normalized.reasoning_summary or f"llm:{normalized.intent}"
     normalized.suggested_next_action = normalized.suggested_next_action or normalized.next_state or current_state.value
 
-    if normalized.intent not in {"registration", "confirmation", "correction", "faq", "help", "smalltalk", "clarification", "field_edit"}:
+    if normalized.intent not in {
+        "registration",
+        "confirmation",
+        "correction",
+        "faq",
+        "help",
+        "smalltalk",
+        "clarification",
+        "field_edit",
+        "existing_driver_support",
+        "human_operator",
+        "payout_support",
+        "tariff_support",
+        "yandex_problem",
+        "blocking_support",
+        "rental_car_question",
+        "courier_registration",
+    }:
         return _fallback_from(fallback, result, "unknown_intent")
 
     try:

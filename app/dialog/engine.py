@@ -29,10 +29,7 @@ from app.documents.registration_flow import (
     build_recognition_reply,
     expand_uploaded_document_types,
     is_expecting_data_document,
-    is_registration_collecting_state,
     next_registration_state,
-    prompt_for_state,
-    resolve_document_type_for_upload,
     skip_data_documents_for_manual_entry,
 )
 from app.documents.service import upsert_document
@@ -64,6 +61,17 @@ from app.whatsapp.media import WhatsAppMediaClient
 from app.whatsapp.parser import ParsedWhatsAppMessage
 
 logger = get_logger(__name__)
+
+SUPPORT_INTENTS = {
+    "existing_driver_support",
+    "human_operator",
+    "payout_support",
+    "tariff_support",
+    "yandex_problem",
+    "blocking_support",
+    "rental_car_question",
+    "courier_registration",
+}
 
 DUPLICATE_REJECTED_REPLY = (
     "Такой водитель уже зарегистрирован.\n\n"
@@ -163,14 +171,23 @@ class DialogueEngine:
         db.flush()
         state = DialogueState(driver.state or DialogueState.NEW.value)
 
+        if incoming.message_type == "text" and _looks_like_operator_request(normalize_text_token(incoming.text or "")):
+            priority_reply = self._handle_priority_interrupts(
+                db,
+                driver,
+                application,
+                state,
+                incoming.text or "",
+                incoming_message.id,
+            )
+            if priority_reply:
+                return self._respond(db, driver, application, priority_reply)
+
         if state == DialogueState.DUPLICATE_REJECTED and incoming.message_type in {"unsupported", "image", "document"}:
             return self._respond(db, driver, application, DUPLICATE_REJECTED_REPLY)
 
         if incoming.message_type == "unsupported":
             return self._respond(db, driver, application, "Поддерживаются только текст, изображение и документ.")
-
-        if incoming.message_type in {"image", "document"}:
-            return self._handle_document(db, driver, application, incoming, incoming_message.id)
 
         command_reply = self._handle_special_commands(db, driver, application, incoming.text or "")
         if command_reply:
@@ -196,6 +213,9 @@ class DialogueEngine:
         )
         if priority_reply:
             return self._respond(db, driver, application, priority_reply)
+
+        if incoming.message_type in {"image", "document"}:
+            return self._handle_document(db, driver, application, incoming, incoming_message.id)
 
         if looks_like_manual_data_entry(incoming.text or "") and is_expecting_data_document(driver, state):
             return self._handle_manual_data_entry(
@@ -228,7 +248,7 @@ class DialogueEngine:
         if state == DialogueState.NEW:
             ai_result = self.ai.respond(state.value, incoming.text or "", driver)
             self._record_ai_trace(db, incoming_message.id, driver, state.value, incoming.text or "", ai_result)
-            if ai_result.intent in {"faq", "help", "smalltalk"}:
+            if ai_result.intent in {"faq", "help", "smalltalk", *SUPPORT_INTENTS}:
                 return self._respond(db, driver, application, self._format_new_state_assistant_reply(ai_result.reply))
 
             create_conversation_event(db, driver, "started_onboarding")
@@ -258,7 +278,7 @@ class DialogueEngine:
 
         ai_result = self.ai.respond(state.value, incoming.text or "", driver)
         self._record_ai_trace(db, incoming_message.id, driver, state.value, incoming.text or "", ai_result)
-        if ai_result.intent in {"faq", "help", "smalltalk"}:
+        if ai_result.intent in {"faq", "help", "smalltalk", *SUPPORT_INTENTS}:
             return self._respond(db, driver, application, ai_result.reply.strip())
         if ai_result.intent == "clarification":
             if ai_result.clear_suggested_clarification:
@@ -456,14 +476,30 @@ class DialogueEngine:
         incoming_message_id: int | None = None,
     ) -> str:
         state = DialogueState(driver.state or DialogueState.NEW.value)
-        if self._is_yandex_pro_followup_state(state):
+        media_context = self._classify_media_context(driver, state)
+        if media_context == "correction_context":
+            return self._respond(
+                db,
+                driver,
+                application,
+                "Файл получил. Для исправления данных напишите новое значение текстом или попросите менеджера.",
+            )
+        if media_context == "unknown_context":
+            return self._respond(
+                db,
+                driver,
+                application,
+                "Фото получил. Сейчас оно не считается документом автоматически. Отправьте фото на шаге, где бот прямо просит документ, или напишите, чем помочь.",
+            )
+        if media_context in {"support_context", "existing_driver_support_context"}:
             driver.requires_attention = True
             db.add(driver)
             create_conversation_event(
                 db,
                 driver,
-                "yandex_pro_attachment_received",
+                "support_attachment_received",
                 {
+                    "media_context": media_context,
                     "message_type": incoming.message_type,
                     "mime_type": incoming.mime_type,
                     "filename": incoming.filename,
@@ -500,22 +536,12 @@ class DialogueEngine:
 
         if state in DOCUMENT_STATE_MAP:
             document_type = DOCUMENT_STATE_MAP[state]
-        elif is_registration_collecting_state(state):
-            document_type = resolve_document_type_for_upload(state, driver, detected_type=detected_type)
-            if not document_type:
-                next_state = next_registration_state(driver, vehicle)
-                if next_state in DOCUMENT_STATE_MAP:
-                    expected_label = DOCUMENT_TYPE_LABELS.get(DOCUMENT_STATE_MAP[next_state], "документ")
-                    hint = f"📸 Сейчас нужно фото: {expected_label}."
-                else:
-                    hint = f"📋 Сейчас нужен ответ по шагу:\n{prompt_for_state(state)}"
-                return self._respond(db, driver, application, hint)
         else:
             return self._respond(
                 db,
                 driver,
                 application,
-                "Сейчас ожидается текстовый ответ. Отправьте сообщение по текущему шагу.",
+                "Фото получил. Сейчас ожидается текстовый ответ по текущему шагу. Документ отправляйте только когда бот прямо просит фото документа.",
             )
 
         recognized: dict[str, str] = {}
@@ -595,6 +621,19 @@ class DialogueEngine:
         else:
             reply = build_recognition_reply(stored_document_types, recognized, next_state)
         return self._respond(db, driver, application, reply)
+
+    def _classify_media_context(self, driver: Driver, state: DialogueState) -> str:
+        if driver.dialog_mode in {"manual", "paused", "closed"}:
+            return "support_context"
+        if state == DialogueState.COMPLETED:
+            return "existing_driver_support_context"
+        if self._is_yandex_pro_followup_state(state) or driver.active_support_topic:
+            return "support_context"
+        if self._get_pending_field_edit(driver) or state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
+            return "correction_context"
+        if state in DOCUMENT_STATE_MAP:
+            return "registration_context"
+        return "unknown_context"
 
     def _check_duplicate_constraints(
         self,
@@ -1074,6 +1113,50 @@ class DialogueEngine:
             return None
 
         detected_intent = classify_dialog_intent(message_text, current_state=state.value)
+        if detected_intent == "human_operator" or _looks_like_operator_request(normalized):
+            return self._activate_manual_mode(
+                db,
+                driver,
+                application,
+                state,
+                message_text,
+                incoming_message_id,
+                intent="human_operator",
+            )
+
+        if detected_intent == "existing_driver_support" or _looks_like_existing_driver_intent(normalized):
+            reply = _existing_driver_options_reply()
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="existing_driver_support",
+                reply=reply,
+                reasoning_summary="priority:existing_driver_support",
+            )
+            return reply
+
+        support_intent = _classify_priority_support_intent(normalized)
+        if support_intent:
+            reply = _priority_support_reply(support_intent)
+            driver.requires_attention = True
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status=support_intent)
+            create_conversation_event(db, driver, support_intent, {"message": message_text})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent=support_intent,
+                reply=reply,
+                reasoning_summary=f"priority:{support_intent}",
+            )
+            return reply
+
         if detected_intent == "smalltalk":
             reply = SMALLTALK_REPLY
             self._record_system_trace(
@@ -1228,6 +1311,38 @@ class DialogueEngine:
             return "Принял. Передаю менеджеру запрос на изменение данных водителя."
 
         return None
+
+    def _activate_manual_mode(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+        incoming_message_id: int,
+        *,
+        intent: str,
+    ) -> str:
+        reply = "Ваш запрос передан менеджеру. Ожидайте ответа."
+        driver.requires_attention = True
+        driver.dialog_mode = "manual"
+        driver.active_support_topic = None
+        driver.active_support_step = None
+        driver.support_context_json = {"human_required": True, "source_state": state.value}
+        db.add(driver)
+        set_application_status(db, application, "awaiting_manager_review", yandex_status="human_required")
+        create_conversation_event(db, driver, "human_required", {"message": message_text})
+        self._record_system_trace(
+            db,
+            incoming_message_id,
+            driver,
+            state.value,
+            message_text,
+            intent=intent,
+            reply=reply,
+            reasoning_summary=f"priority:{intent}",
+        )
+        return reply
 
     def _build_status_reply(self, driver: Driver, application) -> str:
         status = application.status or "collecting_data"
@@ -1620,7 +1735,7 @@ def _looks_like_status_request(normalized: str) -> bool:
     return normalized in exact or any(token in normalized for token in contains)
 
 
-def _looks_like_operator_request(normalized: str) -> bool:
+def _looks_like_operator_request_legacy(normalized: str) -> bool:
     markers = (
         "оператор",
         "менеджер",
@@ -1635,7 +1750,189 @@ def _looks_like_operator_request(normalized: str) -> bool:
     return any(marker in normalized for marker in markers)
 
 
+def _looks_like_operator_request(normalized: str) -> bool:
+    exact = {
+        "оператор",
+        "менеджер",
+        "техподдержка",
+        "живой человек",
+        "свяжите с менеджером",
+        "адам оператор",
+        "менеджер керек",
+        "тірі адам",
+        "қолдау керек",
+    }
+    if normalized.strip(" ?!.,") in exact:
+        return True
+    markers = (
+        "operator",
+        "manager",
+        "support",
+        "оператор",
+        "менеджер",
+        "техподдержка",
+        "поддержка",
+        "живой человек",
+        "свяжите с менеджером",
+        "соедините с менеджером",
+        "позовите менеджера",
+        "адам оператор",
+        "менеджер керек",
+        "тірі адам",
+        "қолдау керек",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _classify_priority_support_intent(normalized: str) -> str | None:
+    if _looks_like_payout_support(normalized):
+        return "payout_support"
+    if _looks_like_tariff_issue(normalized) or _looks_like_tariff_support(normalized):
+        return "tariff_support"
+    if _looks_like_yandex_login_support(normalized) or _looks_like_yandex_problem(normalized):
+        return "yandex_problem"
+    if _looks_like_blocking_support(normalized):
+        return "blocking_support"
+    if _looks_like_rental_car_question(normalized):
+        return "rental_car_question"
+    if _looks_like_courier_registration(normalized):
+        return "courier_registration"
+    return None
+
+
+def _priority_support_reply(intent: str) -> str:
+    replies = {
+        "payout_support": "Принял вопрос по выплатам. Передаю менеджеру для проверки баланса, вывода или задержки выплаты.",
+        "tariff_support": "Принял вопрос по тарифам. Передаю менеджеру, чтобы проверить доступы и настройки тарифов.",
+        "yandex_problem": "Принял проблему с Яндекс Про. Передаю менеджеру для проверки входа, парка, приглашения или статуса аккаунта.",
+        "blocking_support": "Принял вопрос по блокировке. Передаю менеджеру для проверки причины и дальнейших действий.",
+        "rental_car_question": "Принял вопрос по аренде авто. Передаю менеджеру, он подскажет доступные варианты и условия.",
+        "courier_registration": "Принял вопрос по курьерской регистрации. Передаю менеджеру, чтобы отдельно проверить возможность подключения.",
+    }
+    return replies.get(intent, "Принял. Передаю вопрос менеджеру.")
+
+
+def _looks_like_payout_support(normalized: str) -> bool:
+    markers = (
+        "выплата",
+        "выплаты",
+        "вывод",
+        "деньги",
+        "баланс",
+        "моментальная выплата",
+        "не пришли деньги",
+        "ақша",
+        "төлем",
+        "төлем қашан",
+        "ақша түспеді",
+        "баланс шықпай тұр",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_tariff_support(normalized: str) -> bool:
+    markers = (
+        "тариф",
+        "комфорт",
+        "бизнес",
+        "межгород",
+        "экспресс",
+        "грузовой",
+        "нет заказов",
+        "заказы не идут",
+        "тариф ашылмай тұр",
+        "комфорт қосыңыз",
+        "тапсырыс жоқ",
+        "заказ жоқ",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_yandex_problem(normalized: str) -> bool:
+    markers = (
+        "яндекс про",
+        "не могу войти",
+        "не заходит",
+        "парк не вижу",
+        "нет парка",
+        "не пришло приглашение",
+        "аккаунт не активен",
+        "код не приходит",
+        "смс не приходит",
+        "yandex pro",
+        "яндекс кірмей тұр",
+        "парк көрінбей тұр",
+        "код келмеді",
+        "смс келмеді",
+        "аккаунт ашылмай тұр",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_blocking_support(normalized: str) -> bool:
+    markers = (
+        "заблокировали",
+        "блокировка",
+        "заблокирован",
+        "доступ закрыт",
+        "аккаунт заблокирован",
+        "профиль заблокирован",
+        "бұғатталды",
+        "аккаунт бұғат",
+        "кіре алмаймын блок",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_rental_car_question(normalized: str) -> bool:
+    markers = (
+        "аренда авто",
+        "арендная машина",
+        "машина в аренду",
+        "есть авто",
+        "нужна машина",
+        "таксопарк дает машину",
+        "көлік жалға",
+        "аренда көлік",
+        "машина керек",
+        "көлік бар ма",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_courier_registration(normalized: str) -> bool:
+    markers = (
+        "курьер",
+        "курьером",
+        "доставка",
+        "еда",
+        "хочу курьером",
+        "курьерская регистрация",
+        "курьер болып",
+        "жеткізу",
+        "доставкаға тіркел",
+        "курьер тіркеу",
+    )
+    return any(marker in normalized for marker in markers)
+
+
 def _looks_like_existing_driver_intent(normalized: str) -> bool:
+    readable_markers = (
+        "я уже зарегистрирован",
+        "я уже водитель",
+        "я работаю у вас",
+        "я есть в базе",
+        "я подключен",
+        "я в вашем парке",
+        "уже зарегистрирован",
+        "уже водитель",
+        "мен тіркелгенмін",
+        "мен жүргізушімін",
+        "сіздің парктемін",
+        "паркке қосылғанмын",
+    )
+    if any(marker in normalized for marker in readable_markers):
+        return True
     markers = (
         "я уже зарегистрирован",
         "я уже водитель",
