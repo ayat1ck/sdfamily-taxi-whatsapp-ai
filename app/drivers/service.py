@@ -31,3 +31,20 @@ def find_other_driver_by_iin(db: Session, iin: str, exclude_driver_id: int | Non
     if exclude_driver_id is not None:
         query = query.where(Driver.id != exclude_driver_id)
     return db.scalar(query)
+
+
+def find_driver_by_whatsapp_phone(db: Session, whatsapp_phone: str) -> Driver | None:
+    phone = normalize_phone(whatsapp_phone)
+    return db.scalar(select(Driver).where(Driver.whatsapp_phone == phone))
+
+
+def find_driver_by_phone(db: Session, phone: str) -> Driver | None:
+    normalized = normalize_phone(phone)
+    return db.scalar(select(Driver).where(Driver.phone == normalized))
+
+
+def find_driver_by_iin(db: Session, iin: str) -> Driver | None:
+    digits = "".join(ch for ch in iin if ch.isdigit())
+    if len(digits) != 12:
+        return None
+    return db.scalar(select(Driver).where(Driver.iin == digits))

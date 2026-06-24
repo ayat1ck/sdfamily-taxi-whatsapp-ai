@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -34,7 +34,13 @@ from app.documents.registration_flow import (
 )
 from app.documents.service import upsert_document
 from app.drivers.models import Driver
-from app.drivers.service import find_other_driver_by_iin, update_driver_state
+from app.drivers.service import (
+    find_driver_by_iin,
+    find_driver_by_phone,
+    find_driver_by_whatsapp_phone,
+    find_other_driver_by_iin,
+    update_driver_state,
+)
 from app.integrations.google_drive import GoogleDriveClient
 from app.integrations.google_sheets import GoogleSheetsClient
 from app.integrations.yandex.catalog import resolve_brand_input, resolve_model_input
@@ -188,6 +194,17 @@ class DialogueEngine:
 
         if incoming.message_type == "unsupported":
             return self._respond(db, driver, application, "Поддерживаются только текст, изображение и документ.")
+
+        support_menu_reply = self._handle_stateful_support_menu(
+            db,
+            driver,
+            application,
+            state,
+            incoming.text or "",
+            incoming_message.id,
+        )
+        if support_menu_reply:
+            return self._respond(db, driver, application, support_menu_reply)
 
         command_reply = self._handle_special_commands(db, driver, application, incoming.text or "")
         if command_reply:
@@ -1129,6 +1146,17 @@ class DialogueEngine:
             )
 
         if detected_intent == "existing_driver_support" or _looks_like_existing_driver_intent(normalized):
+            self._set_support_context(
+                driver,
+                {
+                    "mode": "existing_driver_support",
+                    "menu": "existing_driver_main",
+                    "created_at": datetime.utcnow().isoformat(),
+                    "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                },
+            )
+            db.add(driver)
+            create_conversation_event(db, driver, "existing_driver_support_menu_opened", {"message": message_text})
             reply = _existing_driver_options_reply()
             self._record_system_trace(
                 db,
@@ -1568,6 +1596,207 @@ class DialogueEngine:
             f"📍 Офис: {office_address}\n"
             f"{OFFICE_HOURS}"
         )
+
+    def _get_support_context(self, driver: Driver) -> dict:
+        context = driver.support_context_json or {}
+        return context if isinstance(context, dict) else {}
+
+    def _set_support_context(self, driver: Driver, context: dict | None) -> None:
+        driver.support_context_json = context or None
+        driver.updated_at = datetime.utcnow()
+
+    def _clear_support_context(self, driver: Driver) -> None:
+        driver.support_context_json = None
+        driver.updated_at = datetime.utcnow()
+
+    def _support_context_is_expired(self, context: dict) -> bool:
+        expires_at = context.get("expires_at")
+        if not isinstance(expires_at, str) or not expires_at:
+            return False
+        try:
+            return datetime.fromisoformat(expires_at) <= datetime.utcnow()
+        except ValueError:
+            return False
+
+    def _looks_like_driver_lookup_payload(self, message_text: str) -> bool:
+        normalized = normalize_text_token(repair_mojibake(message_text))
+        digits = "".join(ch for ch in normalized if ch.isdigit())
+        if len(digits) in {10, 11, 12}:
+            return True
+        compact = "".join(ch for ch in normalized if ch.isalnum())
+        if len(compact) == 12 and compact.isdigit():
+            return True
+        return any(marker in normalized for marker in ("iin", "ийн", "ииин"))
+
+    def _build_driver_profile_card(self, driver: Driver) -> str:
+        vehicle = driver.vehicle
+        docs = []
+        if getattr(vehicle, "registration_certificate", None):
+            docs.append(f"СТС: {vehicle.registration_certificate}")
+        if driver.driver_license_number:
+            docs.append(f"ВУ: {driver.driver_license_number}")
+        if driver.iin:
+            docs.append(f"ИИН: {driver.iin}")
+        vehicle_name = " ".join(part for part in [getattr(vehicle, "brand", None), getattr(vehicle, "model", None)] if part) or "не указан"
+        return (
+            "Нашёл ваш профиль:\n"
+            f"ФИО: {driver.full_name or 'не указан'}\n"
+            f"Телефон: {driver.phone or driver.whatsapp_phone or 'не указан'}\n"
+            f"Авто: {vehicle_name} {getattr(vehicle, 'year', None) or 'не указан'}\n"
+            f"Госномер: {getattr(vehicle, 'plate_number', None) or 'не указан'}\n"
+            f"Документы: {', '.join(docs) if docs else 'не указаны'}\n"
+            "Что хотите изменить?\n"
+            "1. Автомобиль\n"
+            "2. Госномер\n"
+            "3. СТС/техпаспорт\n"
+            "4. Водительское удостоверение\n"
+            "5. Номер телефона\n"
+            "6. Менеджер"
+        )
+
+    def _handle_stateful_support_menu(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+        incoming_message_id: int,
+    ) -> str | None:
+        context = self._get_support_context(driver)
+        if not context:
+            return None
+        if self._support_context_is_expired(context):
+            self._clear_support_context(driver)
+            db.add(driver)
+            return None
+
+        normalized = normalize_text_token(repair_mojibake(message_text)).strip()
+        if context.get("mode") == "existing_driver_support" and context.get("menu") == "existing_driver_main":
+            menu_map = {
+                "1": "payout_support",
+                "2": "yandex_problem",
+                "3": "tariff_support",
+                "4": "driver_update_request",
+                "5": "human_operator",
+            }
+            choice = menu_map.get(normalized)
+            if choice == "human_operator":
+                self._set_support_context(
+                    driver,
+                    {
+                        "mode": "manual",
+                        "menu": "manual_mode",
+                        "created_at": datetime.utcnow().isoformat(),
+                        "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                    },
+                )
+                driver.dialog_mode = "manual"
+                driver.requires_attention = True
+                db.add(driver)
+                set_application_status(db, application, "awaiting_manager_review", yandex_status="human_required")
+                create_conversation_event(db, driver, "human_required", {"source": "existing_driver_support_menu"})
+                self._record_system_trace(
+                    db,
+                    incoming_message_id,
+                    driver,
+                    state.value,
+                    message_text,
+                    intent="human_operator",
+                    reply="Ваш запрос передан менеджеру. Ожидайте ответа.",
+                    reasoning_summary="stateful_support_menu:human_operator",
+                    priority_intent="human_operator",
+                )
+                return "Ваш запрос передан менеджеру. Ожидайте ответа."
+            if choice == "driver_update_request":
+                profile = find_driver_by_whatsapp_phone(db, driver.whatsapp_phone)
+                if profile:
+                    self._set_support_context(
+                        driver,
+                        {
+                            "mode": "driver_update",
+                            "menu": "driver_update_menu",
+                            "driver_id": profile.id,
+                            "vehicle_id": getattr(profile.vehicle, "id", None),
+                            "created_at": datetime.utcnow().isoformat(),
+                            "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                        },
+                    )
+                    db.add(driver)
+                    create_conversation_event(db, driver, "driver_update_profile_found", {"driver_id": profile.id})
+                    return self._build_driver_profile_card(profile)
+                self._set_support_context(
+                    driver,
+                    {
+                        "mode": "driver_lookup",
+                        "reason": "driver_update_request",
+                        "created_at": datetime.utcnow().isoformat(),
+                        "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                    },
+                )
+                db.add(driver)
+                create_conversation_event(db, driver, "driver_update_profile_missing", {"source": "existing_driver_support_menu"})
+                return "Не нашёл профиль по этому WhatsApp-номеру. Напишите ИИН или номер телефона, на который зарегистрированы в Яндекс Про."
+            if choice:
+                self._set_support_context(
+                    driver,
+                    {
+                        "mode": choice,
+                        "menu": choice,
+                        "created_at": datetime.utcnow().isoformat(),
+                        "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                    },
+                )
+                db.add(driver)
+                create_conversation_event(db, driver, choice, {"source": "existing_driver_support_menu"})
+                reply_map = {
+                    "payout_support": _priority_support_reply("payout_support"),
+                    "yandex_problem": _priority_support_reply("yandex_problem"),
+                    "tariff_support": _priority_support_reply("tariff_support"),
+                }
+                return reply_map[choice]
+
+        if context.get("mode") == "driver_lookup":
+            if not self._looks_like_driver_lookup_payload(message_text):
+                return None
+            lookup_value = "".join(ch for ch in message_text if ch.isdigit())
+            profile = (
+                find_driver_by_phone(db, lookup_value)
+                or find_driver_by_whatsapp_phone(db, lookup_value)
+                or find_driver_by_iin(db, lookup_value)
+            )
+            if profile:
+                self._set_support_context(
+                    driver,
+                    {
+                        "mode": "driver_update",
+                        "menu": "driver_update_menu",
+                        "driver_id": profile.id,
+                        "vehicle_id": getattr(profile.vehicle, "id", None),
+                        "created_at": datetime.utcnow().isoformat(),
+                        "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                    },
+                )
+                db.add(driver)
+                create_conversation_event(db, driver, "driver_update_profile_found", {"driver_id": profile.id, "lookup": lookup_value})
+                return self._build_driver_profile_card(profile)
+            driver.dialog_mode = "manual"
+            driver.requires_attention = True
+            db.add(driver)
+            self._set_support_context(
+                driver,
+                {
+                    "mode": "manual",
+                    "menu": "manual_mode",
+                    "created_at": datetime.utcnow().isoformat(),
+                    "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                },
+            )
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_lookup_failed")
+            create_conversation_event(db, driver, "driver_update_profile_missing", {"lookup": lookup_value})
+            return "Не нашёл профиль. Передаю менеджеру."
+
+        return None
 
     def _get_pending_field_edit(self, driver: Driver) -> str | None:
         context = driver.support_context_json or {}
