@@ -931,6 +931,7 @@ class DialogueEngine:
         reply: str,
         reasoning_summary: str,
         priority_intent: str | None = None,
+        matched_rule: str | None = None,
     ) -> None:
         incoming_message = next((message for message in driver.messages if message.id == message_id), None)
         if incoming_message is None:
@@ -938,6 +939,8 @@ class DialogueEngine:
         decision = {"intent": intent, "reply": reply}
         if priority_intent:
             decision["priority_intent"] = priority_intent
+        if matched_rule:
+            decision["matched_rule"] = matched_rule
         upsert_message_ai_trace(
             db,
             message=incoming_message,
@@ -1209,6 +1212,18 @@ class DialogueEngine:
                 priority_intent="existing_driver_support",
             )
             return reply
+
+        matched_rule = self._detect_driver_update_request(message_text)
+        if matched_rule:
+            return self._handle_driver_profile_update_entry(
+                db,
+                driver,
+                application,
+                state,
+                message_text,
+                incoming_message_id,
+                matched_rule=matched_rule,
+            )
 
         support_intent = _classify_priority_support_intent(normalized)
         if support_intent:
@@ -1708,6 +1723,58 @@ class DialogueEngine:
             "9. Менеджер"
         )
 
+    def _detect_driver_update_request(self, message_text: str) -> str | None:
+        normalized = normalize_text_token(repair_mojibake(message_text)).lower().strip(" ?!.,")
+        markers = (
+            "поменять машину",
+            "хочу поменять машину",
+            "поменять авто",
+            "хочу поменять авто",
+            "сменить машину",
+            "сменить авто",
+            "сменить автомобиль",
+            "заменить машину",
+            "заменить авто",
+            "поменял машину",
+            "купил новую машину",
+            "обновить машину",
+            "обновить авто",
+            "изменить автомобиль",
+            "изменить авто",
+            "изменить данные авто",
+            "изменить госномер",
+            "поменять госномер",
+            "обновить стс",
+            "поменять стс",
+            "поменять техпаспорт",
+            "заменить техпаспорт",
+            "поменять права",
+            "заменить права",
+            "обновить права",
+            "водительское удостоверение поменять",
+            "изменить номер телефона",
+            "поменять телефон",
+            "исправить фио",
+            "поменять фио",
+            "исправить имя",
+            "данные неправильно",
+            "изменить данные",
+            "обновить документы",
+            "поменять документы",
+            "көлікті ауыстыру",
+            "машина ауыстыру",
+            "автокөлік ауыстыру",
+            "техпаспорт ауыстыру",
+            "құжат ауыстыру",
+            "құжаттарды ауыстыру",
+            "құқық ауыстыру",
+            "номер ауыстыру",
+            "деректерді өзгерту",
+        )
+        if any(marker in normalized for marker in markers):
+            return next((marker for marker in markers if marker in normalized), "driver_update_request")
+        return None
+
     def _load_conversation_memory(self, db: Session, driver: Driver) -> list[dict[str, object]]:
         rows = db.scalars(
             select(Message)
@@ -1743,6 +1810,73 @@ class DialogueEngine:
             context["last_intent"] = "media"
         driver.support_context_json = context
         driver.updated_at = datetime.utcnow()
+
+    def _handle_driver_profile_update_entry(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+        incoming_message_id: int,
+        *,
+        matched_rule: str,
+    ) -> str:
+        profile = find_driver_by_whatsapp_phone(db, driver.whatsapp_phone)
+        if profile:
+            self._set_support_context(
+                driver,
+                {
+                    "mode": "driver_profile_update",
+                    "menu": "profile_update_menu",
+                    "driver_id": profile.id,
+                    "vehicle_id": getattr(profile.vehicle, "id", None),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                },
+            )
+            db.add(driver)
+            reply = self._build_profile_update_menu(profile)
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="driver_update_request",
+                reply=reply,
+                reasoning_summary="priority:driver_update_request",
+                priority_intent="driver_update_request",
+                matched_rule=matched_rule,
+            )
+            create_conversation_event(db, driver, "driver_profile_update_started", {"matched_rule": matched_rule, "driver_id": profile.id})
+            return reply
+
+        self._set_support_context(
+            driver,
+            {
+                "mode": "driver_lookup",
+                "reason": "driver_update_request",
+                "created_at": datetime.utcnow().isoformat(),
+                "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+            },
+        )
+        db.add(driver)
+        reply = "Не нашёл профиль по этому WhatsApp-номеру. Напишите ИИН или номер телефона, на который зарегистрированы в Яндекс Про."
+        self._record_system_trace(
+            db,
+            incoming_message_id,
+            driver,
+            state.value,
+            message_text,
+            intent="driver_update_request",
+            reply=reply,
+            reasoning_summary="priority:driver_update_request_no_profile",
+            priority_intent="driver_update_request",
+            matched_rule=matched_rule,
+        )
+        create_conversation_event(db, driver, "driver_profile_update_lookup_needed", {"matched_rule": matched_rule})
+        return reply
 
     def _handle_stateful_support_menu(
         self,

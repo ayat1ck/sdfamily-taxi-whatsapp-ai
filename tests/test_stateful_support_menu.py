@@ -22,7 +22,8 @@ class StatefulSupportMenuTests(unittest.TestCase):
         if DialogueEngine is None:
             self.skipTest("runtime dependencies unavailable")
         self.engine = DialogueEngine.__new__(DialogueEngine)
-        self.engine._record_system_trace = lambda *args, **kwargs: None
+        self.traces = []
+        self.engine._record_system_trace = lambda *args, **kwargs: self.traces.append(kwargs)
         self.engine.settings = SimpleNamespace(public_site_address="")
 
     def _driver(self, context=None):
@@ -202,6 +203,38 @@ class StatefulSupportMenuTests(unittest.TestCase):
         with patch("app.dialog.engine.create_conversation_event"):
             reply = self.engine._handle_document(DummyDB(), driver, application, incoming, 5)
         self.assertIn("обновления данных профиля", reply)
+
+    def test_driver_update_request_hard_interrupt_before_faq(self):
+        profile = self._driver()
+        states = [
+            DialogueState.NEW,
+            DialogueState.ASK_IIN,
+            DialogueState.ASK_DRIVER_LICENSE_NUMBER,
+            DialogueState.CONFIRM_DATA,
+            DialogueState.COMPLETED,
+        ]
+        for state in states:
+            with self.subTest(state=state.value):
+                self.traces.clear()
+                driver = self._driver()
+                application = SimpleNamespace(status="collecting_data")
+                with patch("app.dialog.engine.find_driver_by_whatsapp_phone", return_value=profile), patch(
+                    "app.dialog.engine.create_conversation_event"
+                ):
+                    reply = self.engine._handle_priority_interrupts(
+                        DummyDB(),
+                        driver,
+                        application,
+                        state,
+                        "Хочу поменять машину",
+                        99,
+                    )
+                self.assertIn("Нашёл ваш профиль", reply)
+                self.assertNotIn("Подходящие марка", reply)
+                self.assertNotIn("требования задаются таксопарком", reply)
+                self.assertTrue(self.traces)
+                self.assertEqual(self.traces[-1].get("priority_intent"), "driver_update_request")
+                self.assertEqual(self.traces[-1].get("matched_rule"), "поменять машину")
 
 
 if __name__ == "__main__":
