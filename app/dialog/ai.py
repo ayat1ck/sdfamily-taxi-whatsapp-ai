@@ -85,6 +85,11 @@ class AIResult:
     intent: str
     extracted_fields: dict[str, str] = field(default_factory=dict)
     next_state: str | None = None
+    action: str = "answer_only"
+    field: str | None = None
+    extracted_value: str | None = None
+    reply_hint: str = ""
+    should_interrupt_current_flow: bool = False
     confidence: float = 0.6
     provider: str = "deterministic"
     target_field: str | None = None
@@ -109,6 +114,11 @@ class AIModelResponse(BaseModel):
     intent: str = "clarification"
     extracted_fields: dict[str, str] = Field(default_factory=dict)
     next_state: str
+    action: str = "answer_only"
+    field: str | None = None
+    extracted_value: str | None = None
+    reply_hint: str = ""
+    should_interrupt_current_flow: bool = False
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     target_field: str | None = None
     new_value_raw: str | None = None
@@ -605,6 +615,11 @@ def _result_from_model(model: AIModelResponse, *, provider: str) -> AIResult:
         intent=model.intent,
         extracted_fields=dict(model.extracted_fields),
         next_state=model.next_state,
+        action=model.action,
+        field=model.field,
+        extracted_value=model.extracted_value,
+        reply_hint=model.reply_hint,
+        should_interrupt_current_flow=model.should_interrupt_current_flow,
         confidence=model.confidence,
         provider=provider,
         target_field=model.target_field,
@@ -640,8 +655,14 @@ def _normalize_llm_result(result: AIResult, current_state: DialogueState, fallba
         "blocking_support",
         "rental_car_question",
         "courier_registration",
+        "driver_profile_update",
+        "employment_type_change",
+        "unknown",
     }:
         return _fallback_from(fallback, result, "unknown_intent")
+
+    normalized.action = normalized.action or _default_action_for_intent(normalized.intent)
+    normalized.field = normalized.field or _default_field_for_result(normalized)
 
     try:
         next_state = DialogueState(normalized.next_state or current_state.value)
@@ -729,6 +750,37 @@ def _fallback_from(fallback: AIResult, raw_result: AIResult, reason: str, errors
     resolved.raw_decision = raw_result.raw_decision or _trace_payload(raw_result)
     resolved.provider = raw_result.provider or resolved.provider
     return resolved
+
+
+def _default_action_for_intent(intent: str) -> str:
+    if intent in {"faq", "help", "smalltalk"}:
+        return "answer_only"
+    if intent in {
+        "existing_driver_support",
+        "driver_profile_update",
+        "payout_support",
+        "tariff_support",
+        "yandex_problem",
+        "blocking_support",
+        "human_operator",
+        "employment_type_change",
+    }:
+        return "start_flow"
+    if intent == "registration":
+        return "keep_current_flow"
+    if intent in {"correction", "field_edit"}:
+        return "update_field"
+    if intent == "clarification":
+        return "ask_clarification"
+    return "answer_only"
+
+
+def _default_field_for_result(result: AIResult) -> str | None:
+    if result.target_field:
+        return result.target_field
+    if result.extracted_fields:
+        return next(iter(result.extracted_fields.keys()))
+    return None
 
 
 def _allowed_next_states(current_state: DialogueState) -> list[str]:

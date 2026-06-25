@@ -279,22 +279,39 @@ class DialogueEngine:
 
         if state == DialogueState.NEW:
             ai_result = self.ai.respond(state.value, incoming.text or "", driver)
-            self._record_ai_trace(db, incoming_message.id, driver, state.value, incoming.text or "", ai_result)
+            if ai_result.confidence < 0.75 and ai_result.intent not in {"faq", "help", "smalltalk"}:
+                ai_result.action = "ask_clarification"
+            self._record_ai_trace(
+                db,
+                incoming_message.id,
+                driver,
+                state.value,
+                incoming.text or "",
+                ai_result,
+                active_flow_after=state.value,
+                decision_source="backend_router",
+            )
             if ai_result.intent in {"faq", "help", "smalltalk", *SUPPORT_INTENTS}:
                 return self._respond(db, driver, application, self._format_new_state_assistant_reply(ai_result.reply))
 
             create_conversation_event(db, driver, "started_onboarding")
             set_application_status(db, application, "collecting_data")
 
-            if ai_result.intent == "registration" and ai_result.extracted_fields:
+            if ai_result.intent == "employment_type_change":
+                return self._respond(db, driver, application, "Напишите, пожалуйста, какой тип сотрудничества нужен: штатный водитель, СМЗ или ИП.")
+
+            if ai_result.intent == "registration" and ai_result.extracted_fields and ai_result.confidence >= 0.75:
                 self._apply_extracted_fields(driver, ai_result.extracted_fields, db)
-                next_state = DialogueState(ai_result.next_state or DialogueState.ASK_PHONE.value)
+                next_state = DialogueState.ASK_PHONE
                 update_driver_state(db, driver, next_state.value)
                 set_application_status(db, application, _application_status_from_state(next_state))
                 reply = "👋 Отлично! Начинаем регистрацию.\n\n" + PROMPTS[next_state]
                 return self._respond(db, driver, application, reply)
 
-            if ai_result.next_state == DialogueState.ASK_FULL_NAME.value:
+            if ai_result.action == "ask_clarification":
+                return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
+
+            if ai_result.suggested_next_action == DialogueState.ASK_FULL_NAME.value:
                 update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
                 return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
 
@@ -309,8 +326,21 @@ class DialogueEngine:
             return self._respond(db, driver, application, DUPLICATE_REJECTED_REPLY)
 
         ai_result = self.ai.respond(state.value, incoming.text or "", driver)
-        self._record_ai_trace(db, incoming_message.id, driver, state.value, incoming.text or "", ai_result)
+        self._record_ai_trace(
+            db,
+            incoming_message.id,
+            driver,
+            state.value,
+            incoming.text or "",
+            ai_result,
+            active_flow_after=state.value,
+            decision_source="backend_router",
+        )
+        if self._is_active_flow(state) and ai_result.intent in {"faq", "help", "smalltalk"}:
+            return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply))
         if ai_result.intent in {"faq", "help", "smalltalk", *SUPPORT_INTENTS}:
+            if self._is_active_flow(state) and not self._should_interrupt_active_flow(ai_result):
+                return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply))
             return self._respond(db, driver, application, ai_result.reply.strip())
         if ai_result.intent == "clarification":
             if ai_result.clear_suggested_clarification:
@@ -318,10 +348,16 @@ class DialogueEngine:
             elif ai_result.suggested_clarification_value:
                 self._set_pending_car_model_suggestion(driver, ai_result.suggested_clarification_value)
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
+        if ai_result.intent == "employment_type_change":
+            if ai_result.confidence < 0.75:
+                return self._respond(db, driver, application, self._repeat_current_question(state, "Уточните, пожалуйста, хотите сменить тип сотрудничества на СМЗ, штатный формат или ИП?"))
+            return self._respond(db, driver, application, self._repeat_current_question(state, "Понял. После завершения текущего шага помогу сменить тип сотрудничества."))
         if ai_result.intent == "field_edit":
             return self._handle_field_edit(db, driver, application, state, ai_result)
         if ai_result.intent == "correction":
-            correction_state = DialogueState(ai_result.next_state or state.value)
+            if ai_result.confidence < 0.75:
+                return self._respond(db, driver, application, self._repeat_current_question(state, "Уточните, пожалуйста, какое именно поле нужно исправить."))
+            correction_state = DialogueState(ai_result.suggested_next_action or ai_result.next_state or state.value)
             pending_target_field = self._correction_state_to_field_name(correction_state)
             if pending_target_field and state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
                 self._set_pending_field_edit(driver, pending_target_field, state.value)
@@ -355,10 +391,13 @@ class DialogueEngine:
         if duplicate_reply:
             return self._respond(db, driver, application, duplicate_reply)
 
+        if ai_result.confidence < 0.75 and ai_result.intent == "registration":
+            return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply or "Уточните, пожалуйста, ответ на текущий вопрос."))
+
         self._apply_extracted_fields(driver, ai_result.extracted_fields, db)
         if "model" in ai_result.extracted_fields:
             self._clear_pending_car_model_suggestion(driver)
-        next_state = DialogueState(ai_result.next_state or state.value)
+        next_state = next_text_state_after(state) if ai_result.extracted_fields else state
 
         if next_state == DialogueState.READY_TO_SEND_YANDEX:
             validation = self.yandex.validate_driver(driver)
@@ -890,6 +929,9 @@ class DialogueEngine:
         state_before: str,
         input_text: str,
         ai_result: AIResult,
+        *,
+        active_flow_after: str | None = None,
+        decision_source: str = "ai_router",
     ) -> None:
         incoming_message = next((message for message in driver.messages if message.id == message_id), None)
         if incoming_message is None:
@@ -916,7 +958,12 @@ class DialogueEngine:
             validation_errors_json=ai_result.validation_errors or None,
             suggested_next_action=ai_result.suggested_next_action,
             raw_decision_json=ai_result.raw_decision or None,
-            final_decision_json=self._trace_payload(ai_result),
+            final_decision_json=self._trace_payload(
+                ai_result,
+                active_flow_before=state_before,
+                active_flow_after=active_flow_after or ai_result.suggested_next_action or state_before,
+                decision_source=decision_source,
+            ),
         )
 
     def _record_system_trace(
@@ -2088,6 +2135,28 @@ class DialogueEngine:
             return self._handle_stateful_support_menu(db, driver, application, state, message_text, incoming_message_id)
         return None
 
+    def _is_active_flow(self, state: DialogueState) -> bool:
+        return state.value.startswith("ask_") or state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}
+
+    def _repeat_current_question(self, state: DialogueState, base_reply: str) -> str:
+        current_prompt = PROMPTS.get(state, "")
+        if not current_prompt:
+            return base_reply.strip()
+        if not base_reply.strip():
+            return current_prompt
+        return f"{base_reply.strip()}\n\n{current_prompt}"
+
+    def _should_interrupt_active_flow(self, ai_result: AIResult) -> bool:
+        if ai_result.intent in {"human_operator"}:
+            return True
+        if ai_result.should_interrupt_current_flow:
+            return True
+        if ai_result.intent in {"existing_driver_support", "driver_profile_update", "employment_type_change"} and ai_result.confidence >= 0.75:
+            return True
+        if ai_result.intent in {"payout_support", "tariff_support", "yandex_problem", "blocking_support"} and ai_result.confidence >= 0.85:
+            return True
+        return False
+
     def _get_pending_field_edit(self, driver: Driver) -> str | None:
         context = driver.support_context_json or {}
         pending = context.get("pending_field_edit")
@@ -2203,13 +2272,26 @@ class DialogueEngine:
         }
         return labels.get(field_name or "", field_name or "поле")
 
-    def _trace_payload(self, ai_result: AIResult) -> dict[str, object]:
+    def _trace_payload(
+        self,
+        ai_result: AIResult,
+        *,
+        active_flow_before: str | None = None,
+        active_flow_after: str | None = None,
+        decision_source: str = "ai_router",
+    ) -> dict[str, object]:
         return {
             "reply": ai_result.reply,
             "intent": ai_result.intent,
+            "ai_intent": ai_result.intent,
+            "ai_action": ai_result.action,
+            "ai_field": ai_result.field,
             "next_state": ai_result.next_state,
             "confidence": ai_result.confidence,
             "target_field": ai_result.target_field,
+            "extracted_value": ai_result.extracted_value,
+            "reply_hint": ai_result.reply_hint,
+            "should_interrupt_current_flow": ai_result.should_interrupt_current_flow,
             "new_value_raw": ai_result.new_value_raw,
             "extracted_fields": ai_result.extracted_fields,
             "normalized_fields": ai_result.normalized_fields,
@@ -2219,6 +2301,9 @@ class DialogueEngine:
             "validation_errors": ai_result.validation_errors,
             "suggested_next_action": ai_result.suggested_next_action,
             "provider": ai_result.provider,
+            "active_flow_before": active_flow_before,
+            "active_flow_after": active_flow_after,
+            "decision_source": decision_source,
         }
 
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
