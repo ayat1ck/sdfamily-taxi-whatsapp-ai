@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field as dataclass_field
 from functools import lru_cache
 import json
 import re
@@ -83,7 +83,7 @@ SHORT_SUPPORT_REPLY = "Понял. Уточните, что именно не п
 class AIResult:
     reply: str
     intent: str
-    extracted_fields: dict[str, str] = field(default_factory=dict)
+    extracted_fields: dict[str, str] = dataclass_field(default_factory=dict)
     next_state: str | None = None
     action: str = "answer_only"
     field: str | None = None
@@ -94,15 +94,15 @@ class AIResult:
     provider: str = "deterministic"
     target_field: str | None = None
     new_value_raw: str | None = None
-    normalized_fields: dict[str, str] = field(default_factory=dict)
+    normalized_fields: dict[str, str] = dataclass_field(default_factory=dict)
     reasoning_summary: str | None = None
     fallback_used: bool = False
     fallback_reason: str | None = None
-    validation_errors: list[str] = field(default_factory=list)
+    validation_errors: list[str] = dataclass_field(default_factory=list)
     suggested_next_action: str | None = None
     suggested_clarification_value: str | None = None
     clear_suggested_clarification: bool = False
-    raw_decision: dict[str, object] = field(default_factory=dict)
+    raw_decision: dict[str, object] = dataclass_field(default_factory=dict)
 
 
 class FAQAssistantResponse(BaseModel):
