@@ -236,6 +236,83 @@ class StatefulSupportMenuTests(unittest.TestCase):
                 self.assertEqual(self.traces[-1].get("priority_intent"), "driver_update_request")
                 self.assertEqual(self.traces[-1].get("matched_rule"), "поменять машину")
 
+    def test_active_flow_waiting_new_full_name_smalltalk_repeats_prompt(self):
+        driver = self._driver(
+            {
+                "mode": "driver_profile_update",
+                "menu": "profile_update_full_name",
+                "pending_action": "waiting_new_full_name",
+                "active_flow": "driver_profile_update",
+            }
+        )
+        application = SimpleNamespace(status="collecting_data")
+        with patch("app.dialog.engine.resolve_faq_replies", return_value=None):
+            reply = self.engine._handle_active_pending_action(
+                DummyDB(), driver, application, DialogueState.ASK_FULL_NAME, "Ты работаешь?", 1
+            )
+        self.assertIn("Здравствуйте", reply)
+        self.assertIn("новые ФИО", reply)
+
+    def test_active_flow_waiting_new_full_name_faq_repeats_prompt(self):
+        driver = self._driver(
+            {
+                "mode": "driver_profile_update",
+                "menu": "profile_update_full_name",
+                "pending_action": "waiting_new_full_name",
+                "active_flow": "driver_profile_update",
+            }
+        )
+        application = SimpleNamespace(status="collecting_data")
+        with patch("app.dialog.engine.resolve_faq_replies", return_value="Какие-то условия работы"):
+            reply = self.engine._handle_active_pending_action(
+                DummyDB(), driver, application, DialogueState.ASK_FULL_NAME, "Какие условия работы?", 2
+            )
+        self.assertIn("Какие-то условия работы", reply)
+        self.assertIn("новые ФИО", reply)
+
+    def test_active_flow_waiting_new_full_name_cancel_returns_menu(self):
+        driver = self._driver(
+            {
+                "mode": "driver_profile_update",
+                "menu": "profile_update_full_name",
+                "pending_action": "waiting_new_full_name",
+                "active_flow": "driver_profile_update",
+            }
+        )
+        application = SimpleNamespace(status="collecting_data")
+        with patch("app.dialog.engine.find_driver_by_whatsapp_phone", return_value=driver):
+            reply = self.engine._handle_active_pending_action(
+                DummyDB(), driver, application, DialogueState.ASK_FULL_NAME, "отмена", 3
+            )
+        self.assertIn("Что хотите изменить?", reply)
+        self.assertEqual(driver.support_context_json["menu"], "profile_update_menu")
+
+    def test_active_flow_waiting_new_full_name_manager_enables_manual_mode(self):
+        driver = self._driver(
+            {
+                "mode": "driver_profile_update",
+                "menu": "profile_update_full_name",
+                "pending_action": "waiting_new_full_name",
+                "active_flow": "driver_profile_update",
+            }
+        )
+        application = SimpleNamespace(status="collecting_data")
+        self.engine._activate_manual_mode = lambda *args, **kwargs: "Ваш запрос передан менеджеру. Ожидайте ответа."
+        reply = self.engine._handle_active_pending_action(
+            DummyDB(), driver, application, DialogueState.ASK_FULL_NAME, "менеджер", 4
+        )
+        self.assertIn("менеджеру", reply.lower())
+
+    def test_smz_request_does_not_open_existing_driver_menu(self):
+        driver = self._driver()
+        application = SimpleNamespace(status="collecting_data")
+        with patch("app.dialog.engine.create_conversation_event"), patch("app.dialog.engine.set_application_status"):
+            reply = self.engine._handle_priority_interrupts(
+                DummyDB(), driver, application, DialogueState.NEW, "Хочу стать СМЗ", 5
+            )
+        self.assertIn("самозанятого", reply)
+        self.assertNotIn("Вывод денег", reply)
+
 
 if __name__ == "__main__":
     unittest.main()

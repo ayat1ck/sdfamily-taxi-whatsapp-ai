@@ -192,6 +192,17 @@ class DialogueEngine:
         if pending_menu_reply:
             return self._respond(db, driver, application, pending_menu_reply)
 
+        active_flow_reply = self._handle_active_pending_action(
+            db,
+            driver,
+            application,
+            state,
+            incoming.text or "",
+            incoming_message.id,
+        )
+        if active_flow_reply:
+            return self._respond(db, driver, application, active_flow_reply)
+
         if incoming.message_type == "text" and _looks_like_operator_request(normalize_text_token(incoming.text or "")):
             priority_reply = self._handle_priority_interrupts(
                 db,
@@ -1234,6 +1245,33 @@ class DialogueEngine:
                 intent="human_operator",
             )
 
+        if _looks_like_self_employed_request(normalized):
+            driver.requires_attention = True
+            self._set_support_context(
+                driver,
+                {
+                    "mode": "employment_type_change",
+                    "menu": "smz_request",
+                    "created_at": datetime.utcnow().isoformat(),
+                    "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                },
+            )
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="self_employed_requested")
+            create_conversation_event(db, driver, "self_employed_requested", {"message": message_text})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="employment_type_change",
+                reply="Принял. Передаю менеджеру заявку на перевод в статус самозанятого.",
+                reasoning_summary="priority:employment_type_change",
+                priority_intent="employment_type_change",
+            )
+            return "Принял. Передаю менеджеру заявку на перевод в статус самозанятого."
+
         if detected_intent == "existing_driver_support" or _looks_like_existing_driver_intent(normalized):
             self._set_support_context(
                 driver,
@@ -1352,23 +1390,6 @@ class DialogueEngine:
                 reasoning_summary="priority:existing_driver",
             )
             return _existing_driver_options_reply()
-
-        if _looks_like_self_employed_request(normalized):
-            driver.requires_attention = True
-            db.add(driver)
-            set_application_status(db, application, "awaiting_manager_review", yandex_status="self_employed_requested")
-            create_conversation_event(db, driver, "self_employed_requested", {"message": message_text})
-            self._record_system_trace(
-                db,
-                incoming_message_id,
-                driver,
-                state.value,
-                message_text,
-                intent="self_employed_request",
-                reply="Принял. Передаю менеджеру заявку на перевод в статус самозанятого.",
-                reasoning_summary="priority:self_employed_request",
-            )
-            return "Принял. Передаю менеджеру заявку на перевод в статус самозанятого."
 
         if _looks_like_yandex_login_support(normalized):
             support_reply = self._handle_support_flow(db, driver, application, message_text, source_state=state.value)
@@ -2092,6 +2113,18 @@ class DialogueEngine:
                     "created_at": context.get("created_at") or datetime.utcnow().isoformat(),
                     "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
                     "field": choice,
+                    "active_flow": "driver_profile_update",
+                    "pending_action": {
+                        "full_name": "waiting_new_full_name",
+                        "phone": "waiting_new_phone",
+                        "location": "waiting_new_city_address",
+                        "vehicle": "waiting_new_vehicle",
+                        "plate_number": "waiting_new_plate",
+                        "registration_certificate": "waiting_new_sts",
+                        "driver_license_number": "waiting_new_driver_license",
+                        "employment_type": "waiting_new_employment_type",
+                        "human_operator": "waiting_manager",
+                    }.get(choice),
                 },
             )
             db.add(driver)
@@ -2145,6 +2178,104 @@ class DialogueEngine:
         if not base_reply.strip():
             return current_prompt
         return f"{base_reply.strip()}\n\n{current_prompt}"
+
+    def _looks_like_cancel_request(self, message_text: str) -> bool:
+        normalized = normalize_text_token(repair_mojibake(message_text))
+        return normalized in {"отмена", "отменить", "стоп", "cancel", "cancel flow", "тоқтат", "бас тарту"}
+
+    def _profile_update_prompt_for_action(self, pending_action: str | None) -> str:
+        prompts = {
+            "waiting_new_full_name": "Напишите новые ФИО одним сообщением.",
+            "waiting_new_phone": "Напишите новый номер телефона.",
+            "waiting_new_city_address": "Напишите новый город или адрес.",
+            "waiting_new_vehicle": "Пришлите данные по автомобилю или фото документов.",
+            "waiting_new_plate": "Напишите новый госномер.",
+            "waiting_new_sts": "Пришлите фото или номер СТС/техпаспорта.",
+            "waiting_new_driver_license": "Пришлите фото или номер водительского удостоверения.",
+            "waiting_new_employment_type": "Напишите новый тип сотрудничества или СМЗ.",
+        }
+        return prompts.get(pending_action or "", "")
+
+    def _handle_active_pending_action(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        state: DialogueState,
+        message_text: str,
+        incoming_message_id: int,
+    ) -> str | None:
+        context = self._get_support_context(driver)
+        pending_action = context.get("pending_action")
+        if not pending_action:
+            return None
+
+        if _looks_like_operator_request(normalize_text_token(message_text)):
+            return self._activate_manual_mode(
+                db,
+                driver,
+                application,
+                state,
+                message_text,
+                incoming_message_id,
+                intent="human_operator",
+            )
+
+        if self._looks_like_cancel_request(message_text):
+            profile = find_driver_by_whatsapp_phone(db, driver.whatsapp_phone)
+            if profile:
+                self._set_support_context(
+                    driver,
+                    {
+                        "mode": "driver_profile_update",
+                        "menu": "profile_update_menu",
+                        "driver_id": profile.id,
+                        "vehicle_id": getattr(profile.vehicle, "id", None),
+                        "created_at": context.get("created_at") or datetime.utcnow().isoformat(),
+                        "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                    },
+                )
+                db.add(driver)
+                return self._build_profile_update_menu(profile)
+            self._clear_support_context(driver)
+            db.add(driver)
+            return _existing_driver_options_reply()
+
+        if _looks_like_self_employed_request(normalize_text_token(message_text)):
+            driver.requires_attention = True
+            self._set_support_context(
+                driver,
+                {
+                    "mode": "employment_type_change",
+                    "menu": "smz_request",
+                    "created_at": datetime.utcnow().isoformat(),
+                    "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                },
+            )
+            db.add(driver)
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="self_employed_requested")
+            create_conversation_event(db, driver, "self_employed_requested", {"message": message_text, "source": "pending_action"})
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="employment_type_change",
+                reply="Принял. Передаю менеджеру заявку на перевод в статус самозанятого.",
+                reasoning_summary="pending_action:employment_type_change",
+                priority_intent="employment_type_change",
+            )
+            return "Принял. Передаю менеджеру заявку на перевод в статус самозанятого."
+
+        faq_reply = resolve_faq_replies(message_text, self.ai.knowledge_base, office_address=self.settings.public_site_address)
+        if faq_reply:
+            prompt = self._profile_update_prompt_for_action(pending_action)
+            return f"{faq_reply}\n\n{prompt}" if prompt else faq_reply
+        if looks_like_greeting(message_text):
+            prompt = self._profile_update_prompt_for_action(pending_action)
+            return f"{SMALLTALK_REPLY}\n\n{prompt}" if prompt else SMALLTALK_REPLY
+        return None
 
     def _should_interrupt_active_flow(self, ai_result: AIResult) -> bool:
         if ai_result.intent in {"human_operator"}:
