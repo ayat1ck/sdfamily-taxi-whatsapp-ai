@@ -356,6 +356,9 @@ class DialogueEngine:
         if state == DialogueState.DUPLICATE_REJECTED:
             return self._respond(db, driver, application, DUPLICATE_REJECTED_REPLY)
 
+        if self._is_active_flow(state) and _looks_like_current_step_help_request(incoming.text or ""):
+            return self._respond(db, driver, application, self._step_instruction_reply(state))
+
         ai_result = self.ai.respond(state.value, incoming.text or "", driver)
         self._record_ai_trace(
             db,
@@ -2295,6 +2298,11 @@ class DialogueEngine:
             return current_prompt
         return f"{base_reply.strip()}\n\n{current_prompt}"
 
+    def _step_instruction_reply(self, state: DialogueState) -> str:
+        if state == DialogueState.ASK_FULL_NAME:
+            return "Напишите ваше ФИО полностью одним сообщением. Например: Абай Аят Жаныбекулы."
+        return format_in_flow_reply("", state)
+
     def _looks_like_cancel_request(self, message_text: str) -> bool:
         normalized = normalize_text_token(repair_mojibake(message_text))
         return normalized in {"отмена", "отменить", "стоп", "cancel", "cancel flow", "тоқтат", "бас тарту"}
@@ -3018,6 +3026,29 @@ def _looks_like_registration_start_request(text: str) -> bool:
     if any(marker in normalized for marker in start_markers):
         return True
     return "таксопарк" in normalized and any(marker in normalized for marker in intent_markers)
+
+
+def _looks_like_current_step_help_request(text: str) -> bool:
+    normalized = normalize_text_token(text)
+    compact = normalized.strip(" ?!.")
+    if not compact:
+        return False
+    if set(compact) <= {"?"}:
+        return True
+    markers = (
+        "что делать",
+        "что дальше",
+        "что писать",
+        "что написать",
+        "какой ответ",
+        "какой ответ писать",
+        "как ответить",
+        "не понял",
+        "не понимаю",
+        "объясни",
+        "поясни",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 def _detect_support_topic(normalized: str, active_topic: str | None) -> str | None:
