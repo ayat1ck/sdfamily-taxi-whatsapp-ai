@@ -247,11 +247,11 @@ def resolve_document_type_for_upload(
     *,
     detected_type: str | None = None,
 ) -> str | None:
-    if state in DOCUMENT_STATE_MAP:
-        return DOCUMENT_STATE_MAP[state]
     uploaded = uploaded_document_types(driver)
     if detected_type and detected_type not in uploaded:
         return detected_type
+    if state in DOCUMENT_STATE_MAP:
+        return DOCUMENT_STATE_MAP[state]
     next_state = next_registration_state(driver, driver.vehicle)
     if next_state in DOCUMENT_STATE_MAP:
         document_type = DOCUMENT_STATE_MAP[next_state]
