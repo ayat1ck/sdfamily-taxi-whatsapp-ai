@@ -330,10 +330,11 @@ class DialogueEngine:
                 reply = "👋 Отлично! Начинаем регистрацию.\n\n" + PROMPTS[next_state]
                 return self._respond(db, driver, application, reply)
 
-            if ai_result.action == "ask_clarification":
-                return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
-
-            if ai_result.suggested_next_action == DialogueState.ASK_FULL_NAME.value:
+            if (
+                ai_result.suggested_next_action == DialogueState.ASK_FULL_NAME.value
+                or ai_result.next_state == DialogueState.ASK_FULL_NAME.value
+                or (ai_result.intent == "registration" and not ai_result.extracted_fields)
+            ):
                 update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
                 return self._respond(
                     db,
@@ -341,6 +342,9 @@ class DialogueEngine:
                     application,
                     self._build_registration_start_reply(ai_result.reply),
                 )
+
+            if ai_result.action == "ask_clarification":
+                return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
 
             return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
 
@@ -2994,6 +2998,8 @@ def _looks_like_registration_start_request(text: str) -> bool:
         "зарегистр",
         "регистрац",
         "подключ",
+        "тирк",
+        "тірк",
         "тіркел",
         "паркка",
     )
