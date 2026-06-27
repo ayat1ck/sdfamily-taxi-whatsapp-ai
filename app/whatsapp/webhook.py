@@ -44,6 +44,18 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
     replies: list[dict[str, str]] = []
 
     for parsed in parsed_messages:
+        if parsed.provider_message_id:
+            existing_message = db.scalar(
+                select(Message).where(
+                    Message.provider_message_id == parsed.provider_message_id,
+                    Message.direction == "incoming",
+                )
+            )
+            if existing_message:
+                logger.info("Skipping duplicate WhatsApp message %s", parsed.provider_message_id)
+                replies.append({"phone": parsed.sender_phone, "reply": ""})
+                continue
+
         driver = get_or_create_driver(db, parsed.sender_phone)
         application = db.scalar(select(Application).where(Application.driver_id == driver.id))
         if driver.dialog_mode in {"manual", "paused", "closed"}:

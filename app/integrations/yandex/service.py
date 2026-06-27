@@ -38,7 +38,7 @@ class YandexSubmissionService:
             else:
                 result = self.client.submit_driver(payload)
         except YandexPartialSubmissionError as exc:
-            application.status = "sent_to_yandex"
+            application.status = "yandex_error"
             application.yandex_status = "partial_success"
             application.yandex_driver_id = exc.yandex_driver_id or application.yandex_driver_id
             application.yandex_vehicle_id = exc.yandex_vehicle_id or application.yandex_vehicle_id

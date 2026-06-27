@@ -45,6 +45,7 @@ USER_ERROR_MESSAGES: dict[str, str] = {
     "car_brand_model_not_in_catalog": "Марка и модель автомобиля не найдены в справочнике парка.",
     "duplicate_phone": "Этот номер телефона уже зарегистрирован в парке. Если вы уже подключались раньше, напишите менеджеру — поможем восстановить доступ.",
     "invalid_driver_license": "Номер водительского удостоверения не принят системой парка. Проверьте серию и номер, как в документе.",
+    "invalid_car_brand": "Марка автомобиля не принята системой парка. Укажите марку как в Яндекс Про или документах, например LADA, Toyota или Hyundai.",
     "invalid_car_model": "Модель автомобиля не принята системой парка. Укажите модель из документов без лишних цифр и кодов кузова.",
 }
 
@@ -99,6 +100,8 @@ def format_yandex_error_for_user(raw_error: str | None) -> str:
 
     if "duplicate_phone" in lower or "phone already exists" in lower:
         return USER_ERROR_MESSAGES["duplicate_phone"]
+    if "invalid_car_brand" in lower or "brand" in lower and "does not exist" in lower:
+        return USER_ERROR_MESSAGES["invalid_car_brand"]
     if "invalid_car_model" in lower or "model" in lower and "does not exist" in lower:
         return USER_ERROR_MESSAGES["invalid_car_model"]
     if "invalid_driver_license" in lower:
