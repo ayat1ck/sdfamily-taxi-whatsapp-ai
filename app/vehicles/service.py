@@ -9,9 +9,16 @@ from app.utils.validators import normalize_plate_number
 def get_or_create_vehicle(db: Session, driver: Driver) -> Vehicle:
     if driver.vehicle:
         return driver.vehicle
+    vehicle = db.scalar(select(Vehicle).where(Vehicle.driver_id == driver.id))
+    if vehicle:
+        driver.vehicle = vehicle
+        db.add(driver)
+        return vehicle
     vehicle = Vehicle(driver_id=driver.id)
     db.add(vehicle)
     db.flush()
+    driver.vehicle = vehicle
+    db.add(driver)
     return vehicle
 
 

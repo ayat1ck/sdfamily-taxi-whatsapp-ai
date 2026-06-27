@@ -26,6 +26,7 @@ from app.messages.models import Message
 from app.messages.service import create_message
 from app.utils.validators import normalize_plate_number, normalize_service_class
 from app.vehicles.models import Vehicle
+from app.vehicles.service import get_or_create_vehicle
 from app.whatsapp.sender import WhatsAppSender
 
 
@@ -392,7 +393,7 @@ def update_application_snapshot(db: Session, application: Application, payload: 
     vehicle_payload = payload.get("vehicle", {})
     vehicle = driver.vehicle
     if vehicle_payload and not vehicle:
-        vehicle = Vehicle(driver_id=driver.id)
+        vehicle = get_or_create_vehicle(db, driver)
 
     for field_name, new_value in payload.get("driver", {}).items():
         if field_name not in DRIVER_FIELDS:
@@ -415,7 +416,7 @@ def update_application_snapshot(db: Session, application: Application, payload: 
         if field_name not in VEHICLE_FIELDS:
             continue
         if vehicle is None:
-            vehicle = Vehicle(driver_id=driver.id)
+            vehicle = get_or_create_vehicle(db, driver)
         if field_name == "plate_number" and isinstance(new_value, str):
             new_value = normalize_plate_number(new_value)
         if field_name == "service_class" and isinstance(new_value, str):
