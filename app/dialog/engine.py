@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import re
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -31,6 +32,7 @@ from app.documents.registration_flow import (
     expand_uploaded_document_types,
     is_expecting_data_document,
     is_registration_collecting_state,
+    next_text_state_after,
     next_registration_state,
     resolve_document_type_for_upload,
     skip_data_documents_for_manual_entry,
@@ -424,6 +426,21 @@ class DialogueEngine:
         duplicate_reply = self._check_duplicate_constraints(db, driver, application, state, ai_result.extracted_fields)
         if duplicate_reply:
             return self._respond(db, driver, application, duplicate_reply)
+
+        if state == DialogueState.ASK_CITY and not ai_result.extracted_fields:
+            fallback_city = self._extract_city_fallback(incoming.text or "")
+            if fallback_city:
+                next_state_value = next_text_state_after(state).value
+                ai_result = AIResult(
+                    reply="",
+                    intent="registration",
+                    extracted_fields={"city": fallback_city},
+                    next_state=next_state_value,
+                    confidence=0.95,
+                    normalized_fields={"city": fallback_city},
+                    reasoning_summary="engine_fallback:city",
+                    suggested_next_action=next_state_value,
+                )
 
         if ai_result.confidence < 0.75 and ai_result.intent == "registration":
             return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply or "Уточните, пожалуйста, ответ на текущий вопрос."))
@@ -2314,6 +2331,18 @@ class DialogueEngine:
         if not base_reply.strip():
             return current_prompt
         return f"{base_reply.strip()}\n\n{current_prompt}"
+
+    def _extract_city_fallback(self, message_text: str) -> str | None:
+        cleaned = re.sub(r"\s+", " ", (message_text or "").strip(" \t\r\n.,!?;:()[]{}\"'")).strip()
+        if not cleaned:
+            return None
+        normalized = normalize_text_token(cleaned)
+        parts = [part for part in normalized.split() if part]
+        if not (1 <= len(parts) <= 3):
+            return None
+        if all(re.sub(r"[^a-zа-яәіңғүұқөһ-]", "", part).replace("-", "").isalpha() for part in parts):
+            return cleaned
+        return None
 
     def _step_instruction_reply(self, state: DialogueState) -> str:
         if state == DialogueState.ASK_FULL_NAME:
