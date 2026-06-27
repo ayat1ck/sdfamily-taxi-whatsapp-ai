@@ -302,6 +302,17 @@ class DialogueEngine:
                 active_flow_after=state.value,
                 decision_source="backend_router",
             )
+            if _looks_like_registration_start_request(incoming.text or ""):
+                create_conversation_event(db, driver, "started_onboarding")
+                set_application_status(db, application, "collecting_data")
+                update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
+                return self._respond(
+                    db,
+                    driver,
+                    application,
+                    self._build_registration_start_reply("Да, можно зарегистрироваться в SD Family Taxi."),
+                )
+
             if ai_result.intent in {"faq", "help", "smalltalk", *SUPPORT_INTENTS}:
                 return self._respond(db, driver, application, self._format_new_state_assistant_reply(ai_result.reply))
 
@@ -476,7 +487,8 @@ class DialogueEngine:
                     reply = (
                         "Водитель уже создан в парке, но автомобиль не удалось добавить автоматически.\n\n"
                         f"{format_yandex_error_for_user(str(exc))}\n\n"
-                        "Исправьте данные об автомобиле и напишите «Подтверждаю» — повторно создадим только машину."
+                        "Напишите правильную марку и модель автомобиля одним сообщением, например: Toyota Camry. "
+                        "После исправления я снова попрошу проверить данные."
                     )
                 else:
                     reply = build_yandex_error_reply(str(exc))
@@ -2970,6 +2982,36 @@ def _looks_like_yandex_pro_issue(normalized: str) -> bool:
 
 def _looks_like_yandex_pro_success(normalized: str) -> bool:
     return normalized in YANDEX_PRO_SUCCESS_KEYWORDS
+
+
+def _looks_like_registration_start_request(text: str) -> bool:
+    normalized = normalize_text_token(text)
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in ("уже подключ", "уже зарегистр", "подключен уже", "подключён уже")):
+        return False
+    start_markers = (
+        "зарегистр",
+        "регистрац",
+        "подключ",
+        "тіркел",
+        "паркка",
+    )
+    intent_markers = (
+        "можно",
+        "хочу",
+        "надо",
+        "нужно",
+        "давайте",
+        "начать",
+        "начина",
+        "пройти",
+        "деген",
+        "едим",
+    )
+    if any(marker in normalized for marker in start_markers):
+        return True
+    return "таксопарк" in normalized and any(marker in normalized for marker in intent_markers)
 
 
 def _detect_support_topic(normalized: str, active_topic: str | None) -> str | None:
