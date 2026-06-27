@@ -263,14 +263,12 @@ class DialogueEngine:
             return self._handle_document(db, driver, application, incoming, incoming_message.id)
 
         if looks_like_manual_data_entry(incoming.text or "") and is_expecting_data_document(driver, state):
-            return self._handle_manual_data_entry(
-                db,
-                driver,
-                application,
-                state,
-                incoming.text or "",
-                incoming_message.id,
+            reply = (
+                "Для регистрации отправьте фото или PDF документа. "
+                "По фото бот заполнит данные автоматически.\n\n"
+                f"{PROMPTS[state]}"
             )
+            return self._respond(db, driver, application, reply)
 
         pending_field = self._get_pending_field_edit(driver)
         if pending_field and state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
@@ -743,7 +741,7 @@ class DialogueEngine:
             return "support_context"
         if self._get_pending_field_edit(driver) or state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
             return "correction_context"
-        if state in DOCUMENT_STATE_MAP or is_registration_collecting_state(state):
+        if state == DialogueState.NEW or state in DOCUMENT_STATE_MAP or is_registration_collecting_state(state):
             return "registration_context"
         return "unknown_context"
 
