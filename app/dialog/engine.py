@@ -30,7 +30,9 @@ from app.documents.registration_flow import (
     build_recognition_reply,
     expand_uploaded_document_types,
     is_expecting_data_document,
+    is_registration_collecting_state,
     next_registration_state,
+    resolve_document_type_for_upload,
     skip_data_documents_for_manual_entry,
 )
 from app.documents.service import upsert_document
@@ -637,9 +639,8 @@ class DialogueEngine:
             if extraction.document_type and extraction.document_type != "unknown":
                 detected_type = extraction.document_type
 
-        if state in DOCUMENT_STATE_MAP:
-            document_type = DOCUMENT_STATE_MAP[state]
-        else:
+        document_type = resolve_document_type_for_upload(state, driver, detected_type=detected_type)
+        if not document_type:
             return self._respond(
                 db,
                 driver,
@@ -737,7 +738,7 @@ class DialogueEngine:
             return "support_context"
         if self._get_pending_field_edit(driver) or state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
             return "correction_context"
-        if state in DOCUMENT_STATE_MAP:
+        if state in DOCUMENT_STATE_MAP or is_registration_collecting_state(state):
             return "registration_context"
         return "unknown_context"
 
@@ -1750,6 +1751,44 @@ class DialogueEngine:
             return True
         return any(marker in normalized for marker in ("iin", "ийн", "ииин"))
 
+    def _find_existing_yandex_driver(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        lookup: str,
+        *,
+        source: str,
+    ) -> Driver | None:
+        try:
+            profile = self.yandex.find_and_sync_existing_driver(db, driver, lookup)
+        except Exception as exc:
+            logger.warning("Yandex driver lookup failed for %s: %s", lookup, exc)
+            application.yandex_error = f"Yandex lookup failed: {exc}"
+            db.add(application)
+            create_conversation_event(
+                db,
+                driver,
+                "yandex_driver_lookup_failed",
+                {"lookup": lookup, "source": source, "error": str(exc)},
+            )
+            return None
+        if not profile:
+            create_conversation_event(
+                db,
+                driver,
+                "yandex_driver_lookup_empty",
+                {"lookup": lookup, "source": source},
+            )
+            return None
+        create_conversation_event(
+            db,
+            driver,
+            "yandex_driver_lookup_found",
+            {"lookup": lookup, "source": source, "driver_id": profile.id},
+        )
+        return profile
+
     def _build_driver_profile_card(self, driver: Driver) -> str:
         vehicle = driver.vehicle
         docs = []
@@ -1920,6 +1959,41 @@ class DialogueEngine:
             create_conversation_event(db, driver, "driver_profile_update_started", {"matched_rule": matched_rule, "driver_id": profile.id})
             return reply
 
+        profile = self._find_existing_yandex_driver(
+            db,
+            driver,
+            application,
+            driver.whatsapp_phone,
+            source="driver_update_request",
+        )
+        if profile:
+            self._set_support_context(
+                driver,
+                {
+                    "mode": "driver_profile_update",
+                    "menu": "profile_update_menu",
+                    "driver_id": profile.id,
+                    "vehicle_id": getattr(profile.vehicle, "id", None),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
+                },
+            )
+            db.add(driver)
+            reply = self._build_profile_update_menu(profile)
+            self._record_system_trace(
+                db,
+                incoming_message_id,
+                driver,
+                state.value,
+                message_text,
+                intent="driver_update_request",
+                reply=reply,
+                reasoning_summary="priority:driver_update_request_yandex_found",
+                priority_intent="driver_update_request",
+                matched_rule=matched_rule,
+            )
+            return reply
+
         self._set_support_context(
             driver,
             {
@@ -2002,6 +2076,14 @@ class DialogueEngine:
                 return "Ваш запрос передан менеджеру. Ожидайте ответа."
             if choice == "driver_update_request":
                 profile = find_driver_by_whatsapp_phone(db, driver.whatsapp_phone)
+                if not profile:
+                    profile = self._find_existing_yandex_driver(
+                        db,
+                        driver,
+                        application,
+                        driver.whatsapp_phone,
+                        source="existing_driver_support_menu",
+                    )
                 if profile:
                     self._set_support_context(
                         driver,
@@ -2057,6 +2139,14 @@ class DialogueEngine:
                 or find_driver_by_whatsapp_phone(db, lookup_value)
                 or find_driver_by_iin(db, lookup_value)
             )
+            if not profile:
+                profile = self._find_existing_yandex_driver(
+                    db,
+                    driver,
+                    application,
+                    lookup_value,
+                    source="driver_lookup",
+                )
             if profile:
                 self._set_support_context(
                     driver,

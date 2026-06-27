@@ -6,7 +6,7 @@ import httpx
 
 from app.config import get_settings
 from app.integrations.yandex.schemas import YandexDriverPayload
-from app.utils.validators import normalize_work_rule_id, split_service_class_values
+from app.utils.validators import normalize_phone, normalize_work_rule_id, split_service_class_values
 
 
 class YandexPartialSubmissionError(Exception):
@@ -191,6 +191,67 @@ class YandexFleetClient:
             response = client.get("/v1/parks/cars/catalog", headers=headers)
             self._raise_for_status(response)
             return response.json()
+
+    def find_driver_profile(self, lookup: str, *, limit: int = 10) -> dict[str, object] | None:
+        self._validate_config()
+        normalized_lookup = self._normalize_lookup(lookup)
+        if not normalized_lookup:
+            return None
+
+        base_body = {
+            "limit": max(1, min(limit, 100)),
+            "offset": 0,
+            "fields": {
+                "driver_profile": ["id", "park_id", "created_date", "work_status"],
+                "account": ["id", "balance", "balance_limit", "currency"],
+                "person": [
+                    "full_name",
+                    "contact_info",
+                    "driver_license",
+                    "tax_identification_number",
+                    "employment_type",
+                ],
+                "car": ["id", "brand", "model", "license_plate_number", "callsign"],
+            },
+        }
+        request_variants = [
+            (
+                "/v1/parks/driver-profiles/list",
+                {"park_id": self.settings.yandex_park_id},
+                {**base_body, "query": {"text": normalized_lookup}},
+            ),
+            (
+                "/v1/parks/driver-profiles/list",
+                {},
+                {**base_body, "query": {"park": {"id": self.settings.yandex_park_id}, "text": normalized_lookup}},
+            ),
+            (
+                "/v1/parks/contractors/driver-profiles/list",
+                {"park_id": self.settings.yandex_park_id},
+                {**base_body, "query": {"text": normalized_lookup}},
+            ),
+        ]
+        headers = self._build_headers()
+        payload: object | None = None
+        last_error: Exception | None = None
+        with httpx.Client(base_url=self.settings.yandex_api_base_url, timeout=self.settings.yandex_api_timeout_seconds) as client:
+            for path, params, body in request_variants:
+                try:
+                    response = client.post(path, headers=headers, params=params, json=body)
+                    self._raise_for_status(response)
+                    payload = response.json()
+                    break
+                except Exception as exc:
+                    last_error = exc
+        if payload is None:
+            if last_error:
+                raise last_error
+            return None
+
+        candidates = self._extract_list_items(payload)
+        if not candidates:
+            return None
+        return self._choose_driver_profile_candidate(candidates, normalized_lookup)
 
     def _build_headers(self, preview: bool = False) -> dict[str, str]:
         return {
@@ -454,3 +515,62 @@ class YandexFleetClient:
             or response_json.get("vehicle_id")
             or ""
         )
+
+    @staticmethod
+    def _normalize_lookup(value: str) -> str:
+        raw = (value or "").strip()
+        digits = re.sub(r"\D+", "", raw)
+        if len(digits) in {10, 11, 12}:
+            if len(digits) == 12:
+                return digits
+            return normalize_phone(digits)
+        return raw
+
+    @classmethod
+    def _extract_list_items(cls, payload: object) -> list[dict[str, object]]:
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if not isinstance(payload, dict):
+            return []
+        for key in ("driver_profiles", "drivers", "contractors", "items", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        for value in payload.values():
+            nested = cls._extract_list_items(value)
+            if nested:
+                return nested
+        return []
+
+    @classmethod
+    def _choose_driver_profile_candidate(
+        cls,
+        candidates: list[dict[str, object]],
+        lookup: str,
+    ) -> dict[str, object]:
+        lookup_digits = re.sub(r"\D+", "", lookup)
+        for candidate in candidates:
+            flattened = cls._flatten_values(candidate)
+            candidate_digits = [re.sub(r"\D+", "", value) for value in flattened]
+            if lookup_digits and any(lookup_digits and lookup_digits in digits for digits in candidate_digits):
+                return candidate
+            normalized_phone = normalize_phone(lookup) if lookup_digits else ""
+            if normalized_phone and any(normalize_phone(value) == normalized_phone for value in flattened if re.search(r"\d", value)):
+                return candidate
+        return candidates[0]
+
+    @classmethod
+    def _flatten_values(cls, value: object) -> list[str]:
+        if isinstance(value, dict):
+            values: list[str] = []
+            for nested in value.values():
+                values.extend(cls._flatten_values(nested))
+            return values
+        if isinstance(value, list):
+            values = []
+            for nested in value:
+                values.extend(cls._flatten_values(nested))
+            return values
+        if value is None:
+            return []
+        return [str(value)]

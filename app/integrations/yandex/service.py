@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,9 @@ from app.integrations.yandex.client import YandexFleetClient, YandexPartialSubmi
 from app.integrations.yandex.catalog import get_yandex_car_catalog
 from app.integrations.yandex.mapper import map_driver_to_yandex
 from app.integrations.yandex.messages import format_validation_errors_for_user
+from app.vehicles.service import get_or_create_vehicle
 from app.utils.validators import (
+    normalize_phone,
     validate_birth_date,
     validate_driver_dates,
     validate_driver_license_number,
@@ -66,6 +69,46 @@ class YandexSubmissionService:
         preview["validation"] = validation
         preview["document_refs"] = payload.document_refs or []
         return preview
+
+    def find_and_sync_existing_driver(self, db: Session, driver: Driver, lookup: str) -> Driver | None:
+        profile = self.client.find_driver_profile(lookup)
+        if not profile:
+            return None
+
+        application = driver.applications[0] if driver.applications else Application(driver_id=driver.id)
+        db.add(application)
+
+        yandex_driver_id = self._extract_yandex_driver_id(profile)
+        if yandex_driver_id:
+            application.yandex_driver_id = yandex_driver_id
+        application.yandex_status = "found_existing"
+        application.status = "sent_to_yandex"
+        application.yandex_error = None
+
+        fields = self._extract_profile_fields(profile)
+        for key, value in fields.items():
+            if value and hasattr(driver, key):
+                setattr(driver, key, value)
+
+        vehicle_fields = self._extract_vehicle_fields(profile)
+        yandex_vehicle_id = vehicle_fields.pop("yandex_vehicle_id", None)
+        if yandex_vehicle_id:
+            application.yandex_vehicle_id = yandex_vehicle_id
+        if any(vehicle_fields.values()):
+            vehicle = get_or_create_vehicle(db, driver)
+            for key, value in vehicle_fields.items():
+                if value and hasattr(vehicle, key):
+                    setattr(vehicle, key, value)
+            db.add(vehicle)
+
+        driver.state = "completed"
+        driver.dialog_mode = "bot_active"
+        driver.requires_attention = False
+        driver.updated_at = datetime.utcnow()
+        db.add(driver)
+        db.add(application)
+        db.flush()
+        return driver
 
     def validate_payload(self, payload) -> dict[str, list[str]]:
         errors: list[str] = []
@@ -151,3 +194,85 @@ class YandexSubmissionService:
     @staticmethod
     def _format_validation_failure(errors: list[str]) -> str:
         return "Yandex payload validation failed: " + "; ".join(str(item) for item in errors)
+
+    @classmethod
+    def _extract_profile_fields(cls, profile: dict[str, object]) -> dict[str, str]:
+        person = cls._first_dict(profile, "person", "driver", "contractor", "profile") or profile
+        full_name = cls._extract_full_name(person)
+        phone = cls._first_string(person, "phone", "phone_number", "driver_phone")
+        contact_info = cls._first_dict(person, "contact_info", "contacts") or {}
+        phone = phone or cls._first_string(contact_info, "phone", "phone_number")
+        iin = (
+            cls._first_string(person, "tax_identification_number", "iin")
+            or cls._first_string(profile, "tax_identification_number", "iin")
+        )
+        license_data = cls._first_dict(person, "driver_license", "license") or {}
+        return {
+            "full_name": full_name,
+            "last_name": cls._first_string(person, "last_name"),
+            "first_name": cls._first_string(person, "first_name"),
+            "middle_name": cls._first_string(person, "middle_name"),
+            "phone": normalize_phone(phone) if phone else "",
+            "iin": re.sub(r"\D+", "", iin or "") if iin else "",
+            "driver_license_number": cls._first_string(license_data, "number", "driver_license_number"),
+            "driver_license_issue_date": cls._first_string(license_data, "issue_date"),
+            "driver_license_expires_at": cls._first_string(license_data, "expiry_date", "expires_at"),
+            "birth_date": cls._first_string(license_data, "birth_date") or cls._first_string(person, "birth_date"),
+            "employment_type": cls._first_string(person, "employment_type"),
+        }
+
+    @classmethod
+    def _extract_vehicle_fields(cls, profile: dict[str, object]) -> dict[str, str]:
+        car = cls._first_dict(profile, "car", "vehicle") or {}
+        return {
+            "yandex_vehicle_id": cls._first_string(car, "id", "car_id", "vehicle_id"),
+            "brand": cls._first_string(car, "brand"),
+            "model": cls._first_string(car, "model"),
+            "year": cls._first_string(car, "year"),
+            "plate_number": cls._first_string(car, "license_plate_number", "licence_plate_number", "plate_number"),
+            "color": cls._first_string(car, "color"),
+            "vin": cls._first_string(car, "vin"),
+        }
+
+    @classmethod
+    def _extract_yandex_driver_id(cls, profile: dict[str, object]) -> str:
+        driver_profile = cls._first_dict(profile, "driver_profile", "contractor_profile") or {}
+        return (
+            cls._first_string(profile, "contractor_profile_id", "driver_profile_id", "id")
+            or cls._first_string(driver_profile, "id", "driver_profile_id", "contractor_profile_id")
+        )
+
+    @classmethod
+    def _extract_full_name(cls, source: dict[str, object]) -> str:
+        full_name = source.get("full_name")
+        if isinstance(full_name, str):
+            return full_name.strip()
+        if isinstance(full_name, dict):
+            parts = [
+                cls._first_string(full_name, "last_name"),
+                cls._first_string(full_name, "first_name"),
+                cls._first_string(full_name, "middle_name"),
+            ]
+            return " ".join(part for part in parts if part).strip()
+        parts = [
+            cls._first_string(source, "last_name"),
+            cls._first_string(source, "first_name"),
+            cls._first_string(source, "middle_name"),
+        ]
+        return " ".join(part for part in parts if part).strip()
+
+    @staticmethod
+    def _first_dict(source: dict[str, object], *keys: str) -> dict[str, object] | None:
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, dict):
+                return value
+        return None
+
+    @staticmethod
+    def _first_string(source: dict[str, object], *keys: str) -> str:
+        for key in keys:
+            value = source.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return ""

@@ -77,6 +77,7 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
             application=application,
             driver=driver,
         )
+        db.commit()
         try:
             send_result = sender.send_text(driver.whatsapp_phone, reply)
             finish_integration_job(db, job, "sent", response_payload=send_result)
@@ -107,7 +108,7 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
                 failed_message.delivery_status = "error"
                 failed_message.error_text = str(exc)
                 db.add(failed_message)
+        db.commit()
         replies.append({"phone": driver.whatsapp_phone, "reply": reply})
 
-    db.commit()
     return {"status": "ok", "processed": len(replies), "replies": replies}
