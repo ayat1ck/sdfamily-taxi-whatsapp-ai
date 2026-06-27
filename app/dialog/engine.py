@@ -326,7 +326,12 @@ class DialogueEngine:
 
             if ai_result.suggested_next_action == DialogueState.ASK_FULL_NAME.value:
                 update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
-                return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
+                return self._respond(
+                    db,
+                    driver,
+                    application,
+                    self._build_registration_start_reply(ai_result.reply),
+                )
 
             return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
 
@@ -1691,6 +1696,13 @@ class DialogueEngine:
 
     def _format_new_state_assistant_reply(self, base_reply: str) -> str:
         return base_reply.strip()
+
+    def _build_registration_start_reply(self, base_reply: str | None = None) -> str:
+        reply = (base_reply or "👋 Отлично! Начинаем регистрацию.").strip()
+        next_step = PROMPTS[DialogueState.ASK_FULL_NAME]
+        if next_step not in reply:
+            reply = f"{reply}\n\n{next_step}"
+        return reply
 
     def _format_in_flow_assistant_reply(self, state: DialogueState, base_reply: str) -> str:
         return format_in_flow_reply(base_reply, state)
