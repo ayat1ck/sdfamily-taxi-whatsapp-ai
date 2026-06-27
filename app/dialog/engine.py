@@ -362,6 +362,20 @@ class DialogueEngine:
             return self._respond(db, driver, application, self._step_instruction_reply(state))
 
         ai_result = self.ai.respond(state.value, incoming.text or "", driver)
+        if state == DialogueState.ASK_CITY and not ai_result.extracted_fields:
+            fallback_city = self._extract_city_fallback(incoming.text or "")
+            if fallback_city:
+                next_state_value = next_text_state_after(state).value
+                ai_result = AIResult(
+                    reply="",
+                    intent="registration",
+                    extracted_fields={"city": fallback_city},
+                    next_state=next_state_value,
+                    confidence=0.95,
+                    normalized_fields={"city": fallback_city},
+                    reasoning_summary="engine_early_fallback:city",
+                    suggested_next_action=next_state_value,
+                )
         self._record_ai_trace(
             db,
             incoming_message.id,
