@@ -1106,6 +1106,19 @@ def _try_registration_field_extract(
             reasoning_summary="registration_extract:phone",
             suggested_next_action=DialogueState.ASK_CITY.value,
         )
+    if current_state == DialogueState.ASK_CITY and _looks_like_city_answer(text):
+        city = re.sub(r"\s+", " ", text.strip(" \t\r\n.,!?;:()[]{}\"'")).strip()
+        if city:
+            return AIResult(
+                "",
+                "registration",
+                {"city": city},
+                DialogueState.ASK_ADDRESS.value,
+                0.95,
+                normalized_fields={"city": city},
+                reasoning_summary="registration_extract:city",
+                suggested_next_action=DialogueState.ASK_ADDRESS.value,
+            )
     if current_state == DialogueState.ASK_IIN and looks_like_iin(text):
         normalized_iin = re.sub(r"\D+", "", text)
         iin_errors = validate_kz_iin(normalized_iin)
@@ -1775,11 +1788,11 @@ def _looks_like_non_field_message(text: str) -> bool:
 
 
 def _looks_like_city_answer(text: str) -> bool:
-    normalized = normalize_text_token(text)
+    normalized = normalize_text_token(text).strip(".,!?;:()[]{}\"'")
     parts = [part for part in normalized.split() if part]
     if not (1 <= len(parts) <= 3):
         return False
-    return all(part.replace("-", "").isalpha() for part in parts)
+    return all(re.sub(r"[^a-zа-яәіңғүұқөһ-]", "", part).replace("-", "").isalpha() for part in parts)
 
 
 def _looks_like_address_answer(text: str) -> bool:
