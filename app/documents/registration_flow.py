@@ -10,7 +10,6 @@ DOCUMENT_SEQUENCE: list[tuple[DialogueState, str]] = [
     (DialogueState.ASK_DRIVER_LICENSE_BACK, "driver_license_back"),
     (DialogueState.ASK_ID_CARD, "id_card"),
     (DialogueState.ASK_VEHICLE_REGISTRATION_DOC, "vehicle_registration_doc"),
-    (DialogueState.ASK_SELFIE_WITH_LICENSE, "selfie_with_license"),
 ]
 
 DATA_DOCUMENT_TYPES = {
@@ -215,9 +214,6 @@ def next_registration_state(driver: Driver, vehicle: Vehicle | None = None) -> D
     for state in TEXT_FIELD_SEQUENCE:
         if not is_text_field_filled(driver, vehicle, state):
             return state
-
-    if "selfie_with_license" not in uploaded:
-        return DialogueState.ASK_SELFIE_WITH_LICENSE
 
     return DialogueState.CONFIRM_DATA
 

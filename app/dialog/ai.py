@@ -853,7 +853,6 @@ def _default_next_state(state: DialogueState, driver: Driver | None = None) -> D
         DialogueState.ASK_DRIVER_LICENSE_BACK,
         DialogueState.ASK_ID_CARD,
         DialogueState.ASK_VEHICLE_REGISTRATION_DOC,
-        DialogueState.ASK_SELFIE_WITH_LICENSE,
         DialogueState.ASK_ADDRESS,
         DialogueState.ASK_IIN,
         DialogueState.ASK_BIRTH_DATE,
@@ -1667,7 +1666,6 @@ def _build_step_help_reply(current_state: DialogueState, text: str) -> str | Non
         DialogueState.ASK_DRIVER_LICENSE_BACK: "РћС‚РїСЂР°РІСЊС‚Рµ С‡С‘С‚РєРѕРµ С„РѕС‚Рѕ РѕР±СЂР°С‚РЅРѕР№ СЃС‚РѕСЂРѕРЅС‹ РІРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ.",
         DialogueState.ASK_ID_CARD: "РћС‚РїСЂР°РІСЊС‚Рµ С„РѕС‚Рѕ СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёСЏ Р»РёС‡РЅРѕСЃС‚Рё.",
         DialogueState.ASK_VEHICLE_REGISTRATION_DOC: "РћС‚РїСЂР°РІСЊС‚Рµ С„РѕС‚Рѕ С‚РµС…РїР°СЃРїРѕСЂС‚Р° РёР»Рё РЎРўРЎ Р°РІС‚РѕРјРѕР±РёР»СЏ.",
-        DialogueState.ASK_SELFIE_WITH_LICENSE: "РћС‚РїСЂР°РІСЊС‚Рµ СЃРµР»С„Рё СЃ РІРѕРґРёС‚РµР»СЊСЃРєРёРј СѓРґРѕСЃС‚РѕРІРµСЂРµРЅРёРµРј РІ СЂСѓРєР°С….",
     }
     explanation = explanations.get(current_state)
     if not explanation:

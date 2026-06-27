@@ -3118,7 +3118,6 @@ def _application_status_from_state(state: DialogueState) -> str:
         DialogueState.ASK_DRIVER_LICENSE_BACK,
         DialogueState.ASK_ID_CARD,
         DialogueState.ASK_VEHICLE_REGISTRATION_DOC,
-        DialogueState.ASK_SELFIE_WITH_LICENSE,
     }:
         return "waiting_documents"
     if state == DialogueState.CONFIRM_DATA:

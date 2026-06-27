@@ -89,10 +89,6 @@ PROMPTS: dict[DialogueState, str] = {
         f"{DOCUMENT_PHOTO_QUALITY_HINT}\n\n"
         f"{MANUAL_ENTRY_HINT}"
     ),
-    DialogueState.ASK_SELFIE_WITH_LICENSE: (
-        "📸 Отправьте селфи с водительским удостоверением в руке.\n"
-        "Лицо и документ должны быть четко видны, без бликов."
-    ),
     DialogueState.ASK_RENT_OR_POWER_OF_ATTORNEY: "✅ Принял. Проверьте введенные данные.",
     DialogueState.CONFIRM_DATA: (
         "📋 Проверьте собранные данные. "
@@ -123,7 +119,6 @@ DOCUMENT_STATE_MAP = {
     DialogueState.ASK_DRIVER_LICENSE_BACK: "driver_license_back",
     DialogueState.ASK_ID_CARD: "id_card",
     DialogueState.ASK_VEHICLE_REGISTRATION_DOC: "vehicle_registration_doc",
-    DialogueState.ASK_SELFIE_WITH_LICENSE: "selfie_with_license",
 }
 
 
@@ -264,10 +259,6 @@ PROMPTS.update(
             "Распознаем марку, модель, госномер и номер СТС.\n\n"
             f"{DOCUMENT_PHOTO_QUALITY_HINT}\n\n"
             f"{MANUAL_ENTRY_HINT}"
-        ),
-        DialogueState.ASK_SELFIE_WITH_LICENSE: (
-            "📷 Отправьте селфи с водительским удостоверением в руке.\n"
-            "Лицо и документ должны быть чётко видны, без бликов."
         ),
         DialogueState.ASK_RENT_OR_POWER_OF_ATTORNEY: "✅ Принято. Проверьте введённые данные.",
         DialogueState.CONFIRM_DATA: (
