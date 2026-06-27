@@ -663,11 +663,28 @@ class DialogueEngine:
 
         document_type = resolve_document_type_for_upload(state, driver, detected_type=detected_type)
         if not document_type:
+            create_conversation_event(
+                db,
+                driver,
+                "document_type_not_determined",
+                {
+                    "state": state.value,
+                    "message_type": incoming.message_type,
+                    "mime_type": mime_type,
+                    "media_id": incoming.media_id,
+                    "extractor_enabled": self.document_extractor.is_enabled(),
+                    "media_downloaded": bool(image_bytes),
+                },
+            )
             return self._respond(
                 db,
                 driver,
                 application,
-                "Фото получил. Сейчас ожидается текстовый ответ по текущему шагу. Документ отправляйте только когда бот прямо просит фото документа.",
+                (
+                    "Фото получил, но не смог точно определить тип документа.\n\n"
+                    "Отправьте одним фото один документ без бликов: водительское удостоверение, удостоверение личности или СТС. "
+                    "Если есть PDF из eGov или Kaspi, тоже подойдет."
+                ),
             )
 
         recognized: dict[str, str] = {}
