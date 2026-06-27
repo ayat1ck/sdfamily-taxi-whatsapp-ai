@@ -101,18 +101,17 @@ def expand_uploaded_document_types(
     contains_both_license_sides: bool = False,
     additional_document_types: list[str] | None = None,
 ) -> list[str]:
-    """eGov/Kaspi PDF often has both license sides on one page — mark both slots at once."""
+    """Mark every recognized document slot from one upload."""
     ordered: list[str] = [primary_type]
-    if primary_type not in LICENSE_DOCUMENT_TYPES:
-        return ordered
+    for document_type in additional_document_types or []:
+        if document_type != "unknown" and document_type not in ordered:
+            ordered.append(document_type)
 
-    partner = "driver_license_back" if primary_type == "driver_license_front" else "driver_license_front"
-    is_pdf = (mime_type or "").lower() == "application/pdf"
-    add_partner = is_pdf or contains_both_license_sides
-    if not add_partner and additional_document_types:
-        add_partner = partner in additional_document_types
-    if add_partner and partner not in ordered:
-        ordered.append(partner)
+    if primary_type in LICENSE_DOCUMENT_TYPES:
+        partner = "driver_license_back" if primary_type == "driver_license_front" else "driver_license_front"
+        is_pdf = (mime_type or "").lower() == "application/pdf"
+        if (is_pdf or contains_both_license_sides) and partner not in ordered:
+            ordered.append(partner)
     return ordered
 
 
