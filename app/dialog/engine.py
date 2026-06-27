@@ -361,9 +361,8 @@ class DialogueEngine:
         if self._is_active_flow(state) and _looks_like_current_step_help_request(incoming.text or ""):
             return self._respond(db, driver, application, self._step_instruction_reply(state))
 
-        ai_result = self.ai.respond(state.value, incoming.text or "", driver)
-        if state == DialogueState.ASK_CITY and not ai_result.extracted_fields:
-            fallback_city = self._extract_city_fallback(incoming.text or "")
+        if state == DialogueState.ASK_CITY:
+            fallback_city = self._extract_city_value(incoming.text or "")
             if fallback_city:
                 next_state_value = next_text_state_after(state).value
                 ai_result = AIResult(
@@ -373,9 +372,13 @@ class DialogueEngine:
                     next_state=next_state_value,
                     confidence=0.95,
                     normalized_fields={"city": fallback_city},
-                    reasoning_summary="engine_early_fallback:city",
+                    reasoning_summary="engine_direct_city_parse",
                     suggested_next_action=next_state_value,
                 )
+            else:
+                ai_result = self.ai.respond(state.value, incoming.text or "", driver)
+        else:
+            ai_result = self.ai.respond(state.value, incoming.text or "", driver)
         self._record_ai_trace(
             db,
             incoming_message.id,
@@ -442,7 +445,7 @@ class DialogueEngine:
             return self._respond(db, driver, application, duplicate_reply)
 
         if state == DialogueState.ASK_CITY and not ai_result.extracted_fields:
-            fallback_city = self._extract_city_fallback(incoming.text or "")
+            fallback_city = self._extract_city_value(incoming.text or "")
             if fallback_city:
                 next_state_value = next_text_state_after(state).value
                 ai_result = AIResult(
@@ -2356,6 +2359,41 @@ class DialogueEngine:
             return None
         if all(re.sub(r"[^a-zа-яәіңғүұқөһ-]", "", part).replace("-", "").isalpha() for part in parts):
             return cleaned
+        return None
+
+    def _extract_city_value(self, message_text: str) -> str | None:
+        cleaned = re.sub(r"\s+", " ", (message_text or "").strip(" \t\r\n.,!?;:()[]{}\"'")).strip()
+        if not cleaned:
+            return None
+        normalized = normalize_text_token(cleaned)
+        normalized = re.sub(r"\b(работать|работаю|буду|хочу|будем|город|городе|г|г\.|в|во)\b", " ", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        if not normalized:
+            return None
+        city_aliases = {
+            "астана": "Астана",
+            "астане": "Астана",
+            "алматы": "Алматы",
+            "алмате": "Алматы",
+            "шымкент": "Шымкент",
+            "шымкенте": "Шымкент",
+            "караганда": "Караганда",
+            "караганде": "Караганда",
+            "актобе": "Актобе",
+            "актау": "Актау",
+            "атырау": "Атырау",
+            "павлодар": "Павлодар",
+            "павлодаре": "Павлодар",
+            "костанай": "Костанай",
+            "костанае": "Костанай",
+        }
+        if normalized in city_aliases:
+            return city_aliases[normalized]
+        parts = [part for part in normalized.split() if part]
+        if not (1 <= len(parts) <= 3):
+            return None
+        if all(re.sub(r"[^a-zа-яәіңғүұқөһ-]", "", part).replace("-", "").isalpha() for part in parts):
+            return " ".join(part.capitalize() for part in parts)
         return None
 
     def _step_instruction_reply(self, state: DialogueState) -> str:
