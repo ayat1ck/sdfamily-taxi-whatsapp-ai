@@ -266,18 +266,15 @@ def build_recognition_reply(
     types = [document_types] if isinstance(document_types, str) else document_types
     labels = [DOCUMENT_TYPE_LABELS.get(document_type, document_type) for document_type in types]
     if len(labels) == 1:
-        lines = [f"✅ Принял фото: {labels[0]}."]
+        lines = [f"✅ Принял: {labels[0]}."]
     elif len(labels) == 2 and set(types) == LICENSE_DOCUMENT_TYPES:
-        lines = ["✅ Принял PDF: водительское удостоверение (лицевая и обратная сторона)."]
+        lines = ["✅ Принял: водительское удостоверение (обе стороны)."]
     else:
         lines = [f"✅ Принял: {', '.join(labels)}."]
     if recognized_fields:
-        lines.append("🔍 Распознал:")
-        for key, value in recognized_fields.items():
-            label = EXTRACTED_FIELD_LABELS.get(key, key)
-            lines.append(f"• {label}: {value}")
+        lines.append("📋 Данные сохранил и подставил в анкету автоматически.")
     else:
-        lines.append("📋 Данные заполним на следующих шагах.")
+        lines.append("📋 Документ сохранил. Данные доберем на следующих шагах.")
     next_prompt = prompt_for_state(next_state)
     if next_state == DialogueState.CONFIRM_DATA:
         return "\n".join(lines)
