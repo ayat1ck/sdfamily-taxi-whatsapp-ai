@@ -3306,6 +3306,8 @@ def _looks_like_registration_start_request(text: str) -> bool:
     normalized = normalize_text_token(text)
     if not normalized:
         return False
+    if normalized in {"1", "регистрация", "тіркелу", "тіркеу", "тыркелу", "тыркеу"}:
+        return True
     if any(marker in normalized for marker in ("уже подключ", "уже зарегистр", "подключен уже", "подключён уже")):
         return False
     start_markers = (
