@@ -417,6 +417,21 @@ class DialogueEngine:
             active_flow_after=state.value,
             decision_source="backend_router",
         )
+        if self._is_active_flow(state):
+            self._record_registration_debug_event(
+                db,
+                driver,
+                state_before=state.value,
+                message_type=incoming.message_type,
+                media_context="text_message",
+                detected_document_type=None,
+                extracted_fields=ai_result.normalized_fields or ai_result.extracted_fields or {},
+                state_after=ai_result.suggested_next_action or ai_result.next_state or state.value,
+                submit_called=False,
+                message_id=incoming_message.id,
+                mime_type=incoming.mime_type,
+                debug_source="active_flow_text",
+            )
         if self._is_active_flow(state) and ai_result.intent in {"faq", "help", "smalltalk"}:
             return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply))
         if ai_result.intent in {"faq", "help", "smalltalk", *SUPPORT_INTENTS}:
@@ -494,6 +509,7 @@ class DialogueEngine:
         if "model" in ai_result.extracted_fields:
             self._clear_pending_car_model_suggestion(driver)
         next_state = next_text_state_after(state) if ai_result.extracted_fields else state
+        submit_called = False
 
         if next_state == DialogueState.READY_TO_SEND_YANDEX:
             validation = self.yandex.validate_driver(driver)
@@ -519,6 +535,21 @@ class DialogueEngine:
             set_application_status(db, application, "sending_to_yandex")
             self._respond(db, driver, application, PROMPTS[DialogueState.READY_TO_SEND_YANDEX])
             try:
+                submit_called = True
+                self._record_registration_debug_event(
+                    db,
+                    driver,
+                    state_before=state.value,
+                    message_type=incoming.message_type,
+                    media_context="text_message",
+                    detected_document_type=None,
+                    extracted_fields=ai_result.extracted_fields,
+                    state_after=DialogueState.SENDING_TO_YANDEX.value,
+                    submit_called=True,
+                    message_id=incoming_message.id,
+                    mime_type=incoming.mime_type,
+                    debug_source="submit_attempt",
+                )
                 self.yandex.submit(db, driver, application)
                 update_driver_state(db, driver, DialogueState.ASK_YANDEX_PRO_LOGIN.value)
                 set_application_status(db, application, "sent_to_yandex", yandex_status="sent_to_yandex")
@@ -572,6 +603,20 @@ class DialogueEngine:
 
         update_driver_state(db, driver, next_state.value)
         set_application_status(db, application, _application_status_from_state(next_state))
+        self._record_registration_debug_event(
+            db,
+            driver,
+            state_before=state.value,
+            message_type=incoming.message_type,
+            media_context="text_message",
+            detected_document_type=None,
+            extracted_fields=ai_result.extracted_fields,
+            state_after=next_state.value,
+            submit_called=submit_called,
+            message_id=incoming_message.id,
+            mime_type=incoming.mime_type,
+            debug_source="text_step_applied",
+        )
         reply = ai_result.reply or PROMPTS[next_state]
         if next_state == DialogueState.CONFIRM_DATA and ai_result.intent != "faq":
             reply = ai_result.reply or self._build_confirmation(driver, validation=self.yandex.validate_driver(driver))
@@ -678,6 +723,20 @@ class DialogueEngine:
             reply = "Р¤РѕС‚Рѕ РїРѕР»СѓС‡РёР». РЎРµР№С‡Р°СЃ Р¶РґСѓ РѕС‚РІРµС‚ С‚РµРєСЃС‚РѕРј РЅР° С‚РµРєСѓС‰РёР№ С€Р°Рі."
             if current_prompt:
                 reply = f"{reply}\n\n{current_prompt}"
+            self._record_registration_debug_event(
+                db,
+                driver,
+                state_before=state.value,
+                message_type=incoming.message_type,
+                media_context=media_context,
+                detected_document_type=None,
+                extracted_fields={},
+                state_after=state.value,
+                submit_called=False,
+                message_id=incoming_message_id,
+                mime_type=incoming.mime_type,
+                debug_source="text_step_media",
+            )
             return self._respond(db, driver, application, reply)
         if media_context == "unknown_context":
             return self._respond(
@@ -743,6 +802,20 @@ class DialogueEngine:
                     "extractor_enabled": self.document_extractor.is_enabled(),
                     "media_downloaded": bool(image_bytes),
                 },
+            )
+            self._record_registration_debug_event(
+                db,
+                driver,
+                state_before=state.value,
+                message_type=incoming.message_type,
+                media_context=media_context,
+                detected_document_type=detected_type,
+                extracted_fields={},
+                state_after=state.value,
+                submit_called=False,
+                message_id=incoming_message_id,
+                mime_type=mime_type,
+                debug_source="document_type_not_determined",
             )
             return self._respond(
                 db,
@@ -827,6 +900,20 @@ class DialogueEngine:
         next_state = next_registration_state(driver, vehicle)
         update_driver_state(db, driver, next_state.value)
         set_application_status(db, application, _application_status_from_state(next_state))
+        self._record_registration_debug_event(
+            db,
+            driver,
+            state_before=state.value,
+            message_type=incoming.message_type,
+            media_context=media_context,
+            detected_document_type=document_type,
+            extracted_fields=recognized,
+            state_after=next_state.value,
+            submit_called=False,
+            message_id=incoming_message_id,
+            mime_type=mime_type,
+            debug_source="document_processed",
+        )
         if next_state == DialogueState.CONFIRM_DATA:
             reply = self._build_confirmation(driver)
         else:
@@ -2725,6 +2812,40 @@ class DialogueEngine:
             "active_flow_after": active_flow_after,
             "decision_source": decision_source,
         }
+
+    def _record_registration_debug_event(
+        self,
+        db: Session,
+        driver: Driver,
+        *,
+        state_before: str,
+        message_type: str,
+        media_context: str | None,
+        state_after: str,
+        submit_called: bool,
+        detected_document_type: str | None = None,
+        extracted_fields: dict[str, object] | None = None,
+        message_id: int | None = None,
+        mime_type: str | None = None,
+        debug_source: str = "registration_flow",
+    ) -> None:
+        create_conversation_event(
+            db,
+            driver,
+            "registration_debug_trace",
+            {
+                "state_before": state_before,
+                "message_type": message_type,
+                "media_context": media_context,
+                "detected_document_type": detected_document_type,
+                "extracted_fields": extracted_fields or {},
+                "state_after": state_after,
+                "submit_called": submit_called,
+                "message_id": message_id,
+                "mime_type": mime_type,
+                "debug_source": debug_source,
+            },
+        )
 
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
         reply = repair_mojibake(reply)
