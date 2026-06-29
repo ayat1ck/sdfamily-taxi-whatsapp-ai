@@ -173,10 +173,15 @@ def format_in_flow_reply(answer: str, state: DialogueState) -> str:
     if not step_prompt:
         return cleaned
     if not cleaned or cleaned == step_prompt:
-        return f"📋 Следующий шаг:\n{step_prompt}"
-    if "Следующий шаг:" in cleaned or "Текущий шаг регистрации:" in cleaned:
+        return f"📋 Что нужно сделать сейчас:\n{step_prompt}"
+    if (
+        "Следующий шаг:" in cleaned
+        or "Текущий шаг регистрации:" in cleaned
+        or "Что нужно сделать сейчас:" in cleaned
+    ):
         return cleaned
-    return f"{cleaned}\n\n📋 Следующий шаг:\n{step_prompt}"
+    return f"{cleaned}\n\n📋 Что нужно сделать сейчас:\n{step_prompt}"
+
 OFFICE_HOURS = "🕘 Ежедневно с 09:00 до 18:00"
 WELCOME_GREETING = (
     "Здравствуйте! 👋\n\n"

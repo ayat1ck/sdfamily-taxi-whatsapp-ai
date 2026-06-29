@@ -1890,7 +1890,7 @@ class DialogueEngine:
 
     def _build_registration_start_reply(self, base_reply: str | None = None) -> str:
         reply = (base_reply or "👋 Отлично! Начинаем регистрацию.").strip()
-        next_step = PROMPTS[DialogueState.ASK_FULL_NAME]
+        next_step = "✍️ Напишите ФИО полностью одним сообщением.\nНапример: Абай Аят Жаныбекулы."
         if next_step not in reply:
             reply = f"{reply}\n\n{next_step}"
         return reply
@@ -2552,7 +2552,27 @@ class DialogueEngine:
 
     def _step_instruction_reply(self, state: DialogueState) -> str:
         if state == DialogueState.ASK_FULL_NAME:
-            return "Напишите ваше ФИО полностью одним сообщением. Например: Абай Аят Жаныбекулы."
+            return "✍️ Напишите ФИО полностью одним сообщением.\nНапример: Абай Аят Жаныбекулы."
+        if state in {DialogueState.ASK_EXECUTOR_TYPE, DialogueState.ASK_PHONE}:
+            return "📱 Напишите номер телефона одним сообщением.\nНапример: +77766170666."
+        if state == DialogueState.ASK_CITY:
+            return "🏙️ Напишите только город, где будете работать.\nНапример: Астана."
+        if state == DialogueState.ASK_ADDRESS:
+            return "📍 Напишите полный адрес проживания или регистрации одним сообщением.\nНапример: пр. Республики 12, Астана."
+        if state in {
+            DialogueState.ASK_HAS_CAR,
+            DialogueState.ASK_EXISTING_VEHICLE_IDENTIFIER,
+            DialogueState.ASK_CAR_BRAND,
+        }:
+            return "🚘 Напишите марку автомобиля одним сообщением.\nНапример: Toyota."
+        if state == DialogueState.ASK_CAR_MODEL:
+            return "🚘 Напишите модель автомобиля одним сообщением.\nНапример: Camry."
+        if state == DialogueState.ASK_CAR_YEAR:
+            return "📅 Напишите год выпуска автомобиля.\nНапример: 2018."
+        if state == DialogueState.ASK_CAR_PLATE:
+            return "🔢 Напишите госномер автомобиля как в документах.\nНапример: 123ABC01."
+        if state == DialogueState.ASK_CAR_COLOR:
+            return "🎨 Напишите цвет автомобиля одним сообщением.\nНапример: белый."
         return format_in_flow_reply("", state)
 
     def _looks_like_cancel_request(self, message_text: str) -> bool:
