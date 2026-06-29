@@ -38,6 +38,7 @@ from app.admin.service import (
     list_drivers,
     list_events,
     list_integration_jobs,
+    list_unknown_intents,
     mark_messages_read,
     request_deletion,
     restart_application,
@@ -254,6 +255,34 @@ def admin_documents(request: Request, _admin=Depends(get_current_admin), db: Ses
     return templates.TemplateResponse(
         "documents.html",
         admin_template_context(request, nav="documents", documents=documents),
+    )
+
+
+@router.get("/api/unknown-intents")
+def admin_unknown_intents(
+    request: Request,
+    state: str = "",
+    _admin=Depends(require_admin_api),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    rows = list_unknown_intents(db, state=state, limit=100)
+    return JSONResponse(
+        {
+            "items": [
+                {
+                    "id": row.id,
+                    "driver_id": row.driver_id,
+                    "message_id": row.message_id,
+                    "state_before": row.state_before,
+                    "message_text": row.message_text,
+                    "normalized_text": row.normalized_text,
+                    "message_type": row.message_type,
+                    "reason": row.reason,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ]
+        }
     )
 
 

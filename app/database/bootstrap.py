@@ -10,6 +10,7 @@ from app.documents.models import Document
 from app.drivers.models import Driver
 from app.integration_jobs.models import IntegrationJob
 from app.messages.models import Message
+from app.unknown_intents.models import UnknownIntent
 from app.vehicles.models import Vehicle
 
 
@@ -65,6 +66,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
             Application.__table__,
             Message.__table__,
             MessageAITrace.__table__,
+            UnknownIntent.__table__,
             AdminAccount.__table__,
             ConversationEvent.__table__,
             ApplicationAuditLog.__table__,

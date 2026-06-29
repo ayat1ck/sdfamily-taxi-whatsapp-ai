@@ -101,6 +101,24 @@ services:
         sync: false
       - key: YANDEX_CAR_REGISTRATION_CERTIFICATE
         sync: false
+  - type: cron
+    name: sdfamily-taxi-reminders
+    runtime: docker
+    schedule: "*/30 * * * *"
+    dockerCommand: python scripts/run_reminders.py
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sdfamily-taxi-db
+          property: connectionString
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_API_BASE_URL
+        value: https://graph.facebook.com/v20.0
 
 databases:
   - name: sdfamily-taxi-db

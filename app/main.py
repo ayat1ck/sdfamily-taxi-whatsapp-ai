@@ -17,6 +17,7 @@ from app.debug.router import router as debug_router
 from app.drivers.models import Driver
 from app.integration_jobs.models import IntegrationJob
 from app.messages.models import Message
+from app.unknown_intents.models import UnknownIntent
 from app.public_site import router as public_site_router
 from app.vehicles.models import Vehicle
 from app.utils.logger import get_logger

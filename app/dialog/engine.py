@@ -35,6 +35,7 @@ from app.documents.registration_flow import (
     next_text_state_after,
     next_registration_state,
     resolve_document_type_for_upload,
+    set_manual_data_entry,
     skip_data_documents_for_manual_entry,
 )
 from app.documents.service import upsert_document
@@ -57,6 +58,7 @@ from app.integrations.yandex.messages import (
 )
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.service import create_message
+from app.unknown_intents.service import create_unknown_intent
 from app.messages.models import Message
 from app.utils.logger import get_logger
 from app.utils.text import repair_mojibake
@@ -86,68 +88,68 @@ SUPPORT_INTENTS = {
 }
 
 DUPLICATE_REJECTED_REPLY = (
-    "Такой водитель уже зарегистрирован.\n\n"
-    "Доступные действия:\n"
-    "1. Стать самозанятым\n"
-    "2. Изменить данные\n"
-    "3. Сменить автомобиль\n"
-    "4. Помощь со входом\n"
-    "5. Связаться с менеджером"
+    "Р СћР В°Р С”Р С•Р в„– Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ РЎС“Р В¶Р Вµ Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р….\n\n"
+    "Р вЂќР С•РЎРѓРЎвЂљРЎС“Р С—Р Р…РЎвЂ№Р Вµ Р Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎРЏ:\n"
+    "1. Р РЋРЎвЂљР В°РЎвЂљРЎРЉ РЎРѓР В°Р СР С•Р В·Р В°Р Р…РЎРЏРЎвЂљРЎвЂ№Р С\n"
+    "2. Р ВР В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ\n"
+    "3. Р РЋР СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЉ\n"
+    "4. Р СџР С•Р СР С•РЎвЂ°РЎРЉ РЎРѓР С• Р Р†РЎвЂ¦Р С•Р Т‘Р С•Р С\n"
+    "5. Р РЋР Р†РЎРЏР В·Р В°РЎвЂљРЎРЉРЎРѓРЎРЏ РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р С•Р С"
 )
 
 YANDEX_PRO_SUCCESS_KEYWORDS = {
-    "вошел",
-    "вошёл",
+    "Р Р†Р С•РЎв‚¬Р ВµР В»",
+    "Р Р†Р С•РЎв‚¬РЎвЂР В»",
     "voshyol",
     "voshel",
     "voshol",
     "gotovo",
-    "готово",
-    "получилось",
-    "авторизовался",
-    "зашел",
-    "зашёл",
+    "Р С–Р С•РЎвЂљР С•Р Р†Р С•",
+    "Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В»Р С•РЎРѓРЎРЉ",
+    "Р В°Р Р†РЎвЂљР С•РЎР‚Р С‘Р В·Р С•Р Р†Р В°Р В»РЎРѓРЎРЏ",
+    "Р В·Р В°РЎв‚¬Р ВµР В»",
+    "Р В·Р В°РЎв‚¬РЎвЂР В»",
 }
 
 SUPPORT_FLOWS = {
     "yandex_login": {
-        "intro": "Помогу со входом в Яндекс Про. Пройдем шаги по порядку.",
-        "reply": "Сейчас разберем вход в Яндекс Про пошагово.",
-        "completed": "Отлично. Если вход выполнен и приложение открылось, можете выходить на линию. Если что-то еще мешает, напишите, что именно.",
+        "intro": "Р СџР С•Р СР С•Р С–РЎС“ РЎРѓР С• Р Р†РЎвЂ¦Р С•Р Т‘Р С•Р С Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•. Р СџРЎР‚Р С•Р в„–Р Т‘Р ВµР С РЎв‚¬Р В°Р С–Р С‘ Р С—Р С• Р С—Р С•РЎР‚РЎРЏР Т‘Р С”РЎС“.",
+        "reply": "Р РЋР ВµР в„–РЎвЂЎР В°РЎРѓ РЎР‚Р В°Р В·Р В±Р ВµРЎР‚Р ВµР С Р Р†РЎвЂ¦Р С•Р Т‘ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С• Р С—Р С•РЎв‚¬Р В°Р С–Р С•Р Р†Р С•.",
+        "completed": "Р С›РЎвЂљР В»Р С‘РЎвЂЎР Р…Р С•. Р вЂўРЎРѓР В»Р С‘ Р Р†РЎвЂ¦Р С•Р Т‘ Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р ВµР Р… Р С‘ Р С—РЎР‚Р С‘Р В»Р С•Р В¶Р ВµР Р…Р С‘Р Вµ Р С•РЎвЂљР С”РЎР‚РЎвЂ№Р В»Р С•РЎРѓРЎРЉ, Р СР С•Р В¶Р ВµРЎвЂљР Вµ Р Р†РЎвЂ№РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљРЎРЉ Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹. Р вЂўРЎРѓР В»Р С‘ РЎвЂЎРЎвЂљР С•-РЎвЂљР С• Р ВµРЎвЂ°Р Вµ Р СР ВµРЎв‚¬Р В°Р ВµРЎвЂљ, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р С‘Р СР ВµР Р…Р Р…Р С•.",
         "steps": [
-            "Откройте Яндекс Про и проверьте, что входите по тому же номеру телефона, который указывали в анкете.",
-            "Если приложение просит код, дождитесь SMS и введите код подтверждения без ошибок.",
-            "После входа проверьте, открывается ли главный экран водителя и видны ли рабочие разделы.",
+            "Р С›РЎвЂљР С”РЎР‚Р С•Р в„–РЎвЂљР Вµ Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С• Р С‘ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р Р†РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљР Вµ Р С—Р С• РЎвЂљР С•Р СРЎС“ Р В¶Р Вµ Р Р…Р С•Р СР ВµРЎР‚РЎС“ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В°, Р С”Р С•РЎвЂљР С•РЎР‚РЎвЂ№Р в„– РЎС“Р С”Р В°Р В·РЎвЂ№Р Р†Р В°Р В»Р С‘ Р Р† Р В°Р Р…Р С”Р ВµРЎвЂљР Вµ.",
+            "Р вЂўРЎРѓР В»Р С‘ Р С—РЎР‚Р С‘Р В»Р С•Р В¶Р ВµР Р…Р С‘Р Вµ Р С—РЎР‚Р С•РЎРѓР С‘РЎвЂљ Р С”Р С•Р Т‘, Р Т‘Р С•Р В¶Р Т‘Р С‘РЎвЂљР ВµРЎРѓРЎРЉ SMS Р С‘ Р Р†Р Р†Р ВµР Т‘Р С‘РЎвЂљР Вµ Р С”Р С•Р Т‘ Р С—Р С•Р Т‘РЎвЂљР Р†Р ВµРЎР‚Р В¶Р Т‘Р ВµР Р…Р С‘РЎРЏ Р В±Р ВµР В· Р С•РЎв‚¬Р С‘Р В±Р С•Р С”.",
+            "Р СџР С•РЎРѓР В»Р Вµ Р Р†РЎвЂ¦Р С•Р Т‘Р В° Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ, Р С•РЎвЂљР С”РЎР‚РЎвЂ№Р Р†Р В°Р ВµРЎвЂљРЎРѓРЎРЏ Р В»Р С‘ Р С–Р В»Р В°Р Р†Р Р…РЎвЂ№Р в„– РЎРЊР С”РЎР‚Р В°Р Р… Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЏ Р С‘ Р Р†Р С‘Р Т‘Р Р…РЎвЂ№ Р В»Р С‘ РЎР‚Р В°Р В±Р С•РЎвЂЎР С‘Р Вµ РЎР‚Р В°Р В·Р Т‘Р ВµР В»РЎвЂ№.",
         ],
     },
     "yandex_sms": {
-        "intro": "Помогу, если не приходит SMS от Яндекс Про.",
-        "reply": "Проверим по шагам, почему не приходит SMS.",
-        "completed": "Если код пришел и вы вошли, напишите, если нужна помощь со следующим шагом.",
+        "intro": "Р СџР С•Р СР С•Р С–РЎС“, Р ВµРЎРѓР В»Р С‘ Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ SMS Р С•РЎвЂљ Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•.",
+        "reply": "Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚Р С‘Р С Р С—Р С• РЎв‚¬Р В°Р С–Р В°Р С, Р С—Р С•РЎвЂЎР ВµР СРЎС“ Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ SMS.",
+        "completed": "Р вЂўРЎРѓР В»Р С‘ Р С”Р С•Р Т‘ Р С—РЎР‚Р С‘РЎв‚¬Р ВµР В» Р С‘ Р Р†РЎвЂ№ Р Р†Р С•РЎв‚¬Р В»Р С‘, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, Р ВµРЎРѓР В»Р С‘ Р Р…РЎС“Р В¶Р Р…Р В° Р С—Р С•Р СР С•РЎвЂ°РЎРЉ РЎРѓР С• РЎРѓР В»Р ВµР Т‘РЎС“РЎР‹РЎвЂ°Р С‘Р С РЎв‚¬Р В°Р С–Р С•Р С.",
         "steps": [
-            "Проверьте, что номер телефона введен без ошибки и совпадает с номером, который вы указали при регистрации.",
-            "Подождите 1-2 минуты и запросите код еще раз. Иногда SMS приходит не сразу.",
-            "Проверьте связь, перезапустите телефон или отключите режим полета, затем снова запросите код.",
+            "Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р Р…Р С•Р СР ВµРЎР‚ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В° Р Р†Р Р†Р ВµР Т‘Р ВµР Р… Р В±Р ВµР В· Р С•РЎв‚¬Р С‘Р В±Р С”Р С‘ Р С‘ РЎРѓР С•Р Р†Р С—Р В°Р Т‘Р В°Р ВµРЎвЂљ РЎРѓ Р Р…Р С•Р СР ВµРЎР‚Р С•Р С, Р С”Р С•РЎвЂљР С•РЎР‚РЎвЂ№Р в„– Р Р†РЎвЂ№ РЎС“Р С”Р В°Р В·Р В°Р В»Р С‘ Р С—РЎР‚Р С‘ РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘Р С‘.",
+            "Р СџР С•Р Т‘Р С•Р В¶Р Т‘Р С‘РЎвЂљР Вµ 1-2 Р СР С‘Р Р…РЎС“РЎвЂљРЎвЂ№ Р С‘ Р В·Р В°Р С—РЎР‚Р С•РЎРѓР С‘РЎвЂљР Вµ Р С”Р С•Р Т‘ Р ВµРЎвЂ°Р Вµ РЎР‚Р В°Р В·. Р ВР Р…Р С•Р С–Р Т‘Р В° SMS Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ Р Р…Р Вµ РЎРѓРЎР‚Р В°Р В·РЎС“.",
+            "Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ РЎРѓР Р†РЎРЏР В·РЎРЉ, Р С—Р ВµРЎР‚Р ВµР В·Р В°Р С—РЎС“РЎРѓРЎвЂљР С‘РЎвЂљР Вµ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р… Р С‘Р В»Р С‘ Р С•РЎвЂљР С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљР Вµ РЎР‚Р ВµР В¶Р С‘Р С Р С—Р С•Р В»Р ВµРЎвЂљР В°, Р В·Р В°РЎвЂљР ВµР С РЎРѓР Р…Р С•Р Р†Р В° Р В·Р В°Р С—РЎР‚Р С•РЎРѓР С‘РЎвЂљР Вµ Р С”Р С•Р Т‘.",
         ],
     },
     "account_inactive": {
-        "intro": "Помогу проверить, почему аккаунт в Яндекс Про не активен.",
-        "reply": "Разберем статус аккаунта по шагам.",
-        "completed": "Если статус аккаунта обновился и можно продолжать, напишите, если нужна помощь дальше.",
+        "intro": "Р СџР С•Р СР С•Р С–РЎС“ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С‘РЎвЂљРЎРЉ, Р С—Р С•РЎвЂЎР ВµР СРЎС“ Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С• Р Р…Р Вµ Р В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р….",
+        "reply": "Р В Р В°Р В·Р В±Р ВµРЎР‚Р ВµР С РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљР В° Р С—Р С• РЎв‚¬Р В°Р С–Р В°Р С.",
+        "completed": "Р вЂўРЎРѓР В»Р С‘ РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљР В° Р С•Р В±Р Р…Р С•Р Р†Р С‘Р В»РЎРѓРЎРЏ Р С‘ Р СР С•Р В¶Р Р…Р С• Р С—РЎР‚Р С•Р Т‘Р С•Р В»Р В¶Р В°РЎвЂљРЎРЉ, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, Р ВµРЎРѓР В»Р С‘ Р Р…РЎС“Р В¶Р Р…Р В° Р С—Р С•Р СР С•РЎвЂ°РЎРЉ Р Т‘Р В°Р В»РЎРЉРЎв‚¬Р Вµ.",
         "steps": [
-            "Закройте и заново откройте Яндекс Про, затем проверьте, изменился ли статус аккаунта.",
-            "Убедитесь, что регистрация в парке уже завершена и вы входите по правильному номеру.",
-            "Если статус не меняется, подготовьте короткое описание ошибки или текст на экране для менеджера.",
+            "Р вЂ”Р В°Р С”РЎР‚Р С•Р в„–РЎвЂљР Вµ Р С‘ Р В·Р В°Р Р…Р С•Р Р†Р С• Р С•РЎвЂљР С”РЎР‚Р С•Р в„–РЎвЂљР Вµ Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•, Р В·Р В°РЎвЂљР ВµР С Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ, Р С‘Р В·Р СР ВµР Р…Р С‘Р В»РЎРѓРЎРЏ Р В»Р С‘ РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљР В°.",
+            "Р Р€Р В±Р ВµР Т‘Р С‘РЎвЂљР ВµРЎРѓРЎРЉ, РЎвЂЎРЎвЂљР С• РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ Р Р† Р С—Р В°РЎР‚Р С”Р Вµ РЎС“Р В¶Р Вµ Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р ВµР Р…Р В° Р С‘ Р Р†РЎвЂ№ Р Р†РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљР Вµ Р С—Р С• Р С—РЎР‚Р В°Р Р†Р С‘Р В»РЎРЉР Р…Р С•Р СРЎС“ Р Р…Р С•Р СР ВµРЎР‚РЎС“.",
+            "Р вЂўРЎРѓР В»Р С‘ РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ Р Р…Р Вµ Р СР ВµР Р…РЎРЏР ВµРЎвЂљРЎРѓРЎРЏ, Р С—Р С•Р Т‘Р С–Р С•РЎвЂљР С•Р Р†РЎРЉРЎвЂљР Вµ Р С”Р С•РЎР‚Р С•РЎвЂљР С”Р С•Р Вµ Р С•Р С—Р С‘РЎРѓР В°Р Р…Р С‘Р Вµ Р С•РЎв‚¬Р С‘Р В±Р С”Р С‘ Р С‘Р В»Р С‘ РЎвЂљР ВµР С”РЎРѓРЎвЂљ Р Р…Р В° РЎРЊР С”РЎР‚Р В°Р Р…Р Вµ Р Т‘Р В»РЎРЏ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р В°.",
         ],
     },
     "go_online": {
-        "intro": "Помогу выйти на линию в Яндекс Про.",
-        "reply": "Идем по шагам, чтобы выйти на линию.",
-        "completed": "Готово. Если линия открылась, можете начинать работу. Если что-то мешает принять заказ, напишите, что именно.",
+        "intro": "Р СџР С•Р СР С•Р С–РЎС“ Р Р†РЎвЂ№Р в„–РЎвЂљР С‘ Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•.",
+        "reply": "Р ВР Т‘Р ВµР С Р С—Р С• РЎв‚¬Р В°Р С–Р В°Р С, РЎвЂЎРЎвЂљР С•Р В±РЎвЂ№ Р Р†РЎвЂ№Р в„–РЎвЂљР С‘ Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹.",
+        "completed": "Р вЂњР С•РЎвЂљР С•Р Р†Р С•. Р вЂўРЎРѓР В»Р С‘ Р В»Р С‘Р Р…Р С‘РЎРЏ Р С•РЎвЂљР С”РЎР‚РЎвЂ№Р В»Р В°РЎРѓРЎРЉ, Р СР С•Р В¶Р ВµРЎвЂљР Вµ Р Р…Р В°РЎвЂЎР С‘Р Р…Р В°РЎвЂљРЎРЉ РЎР‚Р В°Р В±Р С•РЎвЂљРЎС“. Р вЂўРЎРѓР В»Р С‘ РЎвЂЎРЎвЂљР С•-РЎвЂљР С• Р СР ВµРЎв‚¬Р В°Р ВµРЎвЂљ Р С—РЎР‚Р С‘Р Р…РЎРЏРЎвЂљРЎРЉ Р В·Р В°Р С”Р В°Р В·, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р С‘Р СР ВµР Р…Р Р…Р С•.",
         "steps": [
-            "Откройте Яндекс Про и убедитесь, что вход выполнен под вашим рабочим номером.",
-            "Проверьте, что в приложении заполнены обязательные шаги и нет блокирующих предупреждений.",
-            "Нажмите кнопку выхода на линию и дождитесь, пока приложение покажет активный рабочий статус.",
+            "Р С›РЎвЂљР С”РЎР‚Р С•Р в„–РЎвЂљР Вµ Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С• Р С‘ РЎС“Р В±Р ВµР Т‘Р С‘РЎвЂљР ВµРЎРѓРЎРЉ, РЎвЂЎРЎвЂљР С• Р Р†РЎвЂ¦Р С•Р Т‘ Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р ВµР Р… Р С—Р С•Р Т‘ Р Р†Р В°РЎв‚¬Р С‘Р С РЎР‚Р В°Р В±Р С•РЎвЂЎР С‘Р С Р Р…Р С•Р СР ВµРЎР‚Р С•Р С.",
+            "Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р Р† Р С—РЎР‚Р С‘Р В»Р С•Р В¶Р ВµР Р…Р С‘Р С‘ Р В·Р В°Р С—Р С•Р В»Р Р…Р ВµР Р…РЎвЂ№ Р С•Р В±РЎРЏР В·Р В°РЎвЂљР ВµР В»РЎРЉР Р…РЎвЂ№Р Вµ РЎв‚¬Р В°Р С–Р С‘ Р С‘ Р Р…Р ВµРЎвЂљ Р В±Р В»Р С•Р С”Р С‘РЎР‚РЎС“РЎР‹РЎвЂ°Р С‘РЎвЂ¦ Р С—РЎР‚Р ВµР Т‘РЎС“Р С—РЎР‚Р ВµР В¶Р Т‘Р ВµР Р…Р С‘Р в„–.",
+            "Р СњР В°Р В¶Р СР С‘РЎвЂљР Вµ Р С”Р Р…Р С•Р С—Р С”РЎС“ Р Р†РЎвЂ№РЎвЂ¦Р С•Р Т‘Р В° Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹ Р С‘ Р Т‘Р С•Р В¶Р Т‘Р С‘РЎвЂљР ВµРЎРѓРЎРЉ, Р С—Р С•Р С”Р В° Р С—РЎР‚Р С‘Р В»Р С•Р В¶Р ВµР Р…Р С‘Р Вµ Р С—Р С•Р С”Р В°Р В¶Р ВµРЎвЂљ Р В°Р С”РЎвЂљР С‘Р Р†Р Р…РЎвЂ№Р в„– РЎР‚Р В°Р В±Р С•РЎвЂЎР С‘Р в„– РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ.",
         ],
     },
 }
@@ -181,9 +183,11 @@ class DialogueEngine:
         )
         db.add(driver)
         db.flush()
+        self._reset_stale_support_context(driver)
         memory = self._load_conversation_memory(db, driver)
         self._remember_message_context(driver, incoming, memory)
         state = DialogueState(driver.state or DialogueState.NEW.value)
+        self._touch_support_context(driver)
 
         pending_menu_reply = self._handle_pending_menu(
             db,
@@ -223,7 +227,7 @@ class DialogueEngine:
             return self._respond(db, driver, application, DUPLICATE_REJECTED_REPLY)
 
         if incoming.message_type == "unsupported":
-            return self._respond(db, driver, application, "Поддерживаются только текст, изображение и документ.")
+            return self._respond(db, driver, application, "Р СџР С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С‘Р Р†Р В°РЎР‹РЎвЂљРЎРѓРЎРЏ РЎвЂљР С•Р В»РЎРЉР С”Р С• РЎвЂљР ВµР С”РЎРѓРЎвЂљ, Р С‘Р В·Р С•Р В±РЎР‚Р В°Р В¶Р ВµР Р…Р С‘Р Вµ Р С‘ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ.")
 
         support_menu_reply = self._handle_stateful_support_menu(
             db,
@@ -264,10 +268,35 @@ class DialogueEngine:
         if incoming.message_type in {"image", "document"}:
             return self._handle_document(db, driver, application, incoming, incoming_message.id)
 
+        if incoming.message_type == "text" and state in DOCUMENT_STATE_MAP and not looks_like_manual_data_entry(incoming.text or ""):
+            self._record_registration_debug_event(
+                db,
+                driver,
+                state_before=state.value,
+                message_type=incoming.message_type,
+                media_context="text_message",
+                detected_document_type=None,
+                extracted_fields={},
+                state_after=state.value,
+                submit_called=False,
+                message_id=incoming_message.id,
+                mime_type=incoming.mime_type,
+                debug_source="text_during_doc_step",
+            )
+            return self._respond(
+                db,
+                driver,
+                application,
+                self._repeat_current_question(
+                    state,
+                    "РЎРµР№С‡Р°СЃ РЅСѓР¶РµРЅ РґРѕРєСѓРјРµРЅС‚. РћС‚РїСЂР°РІСЊС‚Рµ С„РѕС‚Рѕ РёР»Рё PDF С‚РѕРіРѕ РґРѕРєСѓРјРµРЅС‚Р°, РєРѕС‚РѕСЂС‹Р№ СЏ Р·Р°РїСЂРѕСЃРёР» РЅР° СЌС‚РѕРј С€Р°РіРµ.",
+                ),
+            )
+
         if looks_like_manual_data_entry(incoming.text or "") and is_expecting_data_document(driver, state):
             reply = (
-                "Для регистрации отправьте фото или PDF документа. "
-                "По фото бот заполнит данные автоматически.\n\n"
+                "Р вЂќР В»РЎРЏ РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘Р С‘ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†РЎРЉРЎвЂљР Вµ РЎвЂћР С•РЎвЂљР С• Р С‘Р В»Р С‘ PDF Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљР В°. "
+                "Р СџР С• РЎвЂћР С•РЎвЂљР С• Р В±Р С•РЎвЂљ Р В·Р В°Р С—Р С•Р В»Р Р…Р С‘РЎвЂљ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р В°Р Р†РЎвЂљР С•Р СР В°РЎвЂљР С‘РЎвЂЎР ВµРЎРѓР С”Р С‘.\n\n"
                 f"{PROMPTS[state]}"
             )
             return self._respond(db, driver, application, reply)
@@ -305,9 +334,9 @@ class DialogueEngine:
                 decision_source="backend_router",
             )
             normalized_new_message = normalize_text_token(incoming.text or "")
-            if normalized_new_message in {"2", "условия", "условие", "тарифы", "комиссия"}:
+            if normalized_new_message in {"2", "РЎС“РЎРѓР В»Р С•Р Р†Р С‘РЎРЏ", "РЎС“РЎРѓР В»Р С•Р Р†Р С‘Р Вµ", "РЎвЂљР В°РЎР‚Р С‘РЎвЂћРЎвЂ№", "Р С”Р С•Р СР С‘РЎРѓРЎРѓР С‘РЎРЏ"}:
                 faq_reply = resolve_faq_replies(
-                    "какие условия",
+                    "Р С”Р В°Р С”Р С‘Р Вµ РЎС“РЎРѓР В»Р С•Р Р†Р С‘РЎРЏ",
                     self.ai.knowledge_base,
                     office_address=self.settings.public_site_address,
                 ) or FALLBACK_MANAGER_REPLY
@@ -315,21 +344,21 @@ class DialogueEngine:
 
             if normalized_new_message in {
                 "3",
-                "вход",
-                "вход в яндекс про",
-                "яндекс про",
-                "помощь со входом",
-                "логин",
+                "Р Р†РЎвЂ¦Р С•Р Т‘",
+                "Р Р†РЎвЂ¦Р С•Р Т‘ Р Р† РЎРЏР Р…Р Т‘Р ВµР С”РЎРѓ Р С—РЎР‚Р С•",
+                "РЎРЏР Р…Р Т‘Р ВµР С”РЎРѓ Р С—РЎР‚Р С•",
+                "Р С—Р С•Р СР С•РЎвЂ°РЎРЉ РЎРѓР С• Р Р†РЎвЂ¦Р С•Р Т‘Р С•Р С",
+                "Р В»Р С•Р С–Р С‘Р Р…",
             }:
                 reply = (
-                    "Помогу со входом в Яндекс Про.\n\n"
-                    "Напишите, что именно не получается:\n"
-                    "1. Не приходит SMS\n"
-                    "2. Не вижу парк\n"
-                    "3. Ошибка при входе"
+                    "Р СџР С•Р СР С•Р С–РЎС“ РЎРѓР С• Р Р†РЎвЂ¦Р С•Р Т‘Р С•Р С Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•.\n\n"
+                    "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р С‘Р СР ВµР Р…Р Р…Р С• Р Р…Р Вµ Р С—Р С•Р В»РЎС“РЎвЂЎР В°Р ВµРЎвЂљРЎРѓРЎРЏ:\n"
+                    "1. Р СњР Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ SMS\n"
+                    "2. Р СњР Вµ Р Р†Р С‘Р В¶РЎС“ Р С—Р В°РЎР‚Р С”\n"
+                    "3. Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р С—РЎР‚Р С‘ Р Р†РЎвЂ¦Р С•Р Т‘Р Вµ"
                 )
                 return self._respond(db, driver, application, self._format_new_state_assistant_reply(reply))
-            if any(marker in normalized_new_message for marker in ("тыркел", "тркел", "тыркеу", "тркеу")):
+            if any(marker in normalized_new_message for marker in ("РЎвЂљРЎвЂ№РЎР‚Р С”Р ВµР В»", "РЎвЂљРЎР‚Р С”Р ВµР В»", "РЎвЂљРЎвЂ№РЎР‚Р С”Р ВµРЎС“", "РЎвЂљРЎР‚Р С”Р ВµРЎС“")):
                 create_conversation_event(db, driver, "started_onboarding")
                 set_application_status(db, application, "collecting_data")
                 update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
@@ -337,7 +366,7 @@ class DialogueEngine:
                     db,
                     driver,
                     application,
-                    self._build_registration_start_reply("👋 Отлично! Начинаем регистрацию."),
+                    self._build_registration_start_reply("СЂСџвЂвЂ№ Р С›РЎвЂљР В»Р С‘РЎвЂЎР Р…Р С•! Р СњР В°РЎвЂЎР С‘Р Р…Р В°Р ВµР С РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎР‹."),
                 )
 
             if _looks_like_registration_start_request(incoming.text or ""):
@@ -348,7 +377,7 @@ class DialogueEngine:
                     db,
                     driver,
                     application,
-                    self._build_registration_start_reply("Да, можно зарегистрироваться в SD Family Taxi."),
+                    self._build_registration_start_reply("Р вЂќР В°, Р СР С•Р В¶Р Р…Р С• Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉРЎРѓРЎРЏ Р Р† SD Family Taxi."),
                 )
 
             if ai_result.intent in {"faq", "help", "smalltalk", *SUPPORT_INTENTS}:
@@ -358,14 +387,15 @@ class DialogueEngine:
             set_application_status(db, application, "collecting_data")
 
             if ai_result.intent == "employment_type_change":
-                return self._respond(db, driver, application, "Напишите, пожалуйста, какой тип сотрудничества нужен: штатный водитель, СМЗ или ИП.")
+                return self._respond(db, driver, application, "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, Р С—Р С•Р В¶Р В°Р В»РЎС“Р в„–РЎРѓРЎвЂљР В°, Р С”Р В°Р С”Р С•Р в„– РЎвЂљР С‘Р С— РЎРѓР С•РЎвЂљРЎР‚РЎС“Р Т‘Р Р…Р С‘РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р В° Р Р…РЎС“Р В¶Р ВµР Р…: РЎв‚¬РЎвЂљР В°РЎвЂљР Р…РЎвЂ№Р в„– Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ, Р РЋР СљР вЂ” Р С‘Р В»Р С‘ Р ВР Сџ.")
 
             if ai_result.intent == "registration" and ai_result.extracted_fields and ai_result.confidence >= 0.75:
+                self._mark_successful_progress(driver)
                 self._apply_extracted_fields(driver, ai_result.extracted_fields, db)
                 next_state = DialogueState.ASK_PHONE
                 update_driver_state(db, driver, next_state.value)
                 set_application_status(db, application, _application_status_from_state(next_state))
-                reply = "👋 Отлично! Начинаем регистрацию.\n\n" + PROMPTS[next_state]
+                reply = "СЂСџвЂвЂ№ Р С›РЎвЂљР В»Р С‘РЎвЂЎР Р…Р С•! Р СњР В°РЎвЂЎР С‘Р Р…Р В°Р ВµР С РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎР‹.\n\n" + PROMPTS[next_state]
                 return self._respond(db, driver, application, reply)
 
             if (
@@ -373,6 +403,7 @@ class DialogueEngine:
                 or ai_result.next_state == DialogueState.ASK_FULL_NAME.value
                 or (ai_result.intent == "registration" and not ai_result.extracted_fields)
             ):
+                self._mark_successful_progress(driver)
                 update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
                 return self._respond(
                     db,
@@ -382,6 +413,16 @@ class DialogueEngine:
                 )
 
             if ai_result.action == "ask_clarification":
+                self._register_fallback(
+                    db,
+                    driver,
+                    application,
+                    state_before=state.value,
+                    reason="new_state_clarification",
+                    message_id=incoming_message.id,
+                    message_text=incoming.text or "",
+                    message_type=incoming.message_type,
+                )
                 return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
 
             return self._respond(db, driver, application, ai_result.reply or PROMPTS[DialogueState.NEW])
@@ -457,12 +498,42 @@ class DialogueEngine:
                 debug_source="active_flow_text",
             )
         if self._is_active_flow(state) and ai_result.intent in {"faq", "help", "smalltalk"}:
+            self._register_fallback(
+                db,
+                driver,
+                application,
+                state_before=state.value,
+                reason=f"active_flow_{ai_result.intent}",
+                message_id=incoming_message.id,
+                message_text=incoming.text or "",
+                message_type=incoming.message_type,
+            )
             return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply))
         if ai_result.intent in {"faq", "help", "smalltalk", *SUPPORT_INTENTS}:
             if self._is_active_flow(state) and not self._should_interrupt_active_flow(ai_result):
+                self._register_fallback(
+                    db,
+                    driver,
+                    application,
+                    state_before=state.value,
+                    reason=f"active_flow_{ai_result.intent}",
+                    message_id=incoming_message.id,
+                    message_text=incoming.text or "",
+                    message_type=incoming.message_type,
+                )
                 return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply))
             return self._respond(db, driver, application, ai_result.reply.strip())
         if ai_result.intent == "clarification":
+            self._register_fallback(
+                db,
+                driver,
+                application,
+                state_before=state.value,
+                reason="clarification_no_progress",
+                message_id=incoming_message.id,
+                message_text=incoming.text or "",
+                message_type=incoming.message_type,
+            )
             if ai_result.clear_suggested_clarification:
                 self._clear_pending_car_model_suggestion(driver)
             elif ai_result.suggested_clarification_value:
@@ -470,13 +541,13 @@ class DialogueEngine:
             return self._respond(db, driver, application, self._format_in_flow_assistant_reply(state, ai_result.reply))
         if ai_result.intent == "employment_type_change":
             if ai_result.confidence < 0.75:
-                return self._respond(db, driver, application, self._repeat_current_question(state, "Уточните, пожалуйста, хотите сменить тип сотрудничества на СМЗ, штатный формат или ИП?"))
-            return self._respond(db, driver, application, self._repeat_current_question(state, "Понял. После завершения текущего шага помогу сменить тип сотрудничества."))
+                return self._respond(db, driver, application, self._repeat_current_question(state, "Р Р€РЎвЂљР С•РЎвЂЎР Р…Р С‘РЎвЂљР Вµ, Р С—Р С•Р В¶Р В°Р В»РЎС“Р в„–РЎРѓРЎвЂљР В°, РЎвЂ¦Р С•РЎвЂљР С‘РЎвЂљР Вµ РЎРѓР СР ВµР Р…Р С‘РЎвЂљРЎРЉ РЎвЂљР С‘Р С— РЎРѓР С•РЎвЂљРЎР‚РЎС“Р Т‘Р Р…Р С‘РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р В° Р Р…Р В° Р РЋР СљР вЂ”, РЎв‚¬РЎвЂљР В°РЎвЂљР Р…РЎвЂ№Р в„– РЎвЂћР С•РЎР‚Р СР В°РЎвЂљ Р С‘Р В»Р С‘ Р ВР Сџ?"))
+            return self._respond(db, driver, application, self._repeat_current_question(state, "Р СџР С•Р Р…РЎРЏР В». Р СџР С•РЎРѓР В»Р Вµ Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р ВµР Р…Р С‘РЎРЏ РЎвЂљР ВµР С”РЎС“РЎвЂ°Р ВµР С–Р С• РЎв‚¬Р В°Р С–Р В° Р С—Р С•Р СР С•Р С–РЎС“ РЎРѓР СР ВµР Р…Р С‘РЎвЂљРЎРЉ РЎвЂљР С‘Р С— РЎРѓР С•РЎвЂљРЎР‚РЎС“Р Т‘Р Р…Р С‘РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р В°."))
         if ai_result.intent == "field_edit":
             return self._handle_field_edit(db, driver, application, state, ai_result)
         if ai_result.intent == "correction":
             if ai_result.confidence < 0.75:
-                return self._respond(db, driver, application, self._repeat_current_question(state, "Уточните, пожалуйста, какое именно поле нужно исправить."))
+                return self._respond(db, driver, application, self._repeat_current_question(state, "Р Р€РЎвЂљР С•РЎвЂЎР Р…Р С‘РЎвЂљР Вµ, Р С—Р С•Р В¶Р В°Р В»РЎС“Р в„–РЎРѓРЎвЂљР В°, Р С”Р В°Р С”Р С•Р Вµ Р С‘Р СР ВµР Р…Р Р…Р С• Р С—Р С•Р В»Р Вµ Р Р…РЎС“Р В¶Р Р…Р С• Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ."))
             correction_state = DialogueState(ai_result.suggested_next_action or ai_result.next_state or state.value)
             pending_target_field = self._correction_state_to_field_name(correction_state)
             if pending_target_field and state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
@@ -495,7 +566,7 @@ class DialogueEngine:
                     db,
                     driver,
                     application,
-                    f"Хорошо. Отправьте новое значение для поля «{self._field_label(pending_target_field)}» одним сообщением.",
+                    f"Р ТђР С•РЎР‚Р С•РЎв‚¬Р С•. Р С›РЎвЂљР С—РЎР‚Р В°Р Р†РЎРЉРЎвЂљР Вµ Р Р…Р С•Р Р†Р С•Р Вµ Р В·Р Р…Р В°РЎвЂЎР ВµР Р…Р С‘Р Вµ Р Т‘Р В»РЎРЏ Р С—Р С•Р В»РЎРЏ Р’В«{self._field_label(pending_target_field)}Р’В» Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.",
                 )
             update_driver_state(db, driver, correction_state.value)
             set_application_status(db, application, _application_status_from_state(correction_state))
@@ -527,8 +598,19 @@ class DialogueEngine:
                 )
 
         if ai_result.confidence < 0.75 and ai_result.intent == "registration":
-            return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply or "Уточните, пожалуйста, ответ на текущий вопрос."))
+            self._register_fallback(
+                db,
+                driver,
+                application,
+                state_before=state.value,
+                reason="low_confidence_registration",
+                message_id=incoming_message.id,
+                message_text=incoming.text or "",
+                message_type=incoming.message_type,
+            )
+            return self._respond(db, driver, application, self._repeat_current_question(state, ai_result.reply or "Р Р€РЎвЂљР С•РЎвЂЎР Р…Р С‘РЎвЂљР Вµ, Р С—Р С•Р В¶Р В°Р В»РЎС“Р в„–РЎРѓРЎвЂљР В°, Р С•РЎвЂљР Р†Р ВµРЎвЂљ Р Р…Р В° РЎвЂљР ВµР С”РЎС“РЎвЂ°Р С‘Р в„– Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ."))
 
+        self._mark_successful_progress(driver)
         self._apply_extracted_fields(driver, ai_result.extracted_fields, db)
         if "model" in ai_result.extracted_fields:
             self._clear_pending_car_model_suggestion(driver)
@@ -547,7 +629,7 @@ class DialogueEngine:
                     driver,
                     application,
                     (
-                        "Перед отправкой нужно исправить данные:\n\n"
+                        "Р СџР ВµРЎР‚Р ВµР Т‘ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С”Р С•Р в„– Р Р…РЎС“Р В¶Р Р…Р С• Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ:\n\n"
                         f"{issues}\n\n"
                         f"{self._build_confirmation(driver, validation=validation)}"
                     ),
@@ -609,10 +691,10 @@ class DialogueEngine:
                 )
                 if exc.yandex_driver_id and not exc.yandex_vehicle_id:
                     reply = (
-                        "Водитель уже создан в парке, но автомобиль не удалось добавить автоматически.\n\n"
+                        "Р вЂ™Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ РЎС“Р В¶Р Вµ РЎРѓР С•Р В·Р Т‘Р В°Р Р… Р Р† Р С—Р В°РЎР‚Р С”Р Вµ, Р Р…Р С• Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЉ Р Р…Р Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р Т‘Р С•Р В±Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•Р СР В°РЎвЂљР С‘РЎвЂЎР ВµРЎРѓР С”Р С‘.\n\n"
                         f"{format_yandex_error_for_user(str(exc))}\n\n"
-                        "Напишите правильную марку и модель автомобиля одним сообщением, например: Toyota Camry. "
-                        "После исправления я снова попрошу проверить данные."
+                        "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р С—РЎР‚Р В°Р Р†Р С‘Р В»РЎРЉР Р…РЎС“РЎР‹ Р СР В°РЎР‚Р С”РЎС“ Р С‘ Р СР С•Р Т‘Р ВµР В»РЎРЉ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЏ Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С, Р Р…Р В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Toyota Camry. "
+                        "Р СџР С•РЎРѓР В»Р Вµ Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ РЎРЏ РЎРѓР Р…Р С•Р Р†Р В° Р С—Р С•Р С—РЎР‚Р С•РЎв‚¬РЎС“ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С‘РЎвЂљРЎРЉ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ."
                     )
                 else:
                     reply = build_yandex_error_reply(str(exc))
@@ -733,20 +815,17 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Файл получил. Использую его для обновления данных профиля. Если нужно, отправьте ещё одно фото или напишите уточнение текстом.",
+                "Р В¤Р В°Р в„–Р В» Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В». Р ВРЎРѓР С—Р С•Р В»РЎРЉР В·РЎС“РЎР‹ Р ВµР С–Р С• Р Т‘Р В»РЎРЏ Р С•Р В±Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ Р Т‘Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦ Р С—РЎР‚Р С•РЎвЂћР С‘Р В»РЎРЏ. Р вЂўРЎРѓР В»Р С‘ Р Р…РЎС“Р В¶Р Р…Р С•, Р С•РЎвЂљР С—РЎР‚Р В°Р Р†РЎРЉРЎвЂљР Вµ Р ВµРЎвЂ°РЎвЂ Р С•Р Т‘Р Р…Р С• РЎвЂћР С•РЎвЂљР С• Р С‘Р В»Р С‘ Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ РЎС“РЎвЂљР С•РЎвЂЎР Р…Р ВµР Р…Р С‘Р Вµ РЎвЂљР ВµР С”РЎРѓРЎвЂљР С•Р С.",
             )
         if media_context == "correction_context":
             return self._respond(
                 db,
                 driver,
                 application,
-                "Файл получил. Для исправления данных напишите новое значение текстом или попросите менеджера.",
+                "Р В¤Р В°Р в„–Р В» Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В». Р вЂќР В»РЎРЏ Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ Р Т‘Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦ Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†Р С•Р Вµ Р В·Р Р…Р В°РЎвЂЎР ВµР Р…Р С‘Р Вµ РЎвЂљР ВµР С”РЎРѓРЎвЂљР С•Р С Р С‘Р В»Р С‘ Р С—Р С•Р С—РЎР‚Р С•РЎРѓР С‘РЎвЂљР Вµ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р В°.",
             )
         if media_context == "text_registration_context":
-            current_prompt = PROMPTS.get(state, "")
-            reply = "Р¤РѕС‚Рѕ РїРѕР»СѓС‡РёР». РЎРµР№С‡Р°СЃ Р¶РґСѓ РѕС‚РІРµС‚ С‚РµРєСЃС‚РѕРј РЅР° С‚РµРєСѓС‰РёР№ С€Р°Рі."
-            if current_prompt:
-                reply = f"{reply}\n\n{current_prompt}"
+            reply = self._repeat_current_question(state, "Сейчас мне нужен текст, а не фото.")
             self._record_registration_debug_event(
                 db,
                 driver,
@@ -759,7 +838,7 @@ class DialogueEngine:
                 submit_called=False,
                 message_id=incoming_message_id,
                 mime_type=incoming.mime_type,
-                debug_source="text_step_media",
+                debug_source="media_during_text_step",
             )
             return self._respond(db, driver, application, reply)
         if media_context == "unknown_context":
@@ -767,7 +846,7 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Фото получил. Сейчас оно не считается документом автоматически. Отправьте фото на шаге, где бот прямо просит документ, или напишите, чем помочь.",
+                "Р В¤Р С•РЎвЂљР С• Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В». Р РЋР ВµР в„–РЎвЂЎР В°РЎРѓ Р С•Р Р…Р С• Р Р…Р Вµ РЎРѓРЎвЂЎР С‘РЎвЂљР В°Р ВµРЎвЂљРЎРѓРЎРЏ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљР С•Р С Р В°Р Р†РЎвЂљР С•Р СР В°РЎвЂљР С‘РЎвЂЎР ВµРЎРѓР С”Р С‘. Р С›РЎвЂљР С—РЎР‚Р В°Р Р†РЎРЉРЎвЂљР Вµ РЎвЂћР С•РЎвЂљР С• Р Р…Р В° РЎв‚¬Р В°Р С–Р Вµ, Р С–Р Т‘Р Вµ Р В±Р С•РЎвЂљ Р С—РЎР‚РЎРЏР СР С• Р С—РЎР‚Р С•РЎРѓР С‘РЎвЂљ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ, Р С‘Р В»Р С‘ Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎР ВµР С Р С—Р С•Р СР С•РЎвЂЎРЎРЉ.",
             )
         if media_context in {"support_context", "existing_driver_support_context"}:
             driver.requires_attention = True
@@ -788,7 +867,7 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "Файл получил. Менеджер увидит его в чате и поможет дальше. Если вы уже вошли в Яндекс Про, напишите: Вошел.",
+                "Р В¤Р В°Р в„–Р В» Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В». Р СљР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚ РЎС“Р Р†Р С‘Р Т‘Р С‘РЎвЂљ Р ВµР С–Р С• Р Р† РЎвЂЎР В°РЎвЂљР Вµ Р С‘ Р С—Р С•Р СР С•Р В¶Р ВµРЎвЂљ Р Т‘Р В°Р В»РЎРЉРЎв‚¬Р Вµ. Р вЂўРЎРѓР В»Р С‘ Р Р†РЎвЂ№ РЎС“Р В¶Р Вµ Р Р†Р С•РЎв‚¬Р В»Р С‘ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ: Р вЂ™Р С•РЎв‚¬Р ВµР В».",
             )
 
         vehicle = get_or_create_vehicle(db, driver)
@@ -841,14 +920,15 @@ class DialogueEngine:
                 mime_type=mime_type,
                 debug_source="document_type_not_determined",
             )
+            self._increment_ocr_failure_counter(driver)
             return self._respond(
                 db,
                 driver,
                 application,
                 (
-                    "Фото получил, но не смог точно определить тип документа.\n\n"
-                    "Отправьте одним фото один документ без бликов: водительское удостоверение, удостоверение личности или СТС. "
-                    "Если есть PDF из eGov или Kaspi, тоже подойдет."
+                    "Р В¤Р С•РЎвЂљР С• Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В», Р Р…Р С• Р Р…Р Вµ РЎРѓР СР С•Р С– РЎвЂљР С•РЎвЂЎР Р…Р С• Р С•Р С—РЎР‚Р ВµР Т‘Р ВµР В»Р С‘РЎвЂљРЎРЉ РЎвЂљР С‘Р С— Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљР В°.\n\n"
+                    "Р С›РЎвЂљР С—РЎР‚Р В°Р Р†РЎРЉРЎвЂљР Вµ Р С•Р Т‘Р Р…Р С‘Р С РЎвЂћР С•РЎвЂљР С• Р С•Р Т‘Р С‘Р Р… Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ Р В±Р ВµР В· Р В±Р В»Р С‘Р С”Р С•Р Р†: Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉРЎРѓР С”Р С•Р Вµ РЎС“Р Т‘Р С•РЎРѓРЎвЂљР С•Р Р†Р ВµРЎР‚Р ВµР Р…Р С‘Р Вµ, РЎС“Р Т‘Р С•РЎРѓРЎвЂљР С•Р Р†Р ВµРЎР‚Р ВµР Р…Р С‘Р Вµ Р В»Р С‘РЎвЂЎР Р…Р С•РЎРѓРЎвЂљР С‘ Р С‘Р В»Р С‘ Р РЋР СћР РЋ. "
+                    "Р вЂўРЎРѓР В»Р С‘ Р ВµРЎРѓРЎвЂљРЎРЉ PDF Р С‘Р В· eGov Р С‘Р В»Р С‘ Kaspi, РЎвЂљР С•Р В¶Р Вµ Р С—Р С•Р Т‘Р С•Р в„–Р Т‘Р ВµРЎвЂљ."
                 ),
             )
 
@@ -891,7 +971,54 @@ class DialogueEngine:
 
         if image_bytes and self.document_extractor.is_enabled() and extraction is not None:
             fields, recognized = normalize_extracted_fields(extraction, document_type=document_type)
+            if not detected_type and not fields:
+                self._increment_ocr_failure_counter(driver)
+                self._record_registration_debug_event(
+                    db,
+                    driver,
+                    state_before=state.value,
+                    message_type=incoming.message_type,
+                    media_context=media_context,
+                    detected_document_type=document_type,
+                    extracted_fields={},
+                    state_after=state.value,
+                    submit_called=False,
+                    message_id=incoming_message_id,
+                    mime_type=mime_type,
+                    debug_source="ocr_empty_result",
+                )
+                if self._ocr_failure_count(driver) >= 2:
+                    self._set_manual_data_entry_enabled(driver, True)
+                    self._record_registration_debug_event(
+                        db,
+                        driver,
+                        state_before=state.value,
+                        message_type=incoming.message_type,
+                        media_context=media_context,
+                        detected_document_type=document_type,
+                        extracted_fields={},
+                        state_after=state.value,
+                        submit_called=False,
+                        message_id=incoming_message_id,
+                        mime_type=mime_type,
+                        debug_source="ocr_manual_mode_enabled",
+                    )
+                    return self._handle_manual_data_entry(
+                        db,
+                        driver,
+                        application,
+                        state,
+                        "manual_data_entry",
+                        incoming_message_id,
+                    )
+                return self._respond(
+                    db,
+                    driver,
+                    application,
+                    "РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РґРѕРєСѓРјРµРЅС‚. РџРµСЂРµС€Р»РёС‚Рµ С„РѕС‚Рѕ Р±РµР· Р±Р»РёРєРѕРІ, С‡С‚РѕР±С‹ РІРµСЃСЊ РґРѕРєСѓРјРµРЅС‚ Р±С‹Р» РІ РєР°РґСЂРµ.",
+                )
             if fields:
+                self._reset_ocr_failure_counter(driver)
                 if "iin" in fields:
                     duplicate_reply = self._check_duplicate_constraints(
                         db, driver, application, DialogueState.ASK_IIN, fields
@@ -974,8 +1101,8 @@ class DialogueEngine:
             existing_driver = find_other_driver_by_iin(db, fields["iin"], exclude_driver_id=driver.id)
             if existing_driver:
                 reply = (
-                    f"Регистрация по ИИН {fields['iin']} уже найдена в системе для номера "
-                    f"{existing_driver.whatsapp_phone}. Повторная регистрация остановлена."
+                    f"Р В Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ Р С—Р С• Р ВР ВР Сњ {fields['iin']} РЎС“Р В¶Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…Р В° Р Р† РЎРѓР С‘РЎРѓРЎвЂљР ВµР СР Вµ Р Т‘Р В»РЎРЏ Р Р…Р С•Р СР ВµРЎР‚Р В° "
+                    f"{existing_driver.whatsapp_phone}. Р СџР С•Р Р†РЎвЂљР С•РЎР‚Р Р…Р В°РЎРЏ РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ Р С•РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…Р В°."
                 )
                 create_conversation_event(db, driver, "duplicate_detected_iin", {"iin": fields["iin"], "existing_phone": existing_driver.whatsapp_phone})
                 self._mark_duplicate_rejected(db, driver, application, reply)
@@ -985,10 +1112,10 @@ class DialogueEngine:
             normalized_plate = normalize_plate_number(fields["plate_number"])
             existing_vehicle = find_vehicle_by_plate_number(db, normalized_plate, exclude_driver_id=driver.id)
             if existing_vehicle:
-                owner = existing_vehicle.driver.whatsapp_phone if existing_vehicle.driver else "другого водителя"
+                owner = existing_vehicle.driver.whatsapp_phone if existing_vehicle.driver else "Р Т‘РЎР‚РЎС“Р С–Р С•Р С–Р С• Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЏ"
                 reply = (
-                    f"Автомобиль с госномером {normalized_plate} уже найден в системе "
-                    f"и привязан к {owner}. Повторная регистрация остановлена."
+                    f"Р С’Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЉ РЎРѓ Р С–Р С•РЎРѓР Р…Р С•Р СР ВµРЎР‚Р С•Р С {normalized_plate} РЎС“Р В¶Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р… Р Р† РЎРѓР С‘РЎРѓРЎвЂљР ВµР СР Вµ "
+                    f"Р С‘ Р С—РЎР‚Р С‘Р Р†РЎРЏР В·Р В°Р Р… Р С” {owner}. Р СџР С•Р Р†РЎвЂљР С•РЎР‚Р Р…Р В°РЎРЏ РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ Р С•РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…Р В°."
                 )
                 create_conversation_event(db, driver, "duplicate_detected_plate", {"plate_number": normalized_plate, "owner": owner})
                 self._mark_duplicate_rejected(db, driver, application, reply)
@@ -1021,7 +1148,7 @@ class DialogueEngine:
             if next_state == DialogueState.CONFIRM_DATA
             else PROMPTS[next_state]
         )
-        reply = f"{MANUAL_DATA_ENTRY_REPLY}\n\n📋 Следующий шаг:\n{next_prompt}"
+        reply = f"{MANUAL_DATA_ENTRY_REPLY}\n\nСЂСџвЂњвЂ№ Р РЋР В»Р ВµР Т‘РЎС“РЎР‹РЎвЂ°Р С‘Р в„– РЎв‚¬Р В°Р С–:\n{next_prompt}"
         self._record_system_trace(
             db,
             incoming_message_id,
@@ -1052,9 +1179,14 @@ class DialogueEngine:
                     },
                 )
             elif ai_result.fallback_used:
-                driver.fallback_count = (driver.fallback_count or 0) + 1
-                db.add(driver)
-            return self._respond(db, driver, application, ai_result.reply or "Не понял, что именно нужно изменить.")
+                self._register_fallback(
+                    db,
+                    driver,
+                    application,
+                    state_before=state.value,
+                    reason="field_edit_fallback",
+                )
+            return self._respond(db, driver, application, ai_result.reply or "Р СњР Вµ Р С—Р С•Р Р…РЎРЏР В», РЎвЂЎРЎвЂљР С• Р С‘Р СР ВµР Р…Р Р…Р С• Р Р…РЎС“Р В¶Р Р…Р С• Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ.")
 
         duplicate_state = state
         if "iin" in ai_result.normalized_fields:
@@ -1066,6 +1198,7 @@ class DialogueEngine:
             return self._respond(db, driver, application, duplicate_reply)
 
         changed_fields = self._apply_extracted_fields(driver, ai_result.normalized_fields, db, application=application, audit_action="field_corrected_by_user", actor_type="driver")
+        self._mark_successful_progress(driver)
         create_conversation_event(
             db,
             driver,
@@ -1084,7 +1217,7 @@ class DialogueEngine:
             db,
             driver,
             application,
-            f"✅ Готово, обновил поле «{self._field_label(ai_result.target_field)}». Проверьте данные ещё раз.\n\n{self._build_confirmation(driver)}",
+            f"РІСљвЂ¦ Р вЂњР С•РЎвЂљР С•Р Р†Р С•, Р С•Р В±Р Р…Р С•Р Р†Р С‘Р В» Р С—Р С•Р В»Р Вµ Р’В«{self._field_label(ai_result.target_field)}Р’В». Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р ВµРЎвЂ°РЎвЂ РЎР‚Р В°Р В·.\n\n{self._build_confirmation(driver)}",
         )
 
     def _handle_pending_field_edit_value(
@@ -1100,7 +1233,7 @@ class DialogueEngine:
         target_state = self._field_name_to_correction_state(target_field)
         if target_state is None:
             self._clear_pending_field_edit(driver)
-            return self._respond(db, driver, application, "Не удалось определить поле для исправления. Напишите, что именно нужно изменить.")
+            return self._respond(db, driver, application, "Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р С•Р С—РЎР‚Р ВµР Т‘Р ВµР В»Р С‘РЎвЂљРЎРЉ Р С—Р С•Р В»Р Вµ Р Т‘Р В»РЎРЏ Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ. Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р С‘Р СР ВµР Р…Р Р…Р С• Р Р…РЎС“Р В¶Р Р…Р С• Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ.")
 
         ai_result = self.ai.respond(target_state.value, message_text, driver)
         ai_result.target_field = ai_result.target_field or target_field
@@ -1110,7 +1243,16 @@ class DialogueEngine:
 
         normalized_fields = ai_result.normalized_fields or ai_result.extracted_fields or {}
         if ai_result.validation_errors or not normalized_fields:
-            reply = ai_result.reply or f"Отправьте корректное значение для поля «{self._field_label(target_field)}»."
+            self._register_fallback(
+                db,
+                driver,
+                application,
+                state_before=state.value,
+                reason="pending_field_edit_invalid",
+                message_id=incoming_message_id,
+                message_text=message_text,
+            )
+            reply = ai_result.reply or f"Р С›РЎвЂљР С—РЎР‚Р В°Р Р†РЎРЉРЎвЂљР Вµ Р С”Р С•РЎР‚РЎР‚Р ВµР С”РЎвЂљР Р…Р С•Р Вµ Р В·Р Р…Р В°РЎвЂЎР ВµР Р…Р С‘Р Вµ Р Т‘Р В»РЎРЏ Р С—Р С•Р В»РЎРЏ Р’В«{self._field_label(target_field)}Р’В»."
             return self._respond(db, driver, application, reply)
 
         duplicate_state = state
@@ -1130,6 +1272,7 @@ class DialogueEngine:
             audit_action="field_corrected_by_user",
             actor_type="driver",
         )
+        self._mark_successful_progress(driver)
         self._clear_pending_field_edit(driver)
         update_driver_state(db, driver, DialogueState.CONFIRM_DATA.value)
         set_application_status(db, application, "confirming_data", yandex_status="needs_resubmit")
@@ -1150,7 +1293,7 @@ class DialogueEngine:
             db,
             driver,
             application,
-            f"Готово, обновил поле «{self._field_label(target_field)}». Проверьте данные еще раз.\n\n{self._build_confirmation(driver)}",
+            f"Р вЂњР С•РЎвЂљР С•Р Р†Р С•, Р С•Р В±Р Р…Р С•Р Р†Р С‘Р В» Р С—Р С•Р В»Р Вµ Р’В«{self._field_label(target_field)}Р’В». Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р ВµРЎвЂ°Р Вµ РЎР‚Р В°Р В·.\n\n{self._build_confirmation(driver)}",
         )
 
     def _record_ai_trace(
@@ -1168,9 +1311,6 @@ class DialogueEngine:
         incoming_message = next((message for message in driver.messages if message.id == message_id), None)
         if incoming_message is None:
             return
-        if ai_result.fallback_used:
-            driver.fallback_count = (driver.fallback_count or 0) + 1
-            db.add(driver)
         upsert_message_ai_trace(
             db,
             message=incoming_message,
@@ -1257,13 +1397,14 @@ class DialogueEngine:
             return None
 
         flow = SUPPORT_FLOWS[topic]
-        progress_words = {"сделал", "дальше", "готово", "получилось", "ок", "ok"}
-        problem_words = {"не получается", "не вышло", "не работает", "ошибка", "не приходит", "не активен", "неактивен"}
+        progress_words = {"РЎРѓР Т‘Р ВµР В»Р В°Р В»", "Р Т‘Р В°Р В»РЎРЉРЎв‚¬Р Вµ", "Р С–Р С•РЎвЂљР С•Р Р†Р С•", "Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В»Р С•РЎРѓРЎРЉ", "Р С•Р С”", "ok"}
+        problem_words = {"Р Р…Р Вµ Р С—Р С•Р В»РЎС“РЎвЂЎР В°Р ВµРЎвЂљРЎРѓРЎРЏ", "Р Р…Р Вµ Р Р†РЎвЂ№РЎв‚¬Р В»Р С•", "Р Р…Р Вµ РЎР‚Р В°Р В±Р С•РЎвЂљР В°Р ВµРЎвЂљ", "Р С•РЎв‚¬Р С‘Р В±Р С”Р В°", "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ", "Р Р…Р Вµ Р В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…", "Р Р…Р ВµР В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…"}
 
         if driver.active_support_topic != topic:
             driver.active_support_topic = topic
             driver.active_support_step = "0"
-            driver.support_context_json = {"source_state": source_state}
+            self._set_support_context(driver, {"source_state": source_state, "mode": "support_flow", "topic": topic})
+            self._mark_successful_progress(driver)
             db.add(driver)
             create_conversation_event(db, driver, "support_flow_started", {"topic": topic})
             return flow["intro"] + "\n\n" + self._support_step_text(topic, 0)
@@ -1275,7 +1416,7 @@ class DialogueEngine:
             db.add(driver)
             set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_needs_help")
             create_conversation_event(db, driver, "support_escalated_to_manager", {"topic": topic, "message": message_text})
-            return "Понял. Передаю вопрос менеджеру. Пока менеджер проверяет, опишите коротко, на каком именно шаге возникла проблема."
+            return "Р СџР С•Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“. Р СџР С•Р С”Р В° Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЏР ВµРЎвЂљ, Р С•Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р С”Р С•РЎР‚Р С•РЎвЂљР С”Р С•, Р Р…Р В° Р С”Р В°Р С”Р С•Р С Р С‘Р СР ВµР Р…Р Р…Р С• РЎв‚¬Р В°Р С–Р Вµ Р Р†Р С•Р В·Р Р…Р С‘Р С”Р В»Р В° Р С—РЎР‚Р С•Р В±Р В»Р ВµР СР В°."
 
         if any(word in normalized for word in progress_words):
             next_step = current_step + 1
@@ -1283,10 +1424,13 @@ class DialogueEngine:
                 driver.active_support_topic = None
                 driver.active_support_step = None
                 driver.support_context_json = None
+                self._mark_successful_progress(driver)
                 db.add(driver)
                 create_conversation_event(db, driver, "support_flow_completed", {"topic": topic})
                 return flow["completed"]
             driver.active_support_step = str(next_step)
+            self._touch_support_context(driver)
+            self._mark_successful_progress(driver)
             db.add(driver)
             return self._support_step_text(topic, next_step)
 
@@ -1295,7 +1439,7 @@ class DialogueEngine:
     def _support_step_text(self, topic: str, step_index: int) -> str:
         flow = SUPPORT_FLOWS[topic]
         step = flow["steps"][step_index]
-        return f"Шаг {step_index + 1}: {step}\n\nКогда сделаете, напишите: сделал. Если не получается, напишите, что именно не выходит."
+        return f"Р РЃР В°Р С– {step_index + 1}: {step}\n\nР С™Р С•Р С–Р Т‘Р В° РЎРѓР Т‘Р ВµР В»Р В°Р ВµРЎвЂљР Вµ, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ: РЎРѓР Т‘Р ВµР В»Р В°Р В». Р вЂўРЎРѓР В»Р С‘ Р Р…Р Вµ Р С—Р С•Р В»РЎС“РЎвЂЎР В°Р ВµРЎвЂљРЎРѓРЎРЏ, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р С‘Р СР ВµР Р…Р Р…Р С• Р Р…Р Вµ Р Р†РЎвЂ№РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ."
 
     def _is_yandex_pro_followup_state(self, state: DialogueState) -> bool:
         return state in {
@@ -1334,8 +1478,8 @@ class DialogueEngine:
                 driver,
                 application,
                 (
-                    "🎉 Отлично, вы вошли в Яндекс Про! Можно выходить на линию.\n"
-                    "💬 Если по работе появятся вопросы, пишите сюда.\n\n"
+                    "СЂСџР‹вЂ° Р С›РЎвЂљР В»Р С‘РЎвЂЎР Р…Р С•, Р Р†РЎвЂ№ Р Р†Р С•РЎв‚¬Р В»Р С‘ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•! Р СљР С•Р В¶Р Р…Р С• Р Р†РЎвЂ№РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљРЎРЉ Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹.\n"
+                    "СЂСџвЂ™В¬ Р вЂўРЎРѓР В»Р С‘ Р С—Р С• РЎР‚Р В°Р В±Р С•РЎвЂљР Вµ Р С—Р С•РЎРЏР Р†РЎРЏРЎвЂљРЎРѓРЎРЏ Р Р†Р С•Р С—РЎР‚Р С•РЎРѓРЎвЂ№, Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ РЎРѓРЎР‹Р Т‘Р В°.\n\n"
                     f"{self._build_office_bonus_block()}"
                 ),
             )
@@ -1354,8 +1498,8 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "👌 Понял. Опишите, что не получается при входе в Яндекс Про — передам менеджеру.\n"
-                "Уже вошли — напишите: Вошел",
+                "СЂСџвЂРЉ Р СџР С•Р Р…РЎРЏР В». Р С›Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р Р…Р Вµ Р С—Р С•Р В»РЎС“РЎвЂЎР В°Р ВµРЎвЂљРЎРѓРЎРЏ Р С—РЎР‚Р С‘ Р Р†РЎвЂ¦Р С•Р Т‘Р Вµ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С• РІР‚вЂќ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р С Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“.\n"
+                "Р Р€Р В¶Р Вµ Р Р†Р С•РЎв‚¬Р В»Р С‘ РІР‚вЂќ Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ: Р вЂ™Р С•РЎв‚¬Р ВµР В»",
             )
 
         if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS and message_text.strip():
@@ -1367,7 +1511,7 @@ class DialogueEngine:
                 db,
                 driver,
                 application,
-                "✅ Принял. После успешного входа напишите: Вошел.",
+                "РІСљвЂ¦ Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР С•РЎРѓР В»Р Вµ РЎС“РЎРѓР С—Р ВµРЎв‚¬Р Р…Р С•Р С–Р С• Р Р†РЎвЂ¦Р С•Р Т‘Р В° Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ: Р вЂ™Р С•РЎв‚¬Р ВµР В».",
             )
 
         if ai_result.intent in {"faq", "help", "smalltalk", "clarification"} and ai_result.reply:
@@ -1401,7 +1545,7 @@ class DialogueEngine:
             driver,
             application,
             self._format_registered_driver_reply(
-                "Регистрация уже завершена. Могу помочь по Яндекс Про, выходу на линию, условиям парка, выплатам, офису и дальнейшим шагам."
+                "Р В Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ РЎС“Р В¶Р Вµ Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р ВµР Р…Р В°. Р СљР С•Р С–РЎС“ Р С—Р С•Р СР С•РЎвЂЎРЎРЉ Р С—Р С• Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•, Р Р†РЎвЂ№РЎвЂ¦Р С•Р Т‘РЎС“ Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹, РЎС“РЎРѓР В»Р С•Р Р†Р С‘РЎРЏР С Р С—Р В°РЎР‚Р С”Р В°, Р Р†РЎвЂ№Р С—Р В»Р В°РЎвЂљР В°Р С, Р С•РЎвЂћР С‘РЎРѓРЎС“ Р С‘ Р Т‘Р В°Р В»РЎРЉР Р…Р ВµР в„–РЎв‚¬Р С‘Р С РЎв‚¬Р В°Р С–Р В°Р С."
             ),
         )
 
@@ -1413,12 +1557,12 @@ class DialogueEngine:
         if _looks_like_restart_request(normalized):
             self._reset_registration(db, driver, application)
             create_conversation_event(db, driver, "registration_restarted")
-            return f"🔄 Анкета сброшена. Начинаем заново.\n\n{REGISTRATION_START_CTA}"
+            return f"СЂСџвЂќвЂћ Р С’Р Р…Р С”Р ВµРЎвЂљР В° РЎРѓР В±РЎР‚Р С•РЎв‚¬Р ВµР Р…Р В°. Р СњР В°РЎвЂЎР С‘Р Р…Р В°Р ВµР С Р В·Р В°Р Р…Р С•Р Р†Р С•.\n\n{REGISTRATION_START_CTA}"
 
         if _looks_like_delete_request(normalized):
             reply = (
-                "Запрос на удаление аккаунта зафиксирован. "
-                "Профиль не удаляется автоматически. Менеджер парка должен проверить и удалить его вручную в системе."
+                "Р вЂ”Р В°Р С—РЎР‚Р С•РЎРѓ Р Р…Р В° РЎС“Р Т‘Р В°Р В»Р ВµР Р…Р С‘Р Вµ Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљР В° Р В·Р В°РЎвЂћР С‘Р С”РЎРѓР С‘РЎР‚Р С•Р Р†Р В°Р Р…. "
+                "Р СџРЎР‚Р С•РЎвЂћР С‘Р В»РЎРЉ Р Р…Р Вµ РЎС“Р Т‘Р В°Р В»РЎРЏР ВµРЎвЂљРЎРѓРЎРЏ Р В°Р Р†РЎвЂљР С•Р СР В°РЎвЂљР С‘РЎвЂЎР ВµРЎРѓР С”Р С‘. Р СљР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚ Р С—Р В°РЎР‚Р С”Р В° Р Т‘Р С•Р В»Р В¶Р ВµР Р… Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С‘РЎвЂљРЎРЉ Р С‘ РЎС“Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ Р ВµР С–Р С• Р Р†РЎР‚РЎС“РЎвЂЎР Р…РЎС“РЎР‹ Р Р† РЎРѓР С‘РЎРѓРЎвЂљР ВµР СР Вµ."
             )
             set_application_status(
                 db,
@@ -1487,11 +1631,11 @@ class DialogueEngine:
                 state.value,
                 message_text,
                 intent="employment_type_change",
-                reply="Принял. Передаю менеджеру заявку на перевод в статус самозанятого.",
+                reply="Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р В·Р В°РЎРЏР Р†Р С”РЎС“ Р Р…Р В° Р С—Р ВµРЎР‚Р ВµР Р†Р С•Р Т‘ Р Р† РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ РЎРѓР В°Р СР С•Р В·Р В°Р Р…РЎРЏРЎвЂљР С•Р С–Р С•.",
                 reasoning_summary="priority:employment_type_change",
                 priority_intent="employment_type_change",
             )
-            return "Принял. Передаю менеджеру заявку на перевод в статус самозанятого."
+            return "Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р В·Р В°РЎРЏР Р†Р С”РЎС“ Р Р…Р В° Р С—Р ВµРЎР‚Р ВµР Р†Р С•Р Т‘ Р Р† РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ РЎРѓР В°Р СР С•Р В·Р В°Р Р…РЎРЏРЎвЂљР С•Р С–Р С•."
 
         if detected_intent == "existing_driver_support" or _looks_like_existing_driver_intent(normalized):
             self._set_support_context(
@@ -1594,10 +1738,10 @@ class DialogueEngine:
                 state.value,
                 message_text,
                 intent="human_required",
-                reply="Ваш запрос передан менеджеру. Ожидайте ответа.",
+                reply="Р вЂ™Р В°РЎв‚¬ Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р Р… Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“. Р С›Р В¶Р С‘Р Т‘Р В°Р в„–РЎвЂљР Вµ Р С•РЎвЂљР Р†Р ВµРЎвЂљР В°.",
                 reasoning_summary="priority:human_required",
             )
-            return "Ваш запрос передан менеджеру. Ожидайте ответа."
+            return "Р вЂ™Р В°РЎв‚¬ Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р Р… Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“. Р С›Р В¶Р С‘Р Т‘Р В°Р в„–РЎвЂљР Вµ Р С•РЎвЂљР Р†Р ВµРЎвЂљР В°."
 
         if _looks_like_existing_driver_intent(normalized):
             self._record_system_trace(
@@ -1627,15 +1771,15 @@ class DialogueEngine:
                 state.value,
                 message_text,
                 intent="yandex_login_support",
-                reply="Передаю информацию менеджеру для проверки входа в Яндекс Про.",
+                reply="Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р С‘Р Р…РЎвЂћР С•РЎР‚Р СР В°РЎвЂ Р С‘РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р Т‘Р В»РЎРЏ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С”Р С‘ Р Р†РЎвЂ¦Р С•Р Т‘Р В° Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•.",
                 reasoning_summary="priority:yandex_login_support",
             )
-            return "Передаю информацию менеджеру для проверки входа в Яндекс Про."
+            return "Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р С‘Р Р…РЎвЂћР С•РЎР‚Р СР В°РЎвЂ Р С‘РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р Т‘Р В»РЎРЏ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С”Р С‘ Р Р†РЎвЂ¦Р С•Р Т‘Р В° Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•."
 
         if _looks_like_application_status_issue(normalized):
             reply = self._build_status_reply(driver, application)
             if not reply or application.status in {None, "", "collecting_data"}:
-                reply = "Передаю информацию менеджеру для проверки заявки."
+                reply = "Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р С‘Р Р…РЎвЂћР С•РЎР‚Р СР В°РЎвЂ Р С‘РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р Т‘Р В»РЎРЏ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С”Р С‘ Р В·Р В°РЎРЏР Р†Р С”Р С‘."
                 driver.requires_attention = True
                 db.add(driver)
                 set_application_status(db, application, "awaiting_manager_review", yandex_status="status_check_required")
@@ -1664,10 +1808,10 @@ class DialogueEngine:
                 state.value,
                 message_text,
                 intent="tariff_support",
-                reply="Принял. Передаю вопрос менеджеру по тарифам и доступам.",
+                reply="Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р С—Р С• РЎвЂљР В°РЎР‚Р С‘РЎвЂћР В°Р С Р С‘ Р Т‘Р С•РЎРѓРЎвЂљРЎС“Р С—Р В°Р С.",
                 reasoning_summary="priority:tariff_support",
             )
-            return "Принял. Передаю вопрос менеджеру по тарифам и доступам."
+            return "Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р С—Р С• РЎвЂљР В°РЎР‚Р С‘РЎвЂћР В°Р С Р С‘ Р Т‘Р С•РЎРѓРЎвЂљРЎС“Р С—Р В°Р С."
 
         if _looks_like_data_change_request(normalized) and state not in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
             driver.requires_attention = True
@@ -1681,10 +1825,10 @@ class DialogueEngine:
                 state.value,
                 message_text,
                 intent="data_change_request",
-                reply="Принял. Передаю менеджеру запрос на изменение данных водителя.",
+                reply="Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р Р…Р В° Р С‘Р В·Р СР ВµР Р…Р ВµР Р…Р С‘Р Вµ Р Т‘Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦ Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЏ.",
                 reasoning_summary="priority:data_change_request",
             )
-            return "Принял. Передаю менеджеру запрос на изменение данных водителя."
+            return "Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р Р…Р В° Р С‘Р В·Р СР ВµР Р…Р ВµР Р…Р С‘Р Вµ Р Т‘Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦ Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЏ."
 
         return None
 
@@ -1699,7 +1843,7 @@ class DialogueEngine:
         *,
         intent: str,
     ) -> str:
-        reply = "Ваш запрос передан менеджеру. Ожидайте ответа."
+        reply = "Р вЂ™Р В°РЎв‚¬ Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р Р… Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“. Р С›Р В¶Р С‘Р Т‘Р В°Р в„–РЎвЂљР Вµ Р С•РЎвЂљР Р†Р ВµРЎвЂљР В°."
         driver.requires_attention = True
         driver.dialog_mode = "manual"
         driver.active_support_topic = None
@@ -1750,6 +1894,7 @@ class DialogueEngine:
         driver.hired_at = None
         driver.is_hearing_impaired = None
         driver.requires_attention = False
+        driver.fallback_count = 0
         driver.duplicate_flag = False
         driver.dialog_mode = "bot_active"
         driver.unread_count = 0
@@ -1863,44 +2008,44 @@ class DialogueEngine:
         issues_block = ""
         if validation.get("errors"):
             issues_block = (
-                "\n\n⚠ Перед отправкой нужно исправить:\n"
+                "\n\nРІС™В  Р СџР ВµРЎР‚Р ВµР Т‘ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С”Р С•Р в„– Р Р…РЎС“Р В¶Р Р…Р С• Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ:\n"
                 f"{format_validation_errors_for_user(validation['errors'])}\n"
             )
         hearing_impaired = {
-            "true": "да",
-            "false": "нет",
+            "true": "Р Т‘Р В°",
+            "false": "Р Р…Р ВµРЎвЂљ",
         }.get((driver.is_hearing_impaired or "").strip().lower(), driver.is_hearing_impaired or "-")
         return (
-            "Проверьте данные:\n\n"
-            f"ФИО: {driver.full_name or '-'}\n"
-            f"Фамилия: {driver.last_name or '-'}\n"
-            f"Имя: {driver.first_name or '-'}\n"
-            f"Отчество: {driver.middle_name or '-'}\n"
-            f"Город: {driver.city or '-'}\n"
-            f"Адрес: {driver.address or '-'}\n"
-            f"ИИН: {driver.iin or '-'}\n"
-            f"Дата рождения: {driver.birth_date or '-'}\n"
-            f"Водительский стаж с: {driver.driving_experience_since or '-'}\n"
-            f"ВУ номер: {driver.driver_license_number or '-'}\n"
-            f"ВУ выдано: {driver.driver_license_issue_date or '-'}\n"
-            f"ВУ действует до: {driver.driver_license_expires_at or '-'}\n"
-            f"Условие работы: {driver.employment_type or '-'}\n"
-            f"Дата принятия: {driver.hired_at or '-'}\n"
-            f"Слабослышащий водитель: {hearing_impaired}\n"
-            f"Авто: {(vehicle.brand + ' ' + vehicle.model) if vehicle and vehicle.brand and vehicle.model else '-'}\n"
-            f"Год: {vehicle.year if vehicle else '-'}\n"
-            f"Госномер: {vehicle.plate_number if vehicle else '-'}\n"
-            f"Цвет: {vehicle.color if vehicle else '-'}\n"
-            f"Номер СТС: {vehicle.registration_certificate if vehicle else '-'}"
+            "Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ:\n\n"
+            f"Р В¤Р ВР С›: {driver.full_name or '-'}\n"
+            f"Р В¤Р В°Р СР С‘Р В»Р С‘РЎРЏ: {driver.last_name or '-'}\n"
+            f"Р ВР СРЎРЏ: {driver.first_name or '-'}\n"
+            f"Р С›РЎвЂљРЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р С•: {driver.middle_name or '-'}\n"
+            f"Р вЂњР С•РЎР‚Р С•Р Т‘: {driver.city or '-'}\n"
+            f"Р С’Р Т‘РЎР‚Р ВµРЎРѓ: {driver.address or '-'}\n"
+            f"Р ВР ВР Сњ: {driver.iin or '-'}\n"
+            f"Р вЂќР В°РЎвЂљР В° РЎР‚Р С•Р В¶Р Т‘Р ВµР Р…Р С‘РЎРЏ: {driver.birth_date or '-'}\n"
+            f"Р вЂ™Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉРЎРѓР С”Р С‘Р в„– РЎРѓРЎвЂљР В°Р В¶ РЎРѓ: {driver.driving_experience_since or '-'}\n"
+            f"Р вЂ™Р Р€ Р Р…Р С•Р СР ВµРЎР‚: {driver.driver_license_number or '-'}\n"
+            f"Р вЂ™Р Р€ Р Р†РЎвЂ№Р Т‘Р В°Р Р…Р С•: {driver.driver_license_issue_date or '-'}\n"
+            f"Р вЂ™Р Р€ Р Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†РЎС“Р ВµРЎвЂљ Р Т‘Р С•: {driver.driver_license_expires_at or '-'}\n"
+            f"Р Р€РЎРѓР В»Р С•Р Р†Р С‘Р Вµ РЎР‚Р В°Р В±Р С•РЎвЂљРЎвЂ№: {driver.employment_type or '-'}\n"
+            f"Р вЂќР В°РЎвЂљР В° Р С—РЎР‚Р С‘Р Р…РЎРЏРЎвЂљР С‘РЎРЏ: {driver.hired_at or '-'}\n"
+            f"Р РЋР В»Р В°Р В±Р С•РЎРѓР В»РЎвЂ№РЎв‚¬Р В°РЎвЂ°Р С‘Р в„– Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ: {hearing_impaired}\n"
+            f"Р С’Р Р†РЎвЂљР С•: {(vehicle.brand + ' ' + vehicle.model) if vehicle and vehicle.brand and vehicle.model else '-'}\n"
+            f"Р вЂњР С•Р Т‘: {vehicle.year if vehicle else '-'}\n"
+            f"Р вЂњР С•РЎРѓР Р…Р С•Р СР ВµРЎР‚: {vehicle.plate_number if vehicle else '-'}\n"
+            f"Р В¦Р Р†Р ВµРЎвЂљ: {vehicle.color if vehicle else '-'}\n"
+            f"Р СњР С•Р СР ВµРЎР‚ Р РЋР СћР РЋ: {vehicle.registration_certificate if vehicle else '-'}"
             f"{issues_block}\n\n"
-            'Если все верно, напишите "Подтверждаю". Если нужно исправить, напишите, что изменить.'
+            'Р вЂўРЎРѓР В»Р С‘ Р Р†РЎРѓР Вµ Р Р†Р ВµРЎР‚Р Р…Р С•, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ "Р СџР С•Р Т‘РЎвЂљР Р†Р ВµРЎР‚Р В¶Р Т‘Р В°РЎР‹". Р вЂўРЎРѓР В»Р С‘ Р Р…РЎС“Р В¶Р Р…Р С• Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ, Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ.'
         )
 
     def _build_yandex_pro_start_reply(self, driver: Driver) -> str:
         contact_phone = driver.phone or driver.whatsapp_phone
-        greeting_name = driver.first_name or driver.full_name or "водитель"
+        greeting_name = driver.first_name or driver.full_name or "Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ"
         return (
-            f"{greeting_name}, спасибо — заявка уже в парке! 🎉\n\n"
+            f"{greeting_name}, РЎРѓР С—Р В°РЎРѓР С‘Р В±Р С• РІР‚вЂќ Р В·Р В°РЎРЏР Р†Р С”Р В° РЎС“Р В¶Р Вµ Р Р† Р С—Р В°РЎР‚Р С”Р Вµ! СЂСџР‹вЂ°\n\n"
             f"{YANDEX_PRO_START_TEMPLATE.format(phone=contact_phone)}\n\n"
             f"{self._build_office_bonus_block()}"
         )
@@ -1913,8 +2058,8 @@ class DialogueEngine:
         return base_reply.strip()
 
     def _build_registration_start_reply(self, base_reply: str | None = None) -> str:
-        reply = (base_reply or "👋 Отлично! Начинаем регистрацию.").strip()
-        next_step = "✍️ Напишите ФИО полностью одним сообщением.\nНапример: Абай Аят Жаныбекулы."
+        reply = (base_reply or "СЂСџвЂвЂ№ Р С›РЎвЂљР В»Р С‘РЎвЂЎР Р…Р С•! Р СњР В°РЎвЂЎР С‘Р Р…Р В°Р ВµР С РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎР‹.").strip()
+        next_step = "РІСљРЊРїС‘РЏ Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р В¤Р ВР С› Р С—Р С•Р В»Р Р…Р С•РЎРѓРЎвЂљРЎРЉРЎР‹ Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Р С’Р В±Р В°Р в„– Р С’РЎРЏРЎвЂљ Р вЂ“Р В°Р Р…РЎвЂ№Р В±Р ВµР С”РЎС“Р В»РЎвЂ№."
         if next_step not in reply:
             reply = f"{reply}\n\n{next_step}"
         return reply
@@ -1924,11 +2069,11 @@ class DialogueEngine:
 
     def _format_post_yandex_reply(self, state: DialogueState, base_reply: str) -> str:
         if state == DialogueState.ASK_YANDEX_PRO_PROBLEM_DETAILS:
-            reminder = "✅ Уже вошли в Яндекс Про — напишите: Вошел. Нет — опишите, что не получается."
+            reminder = "РІСљвЂ¦ Р Р€Р В¶Р Вµ Р Р†Р С•РЎв‚¬Р В»Р С‘ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С• РІР‚вЂќ Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ: Р вЂ™Р С•РЎв‚¬Р ВµР В». Р СњР ВµРЎвЂљ РІР‚вЂќ Р С•Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ, РЎвЂЎРЎвЂљР С• Р Р…Р Вµ Р С—Р С•Р В»РЎС“РЎвЂЎР В°Р ВµРЎвЂљРЎРѓРЎРЏ."
         else:
             reminder = (
-                "📱 Сейчас шаг: войти в Яндекс Про. "
-                "Вошли — напишите: Вошел. Проблема — опишите в чат."
+                "СЂСџвЂњВ± Р РЋР ВµР в„–РЎвЂЎР В°РЎРѓ РЎв‚¬Р В°Р С–: Р Р†Р С•Р в„–РЎвЂљР С‘ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•. "
+                "Р вЂ™Р С•РЎв‚¬Р В»Р С‘ РІР‚вЂќ Р Р…Р В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ: Р вЂ™Р С•РЎв‚¬Р ВµР В». Р СџРЎР‚Р С•Р В±Р В»Р ВµР СР В° РІР‚вЂќ Р С•Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р† РЎвЂЎР В°РЎвЂљ."
             )
         if base_reply.strip() == reminder.strip():
             return base_reply
@@ -1940,10 +2085,10 @@ class DialogueEngine:
     def _build_office_bonus_block(self) -> str:
         office_address = self.settings.public_site_address
         return (
-            "🎁 После регистрации можно приехать в офис и забрать приветственный бонус.\n"
-            "В бокс входят: зарядка 3 в 1, держатель для телефона, салфетка и тряпка.\n"
-            "Для бизнес-класса дополнительно выдаем блок воды.\n"
-            f"📍 Офис: {office_address}\n"
+            "СЂСџР‹Рѓ Р СџР С•РЎРѓР В»Р Вµ РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘Р С‘ Р СР С•Р В¶Р Р…Р С• Р С—РЎР‚Р С‘Р ВµРЎвЂ¦Р В°РЎвЂљРЎРЉ Р Р† Р С•РЎвЂћР С‘РЎРѓ Р С‘ Р В·Р В°Р В±РЎР‚Р В°РЎвЂљРЎРЉ Р С—РЎР‚Р С‘Р Р†Р ВµРЎвЂљРЎРѓРЎвЂљР Р†Р ВµР Р…Р Р…РЎвЂ№Р в„– Р В±Р С•Р Р…РЎС“РЎРѓ.\n"
+            "Р вЂ™ Р В±Р С•Р С”РЎРѓ Р Р†РЎвЂ¦Р С•Р Т‘РЎРЏРЎвЂљ: Р В·Р В°РЎР‚РЎРЏР Т‘Р С”Р В° 3 Р Р† 1, Р Т‘Р ВµРЎР‚Р В¶Р В°РЎвЂљР ВµР В»РЎРЉ Р Т‘Р В»РЎРЏ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В°, РЎРѓР В°Р В»РЎвЂћР ВµРЎвЂљР С”Р В° Р С‘ РЎвЂљРЎР‚РЎРЏР С—Р С”Р В°.\n"
+            "Р вЂќР В»РЎРЏ Р В±Р С‘Р В·Р Р…Р ВµРЎРѓ-Р С”Р В»Р В°РЎРѓРЎРѓР В° Р Т‘Р С•Р С—Р С•Р В»Р Р…Р С‘РЎвЂљР ВµР В»РЎРЉР Р…Р С• Р Р†РЎвЂ№Р Т‘Р В°Р ВµР С Р В±Р В»Р С•Р С” Р Р†Р С•Р Т‘РЎвЂ№.\n"
+            f"СЂСџвЂњРЊ Р С›РЎвЂћР С‘РЎРѓ: {office_address}\n"
             f"{OFFICE_HOURS}"
         )
 
@@ -1952,6 +2097,12 @@ class DialogueEngine:
         return context if isinstance(context, dict) else {}
 
     def _set_support_context(self, driver: Driver, context: dict | None) -> None:
+        if context:
+            now = datetime.utcnow()
+            context = dict(context)
+            context.setdefault("created_at", now.isoformat())
+            context["last_updated"] = now.isoformat()
+            context.setdefault("expires_at", (now + timedelta(minutes=30)).isoformat())
         driver.support_context_json = context or None
         driver.updated_at = datetime.utcnow()
 
@@ -1960,6 +2111,8 @@ class DialogueEngine:
         driver.updated_at = datetime.utcnow()
 
     def _support_context_is_expired(self, context: dict) -> bool:
+        if self._support_context_is_stale(context):
+            return True
         expires_at = context.get("expires_at")
         if not isinstance(expires_at, str) or not expires_at:
             return False
@@ -1967,6 +2120,51 @@ class DialogueEngine:
             return datetime.fromisoformat(expires_at) <= datetime.utcnow()
         except ValueError:
             return False
+
+    def _support_context_is_stale(self, context: dict) -> bool:
+        reference = context.get("last_updated") or context.get("expires_at") or context.get("created_at")
+        if not isinstance(reference, str) or not reference:
+            return False
+        try:
+            return datetime.fromisoformat(reference) <= datetime.utcnow() - timedelta(hours=24)
+        except ValueError:
+            return False
+
+    def _reset_stale_support_context(self, driver: Driver) -> None:
+        context = self._get_support_context(driver)
+        if not context or not self._support_context_is_stale(context):
+            return
+        self._clear_support_context(driver)
+        driver.active_support_topic = None
+        driver.active_support_step = None
+
+    def _touch_support_context(self, driver: Driver) -> None:
+        context = self._get_support_context(driver)
+        if not context:
+            return
+        context["last_updated"] = datetime.utcnow().isoformat()
+        self._set_support_context(driver, context)
+
+    def _ocr_failure_count(self, driver: Driver) -> int:
+        context = self._get_support_context(driver)
+        return int(context.get("consecutive_ocr_failures") or 0)
+
+    def _increment_ocr_failure_counter(self, driver: Driver) -> None:
+        context = self._get_support_context(driver)
+        context["consecutive_ocr_failures"] = int(context.get("consecutive_ocr_failures") or 0) + 1
+        self._set_support_context(driver, context)
+
+    def _reset_ocr_failure_counter(self, driver: Driver) -> None:
+        context = self._get_support_context(driver)
+        if context.get("consecutive_ocr_failures"):
+            context["consecutive_ocr_failures"] = 0
+            self._set_support_context(driver, context)
+
+    def _set_manual_data_entry_enabled(self, driver: Driver, enabled: bool) -> None:
+        set_manual_data_entry(driver, enabled=enabled)
+        context = self._get_support_context(driver)
+        context["manual_data_entry"] = bool(enabled)
+        self._set_support_context(driver, context)
 
     def _looks_like_driver_lookup_payload(self, message_text: str) -> bool:
         normalized = normalize_text_token(repair_mojibake(message_text))
@@ -1976,7 +2174,7 @@ class DialogueEngine:
         compact = "".join(ch for ch in normalized if ch.isalnum())
         if len(compact) == 12 and compact.isdigit():
             return True
-        return any(marker in normalized for marker in ("iin", "ийн", "ииин"))
+        return any(marker in normalized for marker in ("iin", "Р С‘Р С‘РњвЂ Р Р…", "Р С‘Р С‘Р С‘Р Р…"))
 
     def _find_existing_yandex_driver(
         self,
@@ -2020,90 +2218,90 @@ class DialogueEngine:
         vehicle = driver.vehicle
         docs = []
         if getattr(vehicle, "registration_certificate", None):
-            docs.append(f"СТС: {vehicle.registration_certificate}")
+            docs.append(f"Р РЋР СћР РЋ: {vehicle.registration_certificate}")
         if driver.driver_license_number:
-            docs.append(f"ВУ: {driver.driver_license_number}")
+            docs.append(f"Р вЂ™Р Р€: {driver.driver_license_number}")
         if driver.iin:
-            docs.append(f"ИИН: {driver.iin}")
-        vehicle_name = " ".join(part for part in [getattr(vehicle, "brand", None), getattr(vehicle, "model", None)] if part) or "не указан"
+            docs.append(f"Р ВР ВР Сњ: {driver.iin}")
+        vehicle_name = " ".join(part for part in [getattr(vehicle, "brand", None), getattr(vehicle, "model", None)] if part) or "Р Р…Р Вµ РЎС“Р С”Р В°Р В·Р В°Р Р…"
         return (
-            "Нашёл ваш профиль:\n"
-            f"ФИО: {driver.full_name or 'не указан'}\n"
-            f"Телефон: {driver.phone or driver.whatsapp_phone or 'не указан'}\n"
-            f"Авто: {vehicle_name} {getattr(vehicle, 'year', None) or 'не указан'}\n"
-            f"Госномер: {getattr(vehicle, 'plate_number', None) or 'не указан'}\n"
-            f"Документы: {', '.join(docs) if docs else 'не указаны'}\n"
-            "Что хотите изменить?\n"
-            "1. Автомобиль\n"
-            "2. Госномер\n"
-            "3. СТС/техпаспорт\n"
-            "4. Водительское удостоверение\n"
-            "5. Номер телефона\n"
-            "6. Менеджер"
+            "Р СњР В°РЎв‚¬РЎвЂР В» Р Р†Р В°РЎв‚¬ Р С—РЎР‚Р С•РЎвЂћР С‘Р В»РЎРЉ:\n"
+            f"Р В¤Р ВР С›: {driver.full_name or 'Р Р…Р Вµ РЎС“Р С”Р В°Р В·Р В°Р Р…'}\n"
+            f"Р СћР ВµР В»Р ВµРЎвЂћР С•Р Р…: {driver.phone or driver.whatsapp_phone or 'Р Р…Р Вµ РЎС“Р С”Р В°Р В·Р В°Р Р…'}\n"
+            f"Р С’Р Р†РЎвЂљР С•: {vehicle_name} {getattr(vehicle, 'year', None) or 'Р Р…Р Вµ РЎС“Р С”Р В°Р В·Р В°Р Р…'}\n"
+            f"Р вЂњР С•РЎРѓР Р…Р С•Р СР ВµРЎР‚: {getattr(vehicle, 'plate_number', None) or 'Р Р…Р Вµ РЎС“Р С”Р В°Р В·Р В°Р Р…'}\n"
+            f"Р вЂќР С•Р С”РЎС“Р СР ВµР Р…РЎвЂљРЎвЂ№: {', '.join(docs) if docs else 'Р Р…Р Вµ РЎС“Р С”Р В°Р В·Р В°Р Р…РЎвЂ№'}\n"
+            "Р В§РЎвЂљР С• РЎвЂ¦Р С•РЎвЂљР С‘РЎвЂљР Вµ Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ?\n"
+            "1. Р С’Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЉ\n"
+            "2. Р вЂњР С•РЎРѓР Р…Р С•Р СР ВµРЎР‚\n"
+            "3. Р РЋР СћР РЋ/РЎвЂљР ВµРЎвЂ¦Р С—Р В°РЎРѓР С—Р С•РЎР‚РЎвЂљ\n"
+            "4. Р вЂ™Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉРЎРѓР С”Р С•Р Вµ РЎС“Р Т‘Р С•РЎРѓРЎвЂљР С•Р Р†Р ВµРЎР‚Р ВµР Р…Р С‘Р Вµ\n"
+            "5. Р СњР С•Р СР ВµРЎР‚ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В°\n"
+            "6. Р СљР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚"
         )
 
     def _build_profile_update_menu(self, driver: Driver) -> str:
-        base_card = self._build_driver_profile_card(driver).split("Что хотите изменить?")[0].rstrip()
+        base_card = self._build_driver_profile_card(driver).split("Р В§РЎвЂљР С• РЎвЂ¦Р С•РЎвЂљР С‘РЎвЂљР Вµ Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ?")[0].rstrip()
         return base_card + (
-            "\nЧто хотите изменить?\n"
-            "1. ФИО\n"
-            "2. Телефон\n"
-            "3. Город/адрес\n"
-            "4. Автомобиль\n"
-            "5. Госномер\n"
-            "6. СТС/техпаспорт\n"
-            "7. Водительское удостоверение\n"
-            "8. СМЗ/тип сотрудничества\n"
-            "9. Менеджер"
+            "\nР В§РЎвЂљР С• РЎвЂ¦Р С•РЎвЂљР С‘РЎвЂљР Вµ Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ?\n"
+            "1. Р В¤Р ВР С›\n"
+            "2. Р СћР ВµР В»Р ВµРЎвЂћР С•Р Р…\n"
+            "3. Р вЂњР С•РЎР‚Р С•Р Т‘/Р В°Р Т‘РЎР‚Р ВµРЎРѓ\n"
+            "4. Р С’Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЉ\n"
+            "5. Р вЂњР С•РЎРѓР Р…Р С•Р СР ВµРЎР‚\n"
+            "6. Р РЋР СћР РЋ/РЎвЂљР ВµРЎвЂ¦Р С—Р В°РЎРѓР С—Р С•РЎР‚РЎвЂљ\n"
+            "7. Р вЂ™Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉРЎРѓР С”Р С•Р Вµ РЎС“Р Т‘Р С•РЎРѓРЎвЂљР С•Р Р†Р ВµРЎР‚Р ВµР Р…Р С‘Р Вµ\n"
+            "8. Р РЋР СљР вЂ”/РЎвЂљР С‘Р С— РЎРѓР С•РЎвЂљРЎР‚РЎС“Р Т‘Р Р…Р С‘РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р В°\n"
+            "9. Р СљР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚"
         )
 
     def _detect_driver_update_request(self, message_text: str) -> str | None:
         normalized = normalize_text_token(repair_mojibake(message_text)).lower().strip(" ?!.,")
         markers = (
-            "поменять машину",
-            "хочу поменять машину",
-            "поменять авто",
-            "хочу поменять авто",
-            "сменить машину",
-            "сменить авто",
-            "сменить автомобиль",
-            "заменить машину",
-            "заменить авто",
-            "поменял машину",
-            "купил новую машину",
-            "обновить машину",
-            "обновить авто",
-            "изменить автомобиль",
-            "изменить авто",
-            "изменить данные авто",
-            "изменить госномер",
-            "поменять госномер",
-            "обновить стс",
-            "поменять стс",
-            "поменять техпаспорт",
-            "заменить техпаспорт",
-            "поменять права",
-            "заменить права",
-            "обновить права",
-            "водительское удостоверение поменять",
-            "изменить номер телефона",
-            "поменять телефон",
-            "исправить фио",
-            "поменять фио",
-            "исправить имя",
-            "данные неправильно",
-            "изменить данные",
-            "обновить документы",
-            "поменять документы",
-            "көлікті ауыстыру",
-            "машина ауыстыру",
-            "автокөлік ауыстыру",
-            "техпаспорт ауыстыру",
-            "құжат ауыстыру",
-            "құжаттарды ауыстыру",
-            "құқық ауыстыру",
-            "номер ауыстыру",
-            "деректерді өзгерту",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+            "РЎвЂ¦Р С•РЎвЂЎРЎС“ Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•",
+            "РЎвЂ¦Р С•РЎвЂЎРЎС“ Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•",
+            "РЎРѓР СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+            "РЎРѓР СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•",
+            "РЎРѓР СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЉ",
+            "Р В·Р В°Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+            "Р В·Р В°Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏР В» Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+            "Р С”РЎС“Р С—Р С‘Р В» Р Р…Р С•Р Р†РЎС“РЎР‹ Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+            "Р С•Р В±Р Р…Р С•Р Р†Р С‘РЎвЂљРЎРЉ Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+            "Р С•Р В±Р Р…Р С•Р Р†Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•",
+            "Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЉ",
+            "Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•",
+            "Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р В°Р Р†РЎвЂљР С•",
+            "Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р С–Р С•РЎРѓР Р…Р С•Р СР ВµРЎР‚",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ Р С–Р С•РЎРѓР Р…Р С•Р СР ВµРЎР‚",
+            "Р С•Р В±Р Р…Р С•Р Р†Р С‘РЎвЂљРЎРЉ РЎРѓРЎвЂљРЎРѓ",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ РЎРѓРЎвЂљРЎРѓ",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ РЎвЂљР ВµРЎвЂ¦Р С—Р В°РЎРѓР С—Р С•РЎР‚РЎвЂљ",
+            "Р В·Р В°Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ РЎвЂљР ВµРЎвЂ¦Р С—Р В°РЎРѓР С—Р С•РЎР‚РЎвЂљ",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ Р С—РЎР‚Р В°Р Р†Р В°",
+            "Р В·Р В°Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р С—РЎР‚Р В°Р Р†Р В°",
+            "Р С•Р В±Р Р…Р С•Р Р†Р С‘РЎвЂљРЎРЉ Р С—РЎР‚Р В°Р Р†Р В°",
+            "Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉРЎРѓР С”Р С•Р Вµ РЎС“Р Т‘Р С•РЎРѓРЎвЂљР С•Р Р†Р ВµРЎР‚Р ВµР Р…Р С‘Р Вµ Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ",
+            "Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р Р…Р С•Р СР ВµРЎР‚ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В°",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…",
+            "Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ РЎвЂћР С‘Р С•",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ РЎвЂћР С‘Р С•",
+            "Р С‘РЎРѓР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р С‘Р СРЎРЏ",
+            "Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р Р…Р ВµР С—РЎР‚Р В°Р Р†Р С‘Р В»РЎРЉР Р…Р С•",
+            "Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ",
+            "Р С•Р В±Р Р…Р С•Р Р†Р С‘РЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљРЎвЂ№",
+            "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљРЎвЂ№",
+            "Р С”РЈВ©Р В»РЎвЂ“Р С”РЎвЂљРЎвЂ“ Р В°РЎС“РЎвЂ№РЎРѓРЎвЂљРЎвЂ№РЎР‚РЎС“",
+            "Р СР В°РЎв‚¬Р С‘Р Р…Р В° Р В°РЎС“РЎвЂ№РЎРѓРЎвЂљРЎвЂ№РЎР‚РЎС“",
+            "Р В°Р Р†РЎвЂљР С•Р С”РЈВ©Р В»РЎвЂ“Р С” Р В°РЎС“РЎвЂ№РЎРѓРЎвЂљРЎвЂ№РЎР‚РЎС“",
+            "РЎвЂљР ВµРЎвЂ¦Р С—Р В°РЎРѓР С—Р С•РЎР‚РЎвЂљ Р В°РЎС“РЎвЂ№РЎРѓРЎвЂљРЎвЂ№РЎР‚РЎС“",
+            "РўвЂєРўВ±Р В¶Р В°РЎвЂљ Р В°РЎС“РЎвЂ№РЎРѓРЎвЂљРЎвЂ№РЎР‚РЎС“",
+            "РўвЂєРўВ±Р В¶Р В°РЎвЂљРЎвЂљР В°РЎР‚Р Т‘РЎвЂ№ Р В°РЎС“РЎвЂ№РЎРѓРЎвЂљРЎвЂ№РЎР‚РЎС“",
+            "РўвЂєРўВ±РўвЂєРЎвЂ№РўвЂє Р В°РЎС“РЎвЂ№РЎРѓРЎвЂљРЎвЂ№РЎР‚РЎС“",
+            "Р Р…Р С•Р СР ВµРЎР‚ Р В°РЎС“РЎвЂ№РЎРѓРЎвЂљРЎвЂ№РЎР‚РЎС“",
+            "Р Т‘Р ВµРЎР‚Р ВµР С”РЎвЂљР ВµРЎР‚Р Т‘РЎвЂ“ РЈВ©Р В·Р С–Р ВµРЎР‚РЎвЂљРЎС“",
         )
         if any(marker in normalized for marker in markers):
             return next((marker for marker in markers if marker in normalized), "driver_update_request")
@@ -2231,7 +2429,7 @@ class DialogueEngine:
             },
         )
         db.add(driver)
-        reply = "Не нашёл профиль по этому WhatsApp-номеру. Напишите ИИН или номер телефона, на который зарегистрированы в Яндекс Про."
+        reply = "Р СњР Вµ Р Р…Р В°РЎв‚¬РЎвЂР В» Р С—РЎР‚Р С•РЎвЂћР С‘Р В»РЎРЉ Р С—Р С• РЎРЊРЎвЂљР С•Р СРЎС“ WhatsApp-Р Р…Р С•Р СР ВµРЎР‚РЎС“. Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р ВР ВР Сњ Р С‘Р В»Р С‘ Р Р…Р С•Р СР ВµРЎР‚ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В°, Р Р…Р В° Р С”Р С•РЎвЂљР С•РЎР‚РЎвЂ№Р в„– Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р…РЎвЂ№ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•."
         self._record_system_trace(
             db,
             incoming_message_id,
@@ -2296,11 +2494,11 @@ class DialogueEngine:
                     state.value,
                     message_text,
                     intent="human_operator",
-                    reply="Ваш запрос передан менеджеру. Ожидайте ответа.",
+                    reply="Р вЂ™Р В°РЎв‚¬ Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р Р… Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“. Р С›Р В¶Р С‘Р Т‘Р В°Р в„–РЎвЂљР Вµ Р С•РЎвЂљР Р†Р ВµРЎвЂљР В°.",
                     reasoning_summary="stateful_support_menu:human_operator",
                     priority_intent="human_operator",
                 )
-                return "Ваш запрос передан менеджеру. Ожидайте ответа."
+                return "Р вЂ™Р В°РЎв‚¬ Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р Р… Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“. Р С›Р В¶Р С‘Р Т‘Р В°Р в„–РЎвЂљР Вµ Р С•РЎвЂљР Р†Р ВµРЎвЂљР В°."
             if choice == "driver_update_request":
                 profile = find_driver_by_whatsapp_phone(db, driver.whatsapp_phone)
                 if not profile:
@@ -2337,7 +2535,7 @@ class DialogueEngine:
                 )
                 db.add(driver)
                 create_conversation_event(db, driver, "driver_update_profile_missing", {"source": "existing_driver_support_menu"})
-                return "Не нашёл профиль по этому WhatsApp-номеру. Напишите ИИН или номер телефона, на который зарегистрированы в Яндекс Про."
+                return "Р СњР Вµ Р Р…Р В°РЎв‚¬РЎвЂР В» Р С—РЎР‚Р С•РЎвЂћР С‘Р В»РЎРЉ Р С—Р С• РЎРЊРЎвЂљР С•Р СРЎС“ WhatsApp-Р Р…Р С•Р СР ВµРЎР‚РЎС“. Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р ВР ВР Сњ Р С‘Р В»Р С‘ Р Р…Р С•Р СР ВµРЎР‚ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В°, Р Р…Р В° Р С”Р С•РЎвЂљР С•РЎР‚РЎвЂ№Р в„– Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р…РЎвЂ№ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•."
             if choice:
                 self._set_support_context(
                     driver,
@@ -2403,7 +2601,7 @@ class DialogueEngine:
             )
             set_application_status(db, application, "awaiting_manager_review", yandex_status="driver_lookup_failed")
             create_conversation_event(db, driver, "driver_update_profile_missing", {"lookup": lookup_value})
-            return "Не нашёл профиль. Передаю менеджеру."
+            return "Р СњР Вµ Р Р…Р В°РЎв‚¬РЎвЂР В» Р С—РЎР‚Р С•РЎвЂћР С‘Р В»РЎРЉ. Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“."
 
         if context.get("mode") == "driver_profile_update" and context.get("menu") == "profile_update_menu":
             menu_map = {
@@ -2450,17 +2648,17 @@ class DialogueEngine:
                 driver.requires_attention = True
                 set_application_status(db, application, "awaiting_manager_review", yandex_status="human_required")
                 create_conversation_event(db, driver, "human_required", {"source": "profile_update_menu"})
-                return "Ваш запрос передан менеджеру. Ожидайте ответа."
+                return "Р вЂ™Р В°РЎв‚¬ Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р С—Р ВµРЎР‚Р ВµР Т‘Р В°Р Р… Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“. Р С›Р В¶Р С‘Р Т‘Р В°Р в„–РЎвЂљР Вµ Р С•РЎвЂљР Р†Р ВµРЎвЂљР В°."
             create_conversation_event(db, driver, "driver_profile_update_requested", {"field": choice})
             prompt_map = {
-                "full_name": "Напишите новые ФИО одним сообщением.",
-                "phone": "Напишите новый номер телефона.",
-                "location": "Напишите новый город или адрес.",
-                "vehicle": "Пришлите данные по автомобилю или фото документов.",
-                "plate_number": "Напишите новый госномер.",
-                "registration_certificate": "Пришлите фото или номер СТС/техпаспорта.",
-                "driver_license_number": "Пришлите фото или номер водительского удостоверения.",
-                "employment_type": "Напишите новый тип сотрудничества или СМЗ.",
+                "full_name": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р Вµ Р В¤Р ВР С› Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.",
+                "phone": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„– Р Р…Р С•Р СР ВµРЎР‚ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В°.",
+                "location": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„– Р С–Р С•РЎР‚Р С•Р Т‘ Р С‘Р В»Р С‘ Р В°Р Т‘РЎР‚Р ВµРЎРѓ.",
+                "vehicle": "Р СџРЎР‚Р С‘РЎв‚¬Р В»Р С‘РЎвЂљР Вµ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р С• Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎР‹ Р С‘Р В»Р С‘ РЎвЂћР С•РЎвЂљР С• Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљР С•Р Р†.",
+                "plate_number": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„– Р С–Р С•РЎРѓР Р…Р С•Р СР ВµРЎР‚.",
+                "registration_certificate": "Р СџРЎР‚Р С‘РЎв‚¬Р В»Р С‘РЎвЂљР Вµ РЎвЂћР С•РЎвЂљР С• Р С‘Р В»Р С‘ Р Р…Р С•Р СР ВµРЎР‚ Р РЋР СћР РЋ/РЎвЂљР ВµРЎвЂ¦Р С—Р В°РЎРѓР С—Р С•РЎР‚РЎвЂљР В°.",
+                "driver_license_number": "Р СџРЎР‚Р С‘РЎв‚¬Р В»Р С‘РЎвЂљР Вµ РЎвЂћР С•РЎвЂљР С• Р С‘Р В»Р С‘ Р Р…Р С•Р СР ВµРЎР‚ Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉРЎРѓР С”Р С•Р С–Р С• РЎС“Р Т‘Р С•РЎРѓРЎвЂљР С•Р Р†Р ВµРЎР‚Р ВµР Р…Р С‘РЎРЏ.",
+                "employment_type": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„– РЎвЂљР С‘Р С— РЎРѓР С•РЎвЂљРЎР‚РЎС“Р Т‘Р Р…Р С‘РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р В° Р С‘Р В»Р С‘ Р РЋР СљР вЂ”.",
             }
             return prompt_map[choice]
 
@@ -2504,7 +2702,7 @@ class DialogueEngine:
         parts = [part for part in normalized.split() if part]
         if not (1 <= len(parts) <= 3):
             return None
-        if all(re.sub(r"[^a-zа-яәіңғүұқөһ-]", "", part).replace("-", "").isalpha() for part in parts):
+        if all(re.sub(r"[^a-zР В°-РЎРЏРЈв„ўРЎвЂ“РўР€РўвЂњРўР‡РўВ±РўвЂєРЈВ©РўВ»-]", "", part).replace("-", "").isalpha() for part in parts):
             return cleaned
         return None
 
@@ -2513,33 +2711,33 @@ class DialogueEngine:
         if not cleaned:
             return None
         normalized = normalize_text_token(cleaned)
-        normalized = re.sub(r"\b(работать|работаю|буду|хочу|будем|город|городе|г|г\.|в|во)\b", " ", normalized)
+        normalized = re.sub(r"\b(РЎР‚Р В°Р В±Р С•РЎвЂљР В°РЎвЂљРЎРЉ|РЎР‚Р В°Р В±Р С•РЎвЂљР В°РЎР‹|Р В±РЎС“Р Т‘РЎС“|РЎвЂ¦Р С•РЎвЂЎРЎС“|Р В±РЎС“Р Т‘Р ВµР С|Р С–Р С•РЎР‚Р С•Р Т‘|Р С–Р С•РЎР‚Р С•Р Т‘Р Вµ|Р С–|Р С–\.|Р Р†|Р Р†Р С•)\b", " ", normalized)
         normalized = re.sub(r"\s+", " ", normalized).strip()
         if not normalized:
             return None
         city_aliases = {
-            "астана": "Астана",
-            "астане": "Астана",
-            "алматы": "Алматы",
-            "алмате": "Алматы",
-            "шымкент": "Шымкент",
-            "шымкенте": "Шымкент",
-            "караганда": "Караганда",
-            "караганде": "Караганда",
-            "актобе": "Актобе",
-            "актау": "Актау",
-            "атырау": "Атырау",
-            "павлодар": "Павлодар",
-            "павлодаре": "Павлодар",
-            "костанай": "Костанай",
-            "костанае": "Костанай",
+            "Р В°РЎРѓРЎвЂљР В°Р Р…Р В°": "Р С’РЎРѓРЎвЂљР В°Р Р…Р В°",
+            "Р В°РЎРѓРЎвЂљР В°Р Р…Р Вµ": "Р С’РЎРѓРЎвЂљР В°Р Р…Р В°",
+            "Р В°Р В»Р СР В°РЎвЂљРЎвЂ№": "Р С’Р В»Р СР В°РЎвЂљРЎвЂ№",
+            "Р В°Р В»Р СР В°РЎвЂљР Вµ": "Р С’Р В»Р СР В°РЎвЂљРЎвЂ№",
+            "РЎв‚¬РЎвЂ№Р СР С”Р ВµР Р…РЎвЂљ": "Р РЃРЎвЂ№Р СР С”Р ВµР Р…РЎвЂљ",
+            "РЎв‚¬РЎвЂ№Р СР С”Р ВµР Р…РЎвЂљР Вµ": "Р РЃРЎвЂ№Р СР С”Р ВµР Р…РЎвЂљ",
+            "Р С”Р В°РЎР‚Р В°Р С–Р В°Р Р…Р Т‘Р В°": "Р С™Р В°РЎР‚Р В°Р С–Р В°Р Р…Р Т‘Р В°",
+            "Р С”Р В°РЎР‚Р В°Р С–Р В°Р Р…Р Т‘Р Вµ": "Р С™Р В°РЎР‚Р В°Р С–Р В°Р Р…Р Т‘Р В°",
+            "Р В°Р С”РЎвЂљР С•Р В±Р Вµ": "Р С’Р С”РЎвЂљР С•Р В±Р Вµ",
+            "Р В°Р С”РЎвЂљР В°РЎС“": "Р С’Р С”РЎвЂљР В°РЎС“",
+            "Р В°РЎвЂљРЎвЂ№РЎР‚Р В°РЎС“": "Р С’РЎвЂљРЎвЂ№РЎР‚Р В°РЎС“",
+            "Р С—Р В°Р Р†Р В»Р С•Р Т‘Р В°РЎР‚": "Р СџР В°Р Р†Р В»Р С•Р Т‘Р В°РЎР‚",
+            "Р С—Р В°Р Р†Р В»Р С•Р Т‘Р В°РЎР‚Р Вµ": "Р СџР В°Р Р†Р В»Р С•Р Т‘Р В°РЎР‚",
+            "Р С”Р С•РЎРѓРЎвЂљР В°Р Р…Р В°Р в„–": "Р С™Р С•РЎРѓРЎвЂљР В°Р Р…Р В°Р в„–",
+            "Р С”Р С•РЎРѓРЎвЂљР В°Р Р…Р В°Р Вµ": "Р С™Р С•РЎРѓРЎвЂљР В°Р Р…Р В°Р в„–",
         }
         if normalized in city_aliases:
             return city_aliases[normalized]
         parts = [part for part in normalized.split() if part]
         if not (1 <= len(parts) <= 3):
             return None
-        if all(re.sub(r"[^a-zа-яәіңғүұқөһ-]", "", part).replace("-", "").isalpha() for part in parts):
+        if all(re.sub(r"[^a-zР В°-РЎРЏРЈв„ўРЎвЂ“РўР€РўвЂњРўР‡РўВ±РўвЂєРЈВ©РўВ»-]", "", part).replace("-", "").isalpha() for part in parts):
             return " ".join(part.capitalize() for part in parts)
         return None
 
@@ -2550,23 +2748,23 @@ class DialogueEngine:
         normalized = normalize_text_token(cleaned)
         has_digit = any(char.isdigit() for char in cleaned)
         address_markers = (
-            "пр",
-            "пр.",
-            "проспект",
-            "улиц",
-            "ул",
-            "ул.",
-            "дом",
-            "д.",
-            "мкр",
-            "микрорайон",
-            "кв",
-            "квартира",
-            "жк",
-            "район",
-            "астана",
-            "алматы",
-            "шымкент",
+            "Р С—РЎР‚",
+            "Р С—РЎР‚.",
+            "Р С—РЎР‚Р С•РЎРѓР С—Р ВµР С”РЎвЂљ",
+            "РЎС“Р В»Р С‘РЎвЂ ",
+            "РЎС“Р В»",
+            "РЎС“Р В».",
+            "Р Т‘Р С•Р С",
+            "Р Т‘.",
+            "Р СР С”РЎР‚",
+            "Р СР С‘Р С”РЎР‚Р С•РЎР‚Р В°Р в„–Р С•Р Р…",
+            "Р С”Р Р†",
+            "Р С”Р Р†Р В°РЎР‚РЎвЂљР С‘РЎР‚Р В°",
+            "Р В¶Р С”",
+            "РЎР‚Р В°Р в„–Р С•Р Р…",
+            "Р В°РЎРѓРЎвЂљР В°Р Р…Р В°",
+            "Р В°Р В»Р СР В°РЎвЂљРЎвЂ№",
+            "РЎв‚¬РЎвЂ№Р СР С”Р ВµР Р…РЎвЂљ",
         )
         if len(normalized) < 5 or not has_digit:
             return None
@@ -2576,43 +2774,43 @@ class DialogueEngine:
 
     def _step_instruction_reply(self, state: DialogueState) -> str:
         if state == DialogueState.ASK_FULL_NAME:
-            return "✍️ Напишите ФИО полностью одним сообщением.\nНапример: Абай Аят Жаныбекулы."
+            return "РІСљРЊРїС‘РЏ Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р В¤Р ВР С› Р С—Р С•Р В»Р Р…Р С•РЎРѓРЎвЂљРЎРЉРЎР‹ Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Р С’Р В±Р В°Р в„– Р С’РЎРЏРЎвЂљ Р вЂ“Р В°Р Р…РЎвЂ№Р В±Р ВµР С”РЎС“Р В»РЎвЂ№."
         if state in {DialogueState.ASK_EXECUTOR_TYPE, DialogueState.ASK_PHONE}:
-            return "📱 Напишите номер телефона одним сообщением.\nНапример: +77766170666."
+            return "СЂСџвЂњВ± Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р СР ВµРЎР‚ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В° Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: +77766170666."
         if state == DialogueState.ASK_CITY:
-            return "🏙️ Напишите только город, где будете работать.\nНапример: Астана."
+            return "СЂСџРЏв„ўРїС‘РЏ Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ РЎвЂљР С•Р В»РЎРЉР С”Р С• Р С–Р С•РЎР‚Р С•Р Т‘, Р С–Р Т‘Р Вµ Р В±РЎС“Р Т‘Р ВµРЎвЂљР Вµ РЎР‚Р В°Р В±Р С•РЎвЂљР В°РЎвЂљРЎРЉ.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Р С’РЎРѓРЎвЂљР В°Р Р…Р В°."
         if state == DialogueState.ASK_ADDRESS:
-            return "📍 Напишите полный адрес проживания или регистрации одним сообщением.\nНапример: пр. Республики 12, Астана."
+            return "СЂСџвЂњРЊ Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р С—Р С•Р В»Р Р…РЎвЂ№Р в„– Р В°Р Т‘РЎР‚Р ВµРЎРѓ Р С—РЎР‚Р С•Р В¶Р С‘Р Р†Р В°Р Р…Р С‘РЎРЏ Р С‘Р В»Р С‘ РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘Р С‘ Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Р С—РЎР‚. Р В Р ВµРЎРѓР С—РЎС“Р В±Р В»Р С‘Р С”Р С‘ 12, Р С’РЎРѓРЎвЂљР В°Р Р…Р В°."
         if state in {
             DialogueState.ASK_HAS_CAR,
             DialogueState.ASK_EXISTING_VEHICLE_IDENTIFIER,
             DialogueState.ASK_CAR_BRAND,
         }:
-            return "🚘 Напишите марку автомобиля одним сообщением.\nНапример: Toyota."
+            return "СЂСџС™В Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р СР В°РЎР‚Р С”РЎС“ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЏ Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Toyota."
         if state == DialogueState.ASK_CAR_MODEL:
-            return "🚘 Напишите модель автомобиля одним сообщением.\nНапример: Camry."
+            return "СЂСџС™В Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р СР С•Р Т‘Р ВµР В»РЎРЉ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЏ Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Camry."
         if state == DialogueState.ASK_CAR_YEAR:
-            return "📅 Напишите год выпуска автомобиля.\nНапример: 2018."
+            return "СЂСџвЂњвЂ¦ Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р С–Р С•Р Т‘ Р Р†РЎвЂ№Р С—РЎС“РЎРѓР С”Р В° Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЏ.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: 2018."
         if state == DialogueState.ASK_CAR_PLATE:
-            return "🔢 Напишите госномер автомобиля как в документах.\nНапример: 123ABC01."
+            return "СЂСџвЂќСћ Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р С–Р С•РЎРѓР Р…Р С•Р СР ВµРЎР‚ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЏ Р С”Р В°Р С” Р Р† Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљР В°РЎвЂ¦.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: 123ABC01."
         if state == DialogueState.ASK_CAR_COLOR:
-            return "🎨 Напишите цвет автомобиля одним сообщением.\nНапример: белый."
+            return "СЂСџР‹РЃ Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ РЎвЂ Р Р†Р ВµРЎвЂљ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЏ Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.\nР СњР В°Р С—РЎР‚Р С‘Р СР ВµРЎР‚: Р В±Р ВµР В»РЎвЂ№Р в„–."
         return format_in_flow_reply("", state)
 
     def _looks_like_cancel_request(self, message_text: str) -> bool:
         normalized = normalize_text_token(repair_mojibake(message_text))
-        return normalized in {"отмена", "отменить", "стоп", "cancel", "cancel flow", "тоқтат", "бас тарту"}
+        return normalized in {"Р С•РЎвЂљР СР ВµР Р…Р В°", "Р С•РЎвЂљР СР ВµР Р…Р С‘РЎвЂљРЎРЉ", "РЎРѓРЎвЂљР С•Р С—", "cancel", "cancel flow", "РЎвЂљР С•РўвЂєРЎвЂљР В°РЎвЂљ", "Р В±Р В°РЎРѓ РЎвЂљР В°РЎР‚РЎвЂљРЎС“"}
 
     def _profile_update_prompt_for_action(self, pending_action: str | None) -> str:
         prompts = {
-            "waiting_new_full_name": "Напишите новые ФИО одним сообщением.",
-            "waiting_new_phone": "Напишите новый номер телефона.",
-            "waiting_new_city_address": "Напишите новый город или адрес.",
-            "waiting_new_vehicle": "Пришлите данные по автомобилю или фото документов.",
-            "waiting_new_plate": "Напишите новый госномер.",
-            "waiting_new_sts": "Пришлите фото или номер СТС/техпаспорта.",
-            "waiting_new_driver_license": "Пришлите фото или номер водительского удостоверения.",
-            "waiting_new_employment_type": "Напишите новый тип сотрудничества или СМЗ.",
+            "waiting_new_full_name": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р Вµ Р В¤Р ВР С› Р С•Р Т‘Р Р…Р С‘Р С РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р ВµР С.",
+            "waiting_new_phone": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„– Р Р…Р С•Р СР ВµРЎР‚ РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…Р В°.",
+            "waiting_new_city_address": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„– Р С–Р С•РЎР‚Р С•Р Т‘ Р С‘Р В»Р С‘ Р В°Р Т‘РЎР‚Р ВµРЎРѓ.",
+            "waiting_new_vehicle": "Р СџРЎР‚Р С‘РЎв‚¬Р В»Р С‘РЎвЂљР Вµ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р С—Р С• Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎР‹ Р С‘Р В»Р С‘ РЎвЂћР С•РЎвЂљР С• Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљР С•Р Р†.",
+            "waiting_new_plate": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„– Р С–Р С•РЎРѓР Р…Р С•Р СР ВµРЎР‚.",
+            "waiting_new_sts": "Р СџРЎР‚Р С‘РЎв‚¬Р В»Р С‘РЎвЂљР Вµ РЎвЂћР С•РЎвЂљР С• Р С‘Р В»Р С‘ Р Р…Р С•Р СР ВµРЎР‚ Р РЋР СћР РЋ/РЎвЂљР ВµРЎвЂ¦Р С—Р В°РЎРѓР С—Р С•РЎР‚РЎвЂљР В°.",
+            "waiting_new_driver_license": "Р СџРЎР‚Р С‘РЎв‚¬Р В»Р С‘РЎвЂљР Вµ РЎвЂћР С•РЎвЂљР С• Р С‘Р В»Р С‘ Р Р…Р С•Р СР ВµРЎР‚ Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉРЎРѓР С”Р С•Р С–Р С• РЎС“Р Т‘Р С•РЎРѓРЎвЂљР С•Р Р†Р ВµРЎР‚Р ВµР Р…Р С‘РЎРЏ.",
+            "waiting_new_employment_type": "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р…Р С•Р Р†РЎвЂ№Р в„– РЎвЂљР С‘Р С— РЎРѓР С•РЎвЂљРЎР‚РЎС“Р Т‘Р Р…Р С‘РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р В° Р С‘Р В»Р С‘ Р РЋР СљР вЂ”.",
         }
         return prompts.get(pending_action or "", "")
 
@@ -2682,11 +2880,11 @@ class DialogueEngine:
                 state.value,
                 message_text,
                 intent="employment_type_change",
-                reply="Принял. Передаю менеджеру заявку на перевод в статус самозанятого.",
+                reply="Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р В·Р В°РЎРЏР Р†Р С”РЎС“ Р Р…Р В° Р С—Р ВµРЎР‚Р ВµР Р†Р С•Р Т‘ Р Р† РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ РЎРѓР В°Р СР С•Р В·Р В°Р Р…РЎРЏРЎвЂљР С•Р С–Р С•.",
                 reasoning_summary="pending_action:employment_type_change",
                 priority_intent="employment_type_change",
             )
-            return "Принял. Передаю менеджеру заявку на перевод в статус самозанятого."
+            return "Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р В·Р В°РЎРЏР Р†Р С”РЎС“ Р Р…Р В° Р С—Р ВµРЎР‚Р ВµР Р†Р С•Р Т‘ Р Р† РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ РЎРѓР В°Р СР С•Р В·Р В°Р Р…РЎРЏРЎвЂљР С•Р С–Р С•."
 
         faq_reply = resolve_faq_replies(message_text, self.ai.knowledge_base, office_address=self.settings.public_site_address)
         if faq_reply:
@@ -2796,32 +2994,32 @@ class DialogueEngine:
 
     def _field_label(self, field_name: str | None) -> str:
         labels = {
-            "full_name": "ФИО",
-            "last_name": "фамилия",
-            "first_name": "имя",
-            "middle_name": "отчество",
-            "phone": "телефон",
-            "city": "город",
-            "address": "адрес",
-            "iin": "ИИН",
-            "birth_date": "дата рождения",
-            "driving_experience_since": "водительский стаж",
-            "driver_license_number": "номер ВУ",
-            "driver_license_issue_date": "дата выдачи ВУ",
-            "driver_license_expires_at": "срок действия ВУ",
-            "employment_type": "условие работы",
-            "hired_at": "дата принятия",
-            "is_hearing_impaired": "слабослышащий водитель",
-            "brand": "марка авто",
-            "model": "модель авто",
-            "year": "год авто",
-            "plate_number": "госномер",
-            "color": "цвет авто",
-            "registration_certificate": "номер СТС",
+            "full_name": "Р В¤Р ВР С›",
+            "last_name": "РЎвЂћР В°Р СР С‘Р В»Р С‘РЎРЏ",
+            "first_name": "Р С‘Р СРЎРЏ",
+            "middle_name": "Р С•РЎвЂљРЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р С•",
+            "phone": "РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р…",
+            "city": "Р С–Р С•РЎР‚Р С•Р Т‘",
+            "address": "Р В°Р Т‘РЎР‚Р ВµРЎРѓ",
+            "iin": "Р ВР ВР Сњ",
+            "birth_date": "Р Т‘Р В°РЎвЂљР В° РЎР‚Р С•Р В¶Р Т‘Р ВµР Р…Р С‘РЎРЏ",
+            "driving_experience_since": "Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉРЎРѓР С”Р С‘Р в„– РЎРѓРЎвЂљР В°Р В¶",
+            "driver_license_number": "Р Р…Р С•Р СР ВµРЎР‚ Р вЂ™Р Р€",
+            "driver_license_issue_date": "Р Т‘Р В°РЎвЂљР В° Р Р†РЎвЂ№Р Т‘Р В°РЎвЂЎР С‘ Р вЂ™Р Р€",
+            "driver_license_expires_at": "РЎРѓРЎР‚Р С•Р С” Р Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎРЏ Р вЂ™Р Р€",
+            "employment_type": "РЎС“РЎРѓР В»Р С•Р Р†Р С‘Р Вµ РЎР‚Р В°Р В±Р С•РЎвЂљРЎвЂ№",
+            "hired_at": "Р Т‘Р В°РЎвЂљР В° Р С—РЎР‚Р С‘Р Р…РЎРЏРЎвЂљР С‘РЎРЏ",
+            "is_hearing_impaired": "РЎРѓР В»Р В°Р В±Р С•РЎРѓР В»РЎвЂ№РЎв‚¬Р В°РЎвЂ°Р С‘Р в„– Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ",
+            "brand": "Р СР В°РЎР‚Р С”Р В° Р В°Р Р†РЎвЂљР С•",
+            "model": "Р СР С•Р Т‘Р ВµР В»РЎРЉ Р В°Р Р†РЎвЂљР С•",
+            "year": "Р С–Р С•Р Т‘ Р В°Р Р†РЎвЂљР С•",
+            "plate_number": "Р С–Р С•РЎРѓР Р…Р С•Р СР ВµРЎР‚",
+            "color": "РЎвЂ Р Р†Р ВµРЎвЂљ Р В°Р Р†РЎвЂљР С•",
+            "registration_certificate": "Р Р…Р С•Р СР ВµРЎР‚ Р РЋР СћР РЋ",
             "vin": "VIN",
-            "service_class": "класс авто",
+            "service_class": "Р С”Р В»Р В°РЎРѓРЎРѓ Р В°Р Р†РЎвЂљР С•",
         }
-        return labels.get(field_name or "", field_name or "поле")
+        return labels.get(field_name or "", field_name or "Р С—Р С•Р В»Р Вµ")
 
     def _trace_payload(
         self,
@@ -2891,6 +3089,68 @@ class DialogueEngine:
             },
         )
 
+    def _reset_fallback_count(self, driver: Driver) -> None:
+        driver.fallback_count = 0
+        if driver.support_context_json and isinstance(driver.support_context_json, dict):
+            context = dict(driver.support_context_json)
+            context["last_fallback_reason"] = None
+            self._set_support_context(driver, context)
+
+    def _register_fallback(
+        self,
+        db: Session,
+        driver: Driver,
+        application,
+        *,
+        state_before: str,
+        reason: str,
+        message_id: int | None = None,
+        message_text: str = "",
+        message_type: str | None = "text",
+    ) -> None:
+        driver.fallback_count = (driver.fallback_count or 0) + 1
+        context = self._get_support_context(driver)
+        context["last_fallback_reason"] = reason
+        self._set_support_context(driver, context)
+        db.add(driver)
+        create_unknown_intent(
+            db,
+            driver_id=driver.id,
+            message_id=message_id,
+            state_before=state_before,
+            message_text=message_text,
+            normalized_text=normalize_text_token(message_text) if message_text else None,
+            message_type=message_type,
+            reason=reason,
+        )
+        if driver.fallback_count >= 3 and not driver.requires_attention:
+            driver.requires_attention = True
+            driver.dialog_mode = "manual"
+            driver.active_support_topic = None
+            driver.active_support_step = None
+            self._set_support_context(
+                driver,
+                {
+                    "human_required": True,
+                    "mode": "manual",
+                    "source_state": state_before,
+                    "fallback_reason": reason,
+                },
+            )
+            set_application_status(db, application, "awaiting_manager_review", yandex_status="human_required")
+            create_conversation_event(
+                db,
+                driver,
+                "human_required",
+                {"reason": "repeated_fallbacks", "fallback_count": driver.fallback_count, "state": state_before},
+            )
+
+    def _mark_successful_progress(self, driver: Driver) -> None:
+        self._reset_fallback_count(driver)
+        self._reset_ocr_failure_counter(driver)
+        if driver.dialog_mode == "manual" and not driver.requires_attention:
+            driver.dialog_mode = "bot_active"
+
     def _respond(self, db: Session, driver: Driver, application, reply: str) -> str:
         reply = repair_mojibake(reply)
         create_message(
@@ -2918,10 +3178,10 @@ def _looks_like_status_request(normalized: str) -> bool:
         "zayavka status",
     }
     contains = [
-        "статус",
-        "заявк",
-        "на каком этапе",
-        "где моя",
+        "РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓ",
+        "Р В·Р В°РЎРЏР Р†Р С”",
+        "Р Р…Р В° Р С”Р В°Р С”Р С•Р С РЎРЊРЎвЂљР В°Р С—Р Вµ",
+        "Р С–Р Т‘Р Вµ Р СР С•РЎРЏ",
         "my application",
         "my status",
         "what status",
@@ -2931,30 +3191,30 @@ def _looks_like_status_request(normalized: str) -> bool:
 
 def _looks_like_operator_request_legacy(normalized: str) -> bool:
     markers = (
-        "оператор",
-        "менеджер",
-        "живой человек",
-        "соедините",
-        "позовите человека",
-        "позовите менеджера",
-        "техподдержка",
-        "поддержка",
-        "хочу поговорить с человеком",
+        "Р С•Р С—Р ВµРЎР‚Р В°РЎвЂљР С•РЎР‚",
+        "Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚",
+        "Р В¶Р С‘Р Р†Р С•Р в„– РЎвЂЎР ВµР В»Р С•Р Р†Р ВµР С”",
+        "РЎРѓР С•Р ВµР Т‘Р С‘Р Р…Р С‘РЎвЂљР Вµ",
+        "Р С—Р С•Р В·Р С•Р Р†Р С‘РЎвЂљР Вµ РЎвЂЎР ВµР В»Р С•Р Р†Р ВµР С”Р В°",
+        "Р С—Р С•Р В·Р С•Р Р†Р С‘РЎвЂљР Вµ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р В°",
+        "РЎвЂљР ВµРЎвЂ¦Р С—Р С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С”Р В°",
+        "Р С—Р С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С”Р В°",
+        "РЎвЂ¦Р С•РЎвЂЎРЎС“ Р С—Р С•Р С–Р С•Р Р†Р С•РЎР‚Р С‘РЎвЂљРЎРЉ РЎРѓ РЎвЂЎР ВµР В»Р С•Р Р†Р ВµР С”Р С•Р С",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_operator_request(normalized: str) -> bool:
     exact = {
-        "оператор",
-        "менеджер",
-        "техподдержка",
-        "живой человек",
-        "свяжите с менеджером",
-        "адам оператор",
-        "менеджер керек",
-        "тірі адам",
-        "қолдау керек",
+        "Р С•Р С—Р ВµРЎР‚Р В°РЎвЂљР С•РЎР‚",
+        "Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚",
+        "РЎвЂљР ВµРЎвЂ¦Р С—Р С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С”Р В°",
+        "Р В¶Р С‘Р Р†Р С•Р в„– РЎвЂЎР ВµР В»Р С•Р Р†Р ВµР С”",
+        "РЎРѓР Р†РЎРЏР В¶Р С‘РЎвЂљР Вµ РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р С•Р С",
+        "Р В°Р Т‘Р В°Р С Р С•Р С—Р ВµРЎР‚Р В°РЎвЂљР С•РЎР‚",
+        "Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚ Р С”Р ВµРЎР‚Р ВµР С”",
+        "РЎвЂљРЎвЂ“РЎР‚РЎвЂ“ Р В°Р Т‘Р В°Р С",
+        "РўвЂєР С•Р В»Р Т‘Р В°РЎС“ Р С”Р ВµРЎР‚Р ВµР С”",
     }
     if normalized.strip(" ?!.,") in exact:
         return True
@@ -2962,18 +3222,18 @@ def _looks_like_operator_request(normalized: str) -> bool:
         "operator",
         "manager",
         "support",
-        "оператор",
-        "менеджер",
-        "техподдержка",
-        "поддержка",
-        "живой человек",
-        "свяжите с менеджером",
-        "соедините с менеджером",
-        "позовите менеджера",
-        "адам оператор",
-        "менеджер керек",
-        "тірі адам",
-        "қолдау керек",
+        "Р С•Р С—Р ВµРЎР‚Р В°РЎвЂљР С•РЎР‚",
+        "Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚",
+        "РЎвЂљР ВµРЎвЂ¦Р С—Р С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С”Р В°",
+        "Р С—Р С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С”Р В°",
+        "Р В¶Р С‘Р Р†Р С•Р в„– РЎвЂЎР ВµР В»Р С•Р Р†Р ВµР С”",
+        "РЎРѓР Р†РЎРЏР В¶Р С‘РЎвЂљР Вµ РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р С•Р С",
+        "РЎРѓР С•Р ВµР Т‘Р С‘Р Р…Р С‘РЎвЂљР Вµ РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р С•Р С",
+        "Р С—Р С•Р В·Р С•Р Р†Р С‘РЎвЂљР Вµ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р В°",
+        "Р В°Р Т‘Р В°Р С Р С•Р С—Р ВµРЎР‚Р В°РЎвЂљР С•РЎР‚",
+        "Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚ Р С”Р ВµРЎР‚Р ВµР С”",
+        "РЎвЂљРЎвЂ“РЎР‚РЎвЂ“ Р В°Р Т‘Р В°Р С",
+        "РўвЂєР С•Р В»Р Т‘Р В°РЎС“ Р С”Р ВµРЎР‚Р ВµР С”",
     )
     return any(marker in normalized for marker in markers)
 
@@ -2996,116 +3256,116 @@ def _classify_priority_support_intent(normalized: str) -> str | None:
 
 def _priority_support_reply(intent: str) -> str:
     replies = {
-        "payout_support": "Принял вопрос по выплатам. Передаю менеджеру для проверки баланса, вывода или задержки выплаты.",
-        "tariff_support": "Принял вопрос по тарифам. Передаю менеджеру, чтобы проверить доступы и настройки тарифов.",
-        "yandex_problem": "Принял проблему с Яндекс Про. Передаю менеджеру для проверки входа, парка, приглашения или статуса аккаунта.",
-        "blocking_support": "Принял вопрос по блокировке. Передаю менеджеру для проверки причины и дальнейших действий.",
-        "rental_car_question": "Пока что аренды машин у таксопарка нет. Сейчас подключаем только водителей со своими автомобилями.",
-        "courier_registration": "Принял вопрос по курьерской регистрации. Передаю менеджеру, чтобы отдельно проверить возможность подключения.",
+        "payout_support": "Р СџРЎР‚Р С‘Р Р…РЎРЏР В» Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ Р С—Р С• Р Р†РЎвЂ№Р С—Р В»Р В°РЎвЂљР В°Р С. Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р Т‘Р В»РЎРЏ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С”Р С‘ Р В±Р В°Р В»Р В°Р Р…РЎРѓР В°, Р Р†РЎвЂ№Р Р†Р С•Р Т‘Р В° Р С‘Р В»Р С‘ Р В·Р В°Р Т‘Р ВµРЎР‚Р В¶Р С”Р С‘ Р Р†РЎвЂ№Р С—Р В»Р В°РЎвЂљРЎвЂ№.",
+        "tariff_support": "Р СџРЎР‚Р С‘Р Р…РЎРЏР В» Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ Р С—Р С• РЎвЂљР В°РЎР‚Р С‘РЎвЂћР В°Р С. Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“, РЎвЂЎРЎвЂљР С•Р В±РЎвЂ№ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С‘РЎвЂљРЎРЉ Р Т‘Р С•РЎРѓРЎвЂљРЎС“Р С—РЎвЂ№ Р С‘ Р Р…Р В°РЎРѓРЎвЂљРЎР‚Р С•Р в„–Р С”Р С‘ РЎвЂљР В°РЎР‚Р С‘РЎвЂћР С•Р Р†.",
+        "yandex_problem": "Р СџРЎР‚Р С‘Р Р…РЎРЏР В» Р С—РЎР‚Р С•Р В±Р В»Р ВµР СРЎС“ РЎРѓ Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•. Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р Т‘Р В»РЎРЏ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С”Р С‘ Р Р†РЎвЂ¦Р С•Р Т‘Р В°, Р С—Р В°РЎР‚Р С”Р В°, Р С—РЎР‚Р С‘Р С–Р В»Р В°РЎв‚¬Р ВµР Р…Р С‘РЎРЏ Р С‘Р В»Р С‘ РЎРѓРЎвЂљР В°РЎвЂљРЎС“РЎРѓР В° Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљР В°.",
+        "blocking_support": "Р СџРЎР‚Р С‘Р Р…РЎРЏР В» Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ Р С—Р С• Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р С”Р Вµ. Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“ Р Т‘Р В»РЎРЏ Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С”Р С‘ Р С—РЎР‚Р С‘РЎвЂЎР С‘Р Р…РЎвЂ№ Р С‘ Р Т‘Р В°Р В»РЎРЉР Р…Р ВµР в„–РЎв‚¬Р С‘РЎвЂ¦ Р Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘Р в„–.",
+        "rental_car_question": "Р СџР С•Р С”Р В° РЎвЂЎРЎвЂљР С• Р В°РЎР‚Р ВµР Р…Р Т‘РЎвЂ№ Р СР В°РЎв‚¬Р С‘Р Р… РЎС“ РЎвЂљР В°Р С”РЎРѓР С•Р С—Р В°РЎР‚Р С”Р В° Р Р…Р ВµРЎвЂљ. Р РЋР ВµР в„–РЎвЂЎР В°РЎРѓ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР В°Р ВµР С РЎвЂљР С•Р В»РЎРЉР С”Р С• Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»Р ВµР в„– РЎРѓР С• РЎРѓР Р†Р С•Р С‘Р СР С‘ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЏР СР С‘.",
+        "courier_registration": "Р СџРЎР‚Р С‘Р Р…РЎРЏР В» Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ Р С—Р С• Р С”РЎС“РЎР‚РЎРЉР ВµРЎР‚РЎРѓР С”Р С•Р в„– РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘Р С‘. Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“, РЎвЂЎРЎвЂљР С•Р В±РЎвЂ№ Р С•РЎвЂљР Т‘Р ВµР В»РЎРЉР Р…Р С• Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚Р С‘РЎвЂљРЎРЉ Р Р†Р С•Р В·Р СР С•Р В¶Р Р…Р С•РЎРѓРЎвЂљРЎРЉ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р…Р С‘РЎРЏ.",
     }
-    return replies.get(intent, "Принял. Передаю вопрос менеджеру.")
+    return replies.get(intent, "Р СџРЎР‚Р С‘Р Р…РЎРЏР В». Р СџР ВµРЎР‚Р ВµР Т‘Р В°РЎР‹ Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚РЎС“.")
 
 
 def _looks_like_payout_support(normalized: str) -> bool:
     markers = (
-        "выплата",
-        "выплаты",
-        "вывод",
-        "деньги",
-        "баланс",
-        "моментальная выплата",
-        "не пришли деньги",
-        "ақша",
-        "төлем",
-        "төлем қашан",
-        "ақша түспеді",
-        "баланс шықпай тұр",
+        "Р Р†РЎвЂ№Р С—Р В»Р В°РЎвЂљР В°",
+        "Р Р†РЎвЂ№Р С—Р В»Р В°РЎвЂљРЎвЂ№",
+        "Р Р†РЎвЂ№Р Р†Р С•Р Т‘",
+        "Р Т‘Р ВµР Р…РЎРЉР С–Р С‘",
+        "Р В±Р В°Р В»Р В°Р Р…РЎРѓ",
+        "Р СР С•Р СР ВµР Р…РЎвЂљР В°Р В»РЎРЉР Р…Р В°РЎРЏ Р Р†РЎвЂ№Р С—Р В»Р В°РЎвЂљР В°",
+        "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎв‚¬Р В»Р С‘ Р Т‘Р ВµР Р…РЎРЉР С–Р С‘",
+        "Р В°РўвЂєРЎв‚¬Р В°",
+        "РЎвЂљРЈВ©Р В»Р ВµР С",
+        "РЎвЂљРЈВ©Р В»Р ВµР С РўвЂєР В°РЎв‚¬Р В°Р Р…",
+        "Р В°РўвЂєРЎв‚¬Р В° РЎвЂљРўР‡РЎРѓР С—Р ВµР Т‘РЎвЂ“",
+        "Р В±Р В°Р В»Р В°Р Р…РЎРѓ РЎв‚¬РЎвЂ№РўвЂєР С—Р В°Р в„– РЎвЂљРўВ±РЎР‚",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_tariff_support(normalized: str) -> bool:
     markers = (
-        "тариф",
-        "комфорт",
-        "бизнес",
-        "межгород",
-        "экспресс",
-        "грузовой",
-        "нет заказов",
-        "заказы не идут",
-        "тариф ашылмай тұр",
-        "комфорт қосыңыз",
-        "тапсырыс жоқ",
-        "заказ жоқ",
+        "РЎвЂљР В°РЎР‚Р С‘РЎвЂћ",
+        "Р С”Р С•Р СРЎвЂћР С•РЎР‚РЎвЂљ",
+        "Р В±Р С‘Р В·Р Р…Р ВµРЎРѓ",
+        "Р СР ВµР В¶Р С–Р С•РЎР‚Р С•Р Т‘",
+        "РЎРЊР С”РЎРѓР С—РЎР‚Р ВµРЎРѓРЎРѓ",
+        "Р С–РЎР‚РЎС“Р В·Р С•Р Р†Р С•Р в„–",
+        "Р Р…Р ВµРЎвЂљ Р В·Р В°Р С”Р В°Р В·Р С•Р Р†",
+        "Р В·Р В°Р С”Р В°Р В·РЎвЂ№ Р Р…Р Вµ Р С‘Р Т‘РЎС“РЎвЂљ",
+        "РЎвЂљР В°РЎР‚Р С‘РЎвЂћ Р В°РЎв‚¬РЎвЂ№Р В»Р СР В°Р в„– РЎвЂљРўВ±РЎР‚",
+        "Р С”Р С•Р СРЎвЂћР С•РЎР‚РЎвЂљ РўвЂєР С•РЎРѓРЎвЂ№РўР€РЎвЂ№Р В·",
+        "РЎвЂљР В°Р С—РЎРѓРЎвЂ№РЎР‚РЎвЂ№РЎРѓ Р В¶Р С•РўвЂє",
+        "Р В·Р В°Р С”Р В°Р В· Р В¶Р С•РўвЂє",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_yandex_problem(normalized: str) -> bool:
     markers = (
-        "яндекс про",
-        "не могу войти",
-        "не заходит",
-        "парк не вижу",
-        "нет парка",
-        "не пришло приглашение",
-        "аккаунт не активен",
-        "код не приходит",
-        "смс не приходит",
+        "РЎРЏР Р…Р Т‘Р ВµР С”РЎРѓ Р С—РЎР‚Р С•",
+        "Р Р…Р Вµ Р СР С•Р С–РЎС“ Р Р†Р С•Р в„–РЎвЂљР С‘",
+        "Р Р…Р Вµ Р В·Р В°РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ",
+        "Р С—Р В°РЎР‚Р С” Р Р…Р Вµ Р Р†Р С‘Р В¶РЎС“",
+        "Р Р…Р ВµРЎвЂљ Р С—Р В°РЎР‚Р С”Р В°",
+        "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎв‚¬Р В»Р С• Р С—РЎР‚Р С‘Р С–Р В»Р В°РЎв‚¬Р ВµР Р…Р С‘Р Вµ",
+        "Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ Р Р…Р Вµ Р В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…",
+        "Р С”Р С•Р Т‘ Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ",
+        "РЎРѓР СРЎРѓ Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ",
         "yandex pro",
-        "яндекс кірмей тұр",
-        "парк көрінбей тұр",
-        "код келмеді",
-        "смс келмеді",
-        "аккаунт ашылмай тұр",
+        "РЎРЏР Р…Р Т‘Р ВµР С”РЎРѓ Р С”РЎвЂ“РЎР‚Р СР ВµР в„– РЎвЂљРўВ±РЎР‚",
+        "Р С—Р В°РЎР‚Р С” Р С”РЈВ©РЎР‚РЎвЂ“Р Р…Р В±Р ВµР в„– РЎвЂљРўВ±РЎР‚",
+        "Р С”Р С•Р Т‘ Р С”Р ВµР В»Р СР ВµР Т‘РЎвЂ“",
+        "РЎРѓР СРЎРѓ Р С”Р ВµР В»Р СР ВµР Т‘РЎвЂ“",
+        "Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ Р В°РЎв‚¬РЎвЂ№Р В»Р СР В°Р в„– РЎвЂљРўВ±РЎР‚",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_blocking_support(normalized: str) -> bool:
     markers = (
-        "заблокировали",
-        "блокировка",
-        "заблокирован",
-        "доступ закрыт",
-        "аккаунт заблокирован",
-        "профиль заблокирован",
-        "бұғатталды",
-        "аккаунт бұғат",
-        "кіре алмаймын блок",
+        "Р В·Р В°Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р В°Р В»Р С‘",
+        "Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р С”Р В°",
+        "Р В·Р В°Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р В°Р Р…",
+        "Р Т‘Р С•РЎРѓРЎвЂљРЎС“Р С— Р В·Р В°Р С”РЎР‚РЎвЂ№РЎвЂљ",
+        "Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ Р В·Р В°Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р В°Р Р…",
+        "Р С—РЎР‚Р С•РЎвЂћР С‘Р В»РЎРЉ Р В·Р В°Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р В°Р Р…",
+        "Р В±РўВ±РўвЂњР В°РЎвЂљРЎвЂљР В°Р В»Р Т‘РЎвЂ№",
+        "Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ Р В±РўВ±РўвЂњР В°РЎвЂљ",
+        "Р С”РЎвЂ“РЎР‚Р Вµ Р В°Р В»Р СР В°Р в„–Р СРЎвЂ№Р Р… Р В±Р В»Р С•Р С”",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_rental_car_question(normalized: str) -> bool:
     markers = (
-        "аренда авто",
-        "арендная машина",
-        "машина в аренду",
-        "есть авто",
-        "нужна машина",
-        "таксопарк дает машину",
-        "көлік жалға",
-        "аренда көлік",
-        "машина керек",
-        "көлік бар ма",
+        "Р В°РЎР‚Р ВµР Р…Р Т‘Р В° Р В°Р Р†РЎвЂљР С•",
+        "Р В°РЎР‚Р ВµР Р…Р Т‘Р Р…Р В°РЎРЏ Р СР В°РЎв‚¬Р С‘Р Р…Р В°",
+        "Р СР В°РЎв‚¬Р С‘Р Р…Р В° Р Р† Р В°РЎР‚Р ВµР Р…Р Т‘РЎС“",
+        "Р ВµРЎРѓРЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•",
+        "Р Р…РЎС“Р В¶Р Р…Р В° Р СР В°РЎв‚¬Р С‘Р Р…Р В°",
+        "РЎвЂљР В°Р С”РЎРѓР С•Р С—Р В°РЎР‚Р С” Р Т‘Р В°Р ВµРЎвЂљ Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+        "Р С”РЈВ©Р В»РЎвЂ“Р С” Р В¶Р В°Р В»РўвЂњР В°",
+        "Р В°РЎР‚Р ВµР Р…Р Т‘Р В° Р С”РЈВ©Р В»РЎвЂ“Р С”",
+        "Р СР В°РЎв‚¬Р С‘Р Р…Р В° Р С”Р ВµРЎР‚Р ВµР С”",
+        "Р С”РЈВ©Р В»РЎвЂ“Р С” Р В±Р В°РЎР‚ Р СР В°",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_courier_registration(normalized: str) -> bool:
     markers = (
-        "курьер",
-        "курьером",
-        "доставка",
-        "еда",
-        "хочу курьером",
-        "курьерская регистрация",
-        "курьер болып",
-        "жеткізу",
-        "доставкаға тіркел",
-        "курьер тіркеу",
+        "Р С”РЎС“РЎР‚РЎРЉР ВµРЎР‚",
+        "Р С”РЎС“РЎР‚РЎРЉР ВµРЎР‚Р С•Р С",
+        "Р Т‘Р С•РЎРѓРЎвЂљР В°Р Р†Р С”Р В°",
+        "Р ВµР Т‘Р В°",
+        "РЎвЂ¦Р С•РЎвЂЎРЎС“ Р С”РЎС“РЎР‚РЎРЉР ВµРЎР‚Р С•Р С",
+        "Р С”РЎС“РЎР‚РЎРЉР ВµРЎР‚РЎРѓР С”Р В°РЎРЏ РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ",
+        "Р С”РЎС“РЎР‚РЎРЉР ВµРЎР‚ Р В±Р С•Р В»РЎвЂ№Р С—",
+        "Р В¶Р ВµРЎвЂљР С”РЎвЂ“Р В·РЎС“",
+        "Р Т‘Р С•РЎРѓРЎвЂљР В°Р Р†Р С”Р В°РўвЂњР В° РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµР В»",
+        "Р С”РЎС“РЎР‚РЎРЉР ВµРЎР‚ РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµРЎС“",
     )
     return any(marker in normalized for marker in markers)
 
@@ -3113,42 +3373,42 @@ def _looks_like_courier_registration(normalized: str) -> bool:
 def _looks_like_existing_driver_intent(normalized: str) -> bool:
     plain = normalize_text_token(repair_mojibake(normalized)).strip(" ?!.,")
     strong_markers = (
-        "я уже подключен",
-        "я подключен уже",
-        "я уже зарегистрирован",
-        "я уже водитель",
-        "я уже работаю",
-        "я в вашем парке",
-        "я есть в системе",
-        "уже регался",
-        "мен тіркелгенмін",
-        "мен жүргізушімін",
+        "РЎРЏ РЎС“Р В¶Р Вµ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р…",
+        "РЎРЏ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р… РЎС“Р В¶Р Вµ",
+        "РЎРЏ РЎС“Р В¶Р Вµ Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р…",
+        "РЎРЏ РЎС“Р В¶Р Вµ Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ",
+        "РЎРЏ РЎС“Р В¶Р Вµ РЎР‚Р В°Р В±Р С•РЎвЂљР В°РЎР‹",
+        "РЎРЏ Р Р† Р Р†Р В°РЎв‚¬Р ВµР С Р С—Р В°РЎР‚Р С”Р Вµ",
+        "РЎРЏ Р ВµРЎРѓРЎвЂљРЎРЉ Р Р† РЎРѓР С‘РЎРѓРЎвЂљР ВµР СР Вµ",
+        "РЎС“Р В¶Р Вµ РЎР‚Р ВµР С–Р В°Р В»РЎРѓРЎРЏ",
+        "Р СР ВµР Р… РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµР В»Р С–Р ВµР Р…Р СРЎвЂ“Р Р…",
+        "Р СР ВµР Р… Р В¶РўР‡РЎР‚Р С–РЎвЂ“Р В·РЎС“РЎв‚¬РЎвЂ“Р СРЎвЂ“Р Р…",
     )
     if any(marker in plain for marker in strong_markers):
         return True
     readable_markers = (
-        "я уже зарегистрирован",
-        "я уже водитель",
-        "я работаю у вас",
-        "я есть в базе",
-        "я подключен",
-        "я в вашем парке",
-        "уже зарегистрирован",
-        "уже водитель",
-        "мен тіркелгенмін",
-        "мен жүргізушімін",
-        "сіздің парктемін",
-        "паркке қосылғанмын",
+        "РЎРЏ РЎС“Р В¶Р Вµ Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р…",
+        "РЎРЏ РЎС“Р В¶Р Вµ Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ",
+        "РЎРЏ РЎР‚Р В°Р В±Р С•РЎвЂљР В°РЎР‹ РЎС“ Р Р†Р В°РЎРѓ",
+        "РЎРЏ Р ВµРЎРѓРЎвЂљРЎРЉ Р Р† Р В±Р В°Р В·Р Вµ",
+        "РЎРЏ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р…",
+        "РЎРЏ Р Р† Р Р†Р В°РЎв‚¬Р ВµР С Р С—Р В°РЎР‚Р С”Р Вµ",
+        "РЎС“Р В¶Р Вµ Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р…",
+        "РЎС“Р В¶Р Вµ Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ",
+        "Р СР ВµР Р… РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµР В»Р С–Р ВµР Р…Р СРЎвЂ“Р Р…",
+        "Р СР ВµР Р… Р В¶РўР‡РЎР‚Р С–РЎвЂ“Р В·РЎС“РЎв‚¬РЎвЂ“Р СРЎвЂ“Р Р…",
+        "РЎРѓРЎвЂ“Р В·Р Т‘РЎвЂ“РўР€ Р С—Р В°РЎР‚Р С”РЎвЂљР ВµР СРЎвЂ“Р Р…",
+        "Р С—Р В°РЎР‚Р С”Р С”Р Вµ РўвЂєР С•РЎРѓРЎвЂ№Р В»РўвЂњР В°Р Р…Р СРЎвЂ№Р Р…",
     )
     if any(marker in normalized for marker in readable_markers):
         return True
     markers = (
-        "я уже зарегистрирован",
-        "я уже водитель",
-        "я работаю у вас",
-        "я есть в базе",
-        "я подключен",
-        "я в вашем парке",
+        "РЎРЏ РЎС“Р В¶Р Вµ Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р…",
+        "РЎРЏ РЎС“Р В¶Р Вµ Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ",
+        "РЎРЏ РЎР‚Р В°Р В±Р С•РЎвЂљР В°РЎР‹ РЎС“ Р Р†Р В°РЎРѓ",
+        "РЎРЏ Р ВµРЎРѓРЎвЂљРЎРЉ Р Р† Р В±Р В°Р В·Р Вµ",
+        "РЎРЏ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р…",
+        "РЎРЏ Р Р† Р Р†Р В°РЎв‚¬Р ВµР С Р С—Р В°РЎР‚Р С”Р Вµ",
     )
     if not any(marker in normalized for marker in markers):
         return False
@@ -3167,72 +3427,72 @@ def _looks_like_existing_driver_intent(normalized: str) -> bool:
 
 def _looks_like_application_status_issue(normalized: str) -> bool:
     markers = (
-        "когда будет готово",
-        "где моя заявка",
-        "меня нет в парке",
-        "не вижу парк",
-        "не пришло приглашение",
-        "не отображается парк",
-        "заявка не обработана",
+        "Р С”Р С•Р С–Р Т‘Р В° Р В±РЎС“Р Т‘Р ВµРЎвЂљ Р С–Р С•РЎвЂљР С•Р Р†Р С•",
+        "Р С–Р Т‘Р Вµ Р СР С•РЎРЏ Р В·Р В°РЎРЏР Р†Р С”Р В°",
+        "Р СР ВµР Р…РЎРЏ Р Р…Р ВµРЎвЂљ Р Р† Р С—Р В°РЎР‚Р С”Р Вµ",
+        "Р Р…Р Вµ Р Р†Р С‘Р В¶РЎС“ Р С—Р В°РЎР‚Р С”",
+        "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎв‚¬Р В»Р С• Р С—РЎР‚Р С‘Р С–Р В»Р В°РЎв‚¬Р ВµР Р…Р С‘Р Вµ",
+        "Р Р…Р Вµ Р С•РЎвЂљР С•Р В±РЎР‚Р В°Р В¶Р В°Р ВµРЎвЂљРЎРѓРЎРЏ Р С—Р В°РЎР‚Р С”",
+        "Р В·Р В°РЎРЏР Р†Р С”Р В° Р Р…Р Вµ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР В°Р Р…Р В°",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_yandex_login_support(normalized: str) -> bool:
     markers = (
-        "не могу войти",
-        "не заходит",
-        "ошибка входа",
-        "нет парка",
-        "не вижу парк",
-        "нет аккаунта",
-        "не отображается таксопарк",
+        "Р Р…Р Вµ Р СР С•Р С–РЎС“ Р Р†Р С•Р в„–РЎвЂљР С‘",
+        "Р Р…Р Вµ Р В·Р В°РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ",
+        "Р С•РЎв‚¬Р С‘Р В±Р С”Р В° Р Р†РЎвЂ¦Р С•Р Т‘Р В°",
+        "Р Р…Р ВµРЎвЂљ Р С—Р В°РЎР‚Р С”Р В°",
+        "Р Р…Р Вµ Р Р†Р С‘Р В¶РЎС“ Р С—Р В°РЎР‚Р С”",
+        "Р Р…Р ВµРЎвЂљ Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљР В°",
+        "Р Р…Р Вµ Р С•РЎвЂљР С•Р В±РЎР‚Р В°Р В¶Р В°Р ВµРЎвЂљРЎРѓРЎРЏ РЎвЂљР В°Р С”РЎРѓР С•Р С—Р В°РЎР‚Р С”",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_tariff_issue(normalized: str) -> bool:
     markers = (
-        "не могу отключить тариф",
-        "включите комфорт",
-        "включите межгород",
-        "включите экспресс",
-        "подключите тариф",
-        "почему нет комфорта",
-        "почему нет заказов",
+        "Р Р…Р Вµ Р СР С•Р С–РЎС“ Р С•РЎвЂљР С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљРЎРЉ РЎвЂљР В°РЎР‚Р С‘РЎвЂћ",
+        "Р Р†Р С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљР Вµ Р С”Р С•Р СРЎвЂћР С•РЎР‚РЎвЂљ",
+        "Р Р†Р С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљР Вµ Р СР ВµР В¶Р С–Р С•РЎР‚Р С•Р Т‘",
+        "Р Р†Р С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљР Вµ РЎРЊР С”РЎРѓР С—РЎР‚Р ВµРЎРѓРЎРѓ",
+        "Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљР Вµ РЎвЂљР В°РЎР‚Р С‘РЎвЂћ",
+        "Р С—Р С•РЎвЂЎР ВµР СРЎС“ Р Р…Р ВµРЎвЂљ Р С”Р С•Р СРЎвЂћР С•РЎР‚РЎвЂљР В°",
+        "Р С—Р С•РЎвЂЎР ВµР СРЎС“ Р Р…Р ВµРЎвЂљ Р В·Р В°Р С”Р В°Р В·Р С•Р Р†",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_data_change_request(normalized: str) -> bool:
     markers = (
-        "поменял машину",
-        "сменил номер",
-        "изменить данные",
-        "поменять иин",
-        "изменить права",
-        "обновить документы",
+        "Р С—Р С•Р СР ВµР Р…РЎРЏР В» Р СР В°РЎв‚¬Р С‘Р Р…РЎС“",
+        "РЎРѓР СР ВµР Р…Р С‘Р В» Р Р…Р С•Р СР ВµРЎР‚",
+        "Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ",
+        "Р С—Р С•Р СР ВµР Р…РЎРЏРЎвЂљРЎРЉ Р С‘Р С‘Р Р…",
+        "Р С‘Р В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р С—РЎР‚Р В°Р Р†Р В°",
+        "Р С•Р В±Р Р…Р С•Р Р†Р С‘РЎвЂљРЎРЉ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљРЎвЂ№",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _looks_like_self_employed_request(normalized: str) -> bool:
     markers = (
-        "хочу стать самозанятым",
-        "сделайте смз",
-        "парковый самозанятый",
+        "РЎвЂ¦Р С•РЎвЂЎРЎС“ РЎРѓРЎвЂљР В°РЎвЂљРЎРЉ РЎРѓР В°Р СР С•Р В·Р В°Р Р…РЎРЏРЎвЂљРЎвЂ№Р С",
+        "РЎРѓР Т‘Р ВµР В»Р В°Р в„–РЎвЂљР Вµ РЎРѓР СР В·",
+        "Р С—Р В°РЎР‚Р С”Р С•Р Р†РЎвЂ№Р в„– РЎРѓР В°Р СР С•Р В·Р В°Р Р…РЎРЏРЎвЂљРЎвЂ№Р в„–",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _existing_driver_options_reply() -> str:
     return (
-        "Понял, вы уже подключены. Что нужно сделать?\n"
-        "1. Вывод денег\n"
-        "2. Вход в Яндекс Про\n"
-        "3. Тарифы\n"
-        "4. Изменить авто/документы\n"
-        "5. Менеджер"
+        "Р СџР С•Р Р…РЎРЏР В», Р Р†РЎвЂ№ РЎС“Р В¶Р Вµ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р…РЎвЂ№. Р В§РЎвЂљР С• Р Р…РЎС“Р В¶Р Р…Р С• РЎРѓР Т‘Р ВµР В»Р В°РЎвЂљРЎРЉ?\n"
+        "1. Р вЂ™РЎвЂ№Р Р†Р С•Р Т‘ Р Т‘Р ВµР Р…Р ВµР С–\n"
+        "2. Р вЂ™РЎвЂ¦Р С•Р Т‘ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•\n"
+        "3. Р СћР В°РЎР‚Р С‘РЎвЂћРЎвЂ№\n"
+        "4. Р ВР В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•/Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљРЎвЂ№\n"
+        "5. Р СљР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚"
     )
 
 
@@ -3248,13 +3508,13 @@ def _looks_like_restart_request(normalized: str) -> bool:
         "snachala",
     }
     contains = [
-        "заново",
-        "начать заново",
-        "новая регистрация",
-        "новый аккаунт",
-        "по новой",
-        "с нуля",
-        "хочу заново",
+        "Р В·Р В°Р Р…Р С•Р Р†Р С•",
+        "Р Р…Р В°РЎвЂЎР В°РЎвЂљРЎРЉ Р В·Р В°Р Р…Р С•Р Р†Р С•",
+        "Р Р…Р С•Р Р†Р В°РЎРЏ РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ",
+        "Р Р…Р С•Р Р†РЎвЂ№Р в„– Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ",
+        "Р С—Р С• Р Р…Р С•Р Р†Р С•Р в„–",
+        "РЎРѓ Р Р…РЎС“Р В»РЎРЏ",
+        "РЎвЂ¦Р С•РЎвЂЎРЎС“ Р В·Р В°Р Р…Р С•Р Р†Р С•",
         "register new",
         "from scratch",
         "restart",
@@ -3277,10 +3537,10 @@ def _looks_like_delete_request(normalized: str) -> bool:
         "delete me",
     }
     contains = [
-        "удали",
-        "удалить",
-        "закрыть аккаунт",
-        "снести аккаунт",
+        "РЎС“Р Т‘Р В°Р В»Р С‘",
+        "РЎС“Р Т‘Р В°Р В»Р С‘РЎвЂљРЎРЉ",
+        "Р В·Р В°Р С”РЎР‚РЎвЂ№РЎвЂљРЎРЉ Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ",
+        "РЎРѓР Р…Р ВµРЎРѓРЎвЂљР С‘ Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ",
         "delete account",
         "delete profile",
         "remove account",
@@ -3293,33 +3553,33 @@ def _looks_like_delete_request(normalized: str) -> bool:
 
 def _looks_like_yandex_pro_install_request(normalized: str) -> bool:
     contains = [
-        "не скачал",
-        "не установил",
-        "как скачать",
-        "где скачать",
-        "скачать",
-        "установить",
+        "Р Р…Р Вµ РЎРѓР С”Р В°РЎвЂЎР В°Р В»",
+        "Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р С‘Р В»",
+        "Р С”Р В°Р С” РЎРѓР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ",
+        "Р С–Р Т‘Р Вµ РЎРѓР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ",
+        "РЎРѓР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ",
+        "РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р С‘РЎвЂљРЎРЉ",
         "install",
         "download",
     ]
-    return normalized in {"не скачал", "скачать"} or any(token in normalized for token in contains)
+    return normalized in {"Р Р…Р Вµ РЎРѓР С”Р В°РЎвЂЎР В°Р В»", "РЎРѓР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ"} or any(token in normalized for token in contains)
 
 
 def _looks_like_yandex_pro_issue(normalized: str) -> bool:
     contains = [
-        "ошиб",
-        "не получается",
-        "не могу войти",
-        "не входит",
-        "не заходит",
-        "помощ",
+        "Р С•РЎв‚¬Р С‘Р В±",
+        "Р Р…Р Вµ Р С—Р С•Р В»РЎС“РЎвЂЎР В°Р ВµРЎвЂљРЎРѓРЎРЏ",
+        "Р Р…Р Вµ Р СР С•Р С–РЎС“ Р Р†Р С•Р в„–РЎвЂљР С‘",
+        "Р Р…Р Вµ Р Р†РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ",
+        "Р Р…Р Вµ Р В·Р В°РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ",
+        "Р С—Р С•Р СР С•РЎвЂ°",
         "help",
         "support",
-        "смс не приходит",
-        "код не приходит",
-        "не приходит код",
+        "РЎРѓР СРЎРѓ Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ",
+        "Р С”Р С•Р Т‘ Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ",
+        "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ Р С”Р С•Р Т‘",
     ]
-    return normalized in {"ошибка", "помощь", "help"} or any(token in normalized for token in contains)
+    return normalized in {"Р С•РЎв‚¬Р С‘Р В±Р С”Р В°", "Р С—Р С•Р СР С•РЎвЂ°РЎРЉ", "help"} or any(token in normalized for token in contains)
 
 
 def _looks_like_yandex_pro_success(normalized: str) -> bool:
@@ -3330,34 +3590,34 @@ def _looks_like_registration_start_request(text: str) -> bool:
     normalized = normalize_text_token(text)
     if not normalized:
         return False
-    if normalized in {"1", "регистрация", "тіркелу", "тіркеу", "тыркелу", "тыркеу"}:
+    if normalized in {"1", "РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ", "РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµР В»РЎС“", "РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµРЎС“", "РЎвЂљРЎвЂ№РЎР‚Р С”Р ВµР В»РЎС“", "РЎвЂљРЎвЂ№РЎР‚Р С”Р ВµРЎС“"}:
         return True
-    if any(marker in normalized for marker in ("уже подключ", "уже зарегистр", "подключен уже", "подключён уже")):
+    if any(marker in normalized for marker in ("РЎС“Р В¶Р Вµ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎ", "РЎС“Р В¶Р Вµ Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚", "Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р… РЎС“Р В¶Р Вµ", "Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎРЎвЂР Р… РЎС“Р В¶Р Вµ")):
         return False
     start_markers = (
-        "зарегистр",
-        "регистрац",
-        "подключ",
-        "тирк",
-        "тірк",
-        "тіркел",
-        "паркка",
+        "Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚",
+        "РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ ",
+        "Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎ",
+        "РЎвЂљР С‘РЎР‚Р С”",
+        "РЎвЂљРЎвЂ“РЎР‚Р С”",
+        "РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµР В»",
+        "Р С—Р В°РЎР‚Р С”Р С”Р В°",
     )
     intent_markers = (
-        "можно",
-        "хочу",
-        "надо",
-        "нужно",
-        "давайте",
-        "начать",
-        "начина",
-        "пройти",
-        "деген",
-        "едим",
+        "Р СР С•Р В¶Р Р…Р С•",
+        "РЎвЂ¦Р С•РЎвЂЎРЎС“",
+        "Р Р…Р В°Р Т‘Р С•",
+        "Р Р…РЎС“Р В¶Р Р…Р С•",
+        "Р Т‘Р В°Р Р†Р В°Р в„–РЎвЂљР Вµ",
+        "Р Р…Р В°РЎвЂЎР В°РЎвЂљРЎРЉ",
+        "Р Р…Р В°РЎвЂЎР С‘Р Р…Р В°",
+        "Р С—РЎР‚Р С•Р в„–РЎвЂљР С‘",
+        "Р Т‘Р ВµР С–Р ВµР Р…",
+        "Р ВµР Т‘Р С‘Р С",
     )
     if any(marker in normalized for marker in start_markers):
         return True
-    return "таксопарк" in normalized and any(marker in normalized for marker in intent_markers)
+    return "РЎвЂљР В°Р С”РЎРѓР С•Р С—Р В°РЎР‚Р С”" in normalized and any(marker in normalized for marker in intent_markers)
 
 
 def _looks_like_current_step_help_request(text: str) -> bool:
@@ -3368,63 +3628,63 @@ def _looks_like_current_step_help_request(text: str) -> bool:
     if set(compact) <= {"?"}:
         return True
     markers = (
-        "что делать",
-        "что дальше",
-        "что писать",
-        "что написать",
-        "какой ответ",
-        "какой ответ писать",
-        "как ответить",
-        "не понял",
-        "не понимаю",
-        "объясни",
-        "поясни",
+        "РЎвЂЎРЎвЂљР С• Р Т‘Р ВµР В»Р В°РЎвЂљРЎРЉ",
+        "РЎвЂЎРЎвЂљР С• Р Т‘Р В°Р В»РЎРЉРЎв‚¬Р Вµ",
+        "РЎвЂЎРЎвЂљР С• Р С—Р С‘РЎРѓР В°РЎвЂљРЎРЉ",
+        "РЎвЂЎРЎвЂљР С• Р Р…Р В°Р С—Р С‘РЎРѓР В°РЎвЂљРЎРЉ",
+        "Р С”Р В°Р С”Р С•Р в„– Р С•РЎвЂљР Р†Р ВµРЎвЂљ",
+        "Р С”Р В°Р С”Р С•Р в„– Р С•РЎвЂљР Р†Р ВµРЎвЂљ Р С—Р С‘РЎРѓР В°РЎвЂљРЎРЉ",
+        "Р С”Р В°Р С” Р С•РЎвЂљР Р†Р ВµРЎвЂљР С‘РЎвЂљРЎРЉ",
+        "Р Р…Р Вµ Р С—Р С•Р Р…РЎРЏР В»",
+        "Р Р…Р Вµ Р С—Р С•Р Р…Р С‘Р СР В°РЎР‹",
+        "Р С•Р В±РЎР‰РЎРЏРЎРѓР Р…Р С‘",
+        "Р С—Р С•РЎРЏРЎРѓР Р…Р С‘",
     )
     return any(marker in normalized for marker in markers)
 
 
 def _detect_support_topic(normalized: str, active_topic: str | None) -> str | None:
-    if active_topic and normalized in {"сделал", "дальше", "готово", "получилось", "ок", "ok"}:
+    if active_topic and normalized in {"РЎРѓР Т‘Р ВµР В»Р В°Р В»", "Р Т‘Р В°Р В»РЎРЉРЎв‚¬Р Вµ", "Р С–Р С•РЎвЂљР С•Р Р†Р С•", "Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В»Р С•РЎРѓРЎРЉ", "Р С•Р С”", "ok"}:
         return active_topic
     if active_topic and any(
         token in normalized
-        for token in {"не получается", "не вышло", "не работает", "ошибка", "не приходит", "не активен", "неактивен"}
+        for token in {"Р Р…Р Вµ Р С—Р С•Р В»РЎС“РЎвЂЎР В°Р ВµРЎвЂљРЎРѓРЎРЏ", "Р Р…Р Вµ Р Р†РЎвЂ№РЎв‚¬Р В»Р С•", "Р Р…Р Вµ РЎР‚Р В°Р В±Р С•РЎвЂљР В°Р ВµРЎвЂљ", "Р С•РЎв‚¬Р С‘Р В±Р С”Р В°", "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ", "Р Р…Р Вµ Р В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…", "Р Р…Р ВµР В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…"}
     ):
         return active_topic
 
     topic_keywords = {
-        "yandex_login": {"не могу войти", "не могу зайти", "войти в яндекс", "логин", "вход", "авторизация"},
-        "yandex_sms": {"смс", "sms", "код не приходит", "не приходит код", "не пришел код", "не пришла смс"},
+        "yandex_login": {"Р Р…Р Вµ Р СР С•Р С–РЎС“ Р Р†Р С•Р в„–РЎвЂљР С‘", "Р Р…Р Вµ Р СР С•Р С–РЎС“ Р В·Р В°Р в„–РЎвЂљР С‘", "Р Р†Р С•Р в„–РЎвЂљР С‘ Р Р† РЎРЏР Р…Р Т‘Р ВµР С”РЎРѓ", "Р В»Р С•Р С–Р С‘Р Р…", "Р Р†РЎвЂ¦Р С•Р Т‘", "Р В°Р Р†РЎвЂљР С•РЎР‚Р С‘Р В·Р В°РЎвЂ Р С‘РЎРЏ"},
+        "yandex_sms": {"РЎРѓР СРЎРѓ", "sms", "Р С”Р С•Р Т‘ Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ", "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎвЂ¦Р С•Р Т‘Р С‘РЎвЂљ Р С”Р С•Р Т‘", "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎв‚¬Р ВµР В» Р С”Р С•Р Т‘", "Р Р…Р Вµ Р С—РЎР‚Р С‘РЎв‚¬Р В»Р В° РЎРѓР СРЎРѓ"},
         "account_inactive": {
-            "не активен",
-            "неактивен",
-            "аккаунт не активен",
-            "профиль не активен",
-            "с нуля",
-            "обратно кинули",
-            "заново зарегистрироваться",
-            "обратно на регистрацию",
-            "кинули на регистрацию",
+            "Р Р…Р Вµ Р В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…",
+            "Р Р…Р ВµР В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…",
+            "Р В°Р С”Р С”Р В°РЎС“Р Р…РЎвЂљ Р Р…Р Вµ Р В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…",
+            "Р С—РЎР‚Р С•РЎвЂћР С‘Р В»РЎРЉ Р Р…Р Вµ Р В°Р С”РЎвЂљР С‘Р Р†Р ВµР Р…",
+            "РЎРѓ Р Р…РЎС“Р В»РЎРЏ",
+            "Р С•Р В±РЎР‚Р В°РЎвЂљР Р…Р С• Р С”Р С‘Р Р…РЎС“Р В»Р С‘",
+            "Р В·Р В°Р Р…Р С•Р Р†Р С• Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°РЎвЂљРЎРЉРЎРѓРЎРЏ",
+            "Р С•Р В±РЎР‚Р В°РЎвЂљР Р…Р С• Р Р…Р В° РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎР‹",
+            "Р С”Р С‘Р Р…РЎС“Р В»Р С‘ Р Р…Р В° РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎР‹",
         },
         "go_online": {
-            "выйти на линию",
-            "как выйти на линию",
-            "на линию",
-            "включить линию",
-            "как начать работать",
-            "нет заказов",
-            "ни одного заказа",
-            "не одного заказа",
-            "заказов не дали",
-            "час посидел",
-            "долго без заказов",
-            "нет заказа",
+            "Р Р†РЎвЂ№Р в„–РЎвЂљР С‘ Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹",
+            "Р С”Р В°Р С” Р Р†РЎвЂ№Р в„–РЎвЂљР С‘ Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹",
+            "Р Р…Р В° Р В»Р С‘Р Р…Р С‘РЎР‹",
+            "Р Р†Р С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљРЎРЉ Р В»Р С‘Р Р…Р С‘РЎР‹",
+            "Р С”Р В°Р С” Р Р…Р В°РЎвЂЎР В°РЎвЂљРЎРЉ РЎР‚Р В°Р В±Р С•РЎвЂљР В°РЎвЂљРЎРЉ",
+            "Р Р…Р ВµРЎвЂљ Р В·Р В°Р С”Р В°Р В·Р С•Р Р†",
+            "Р Р…Р С‘ Р С•Р Т‘Р Р…Р С•Р С–Р С• Р В·Р В°Р С”Р В°Р В·Р В°",
+            "Р Р…Р Вµ Р С•Р Т‘Р Р…Р С•Р С–Р С• Р В·Р В°Р С”Р В°Р В·Р В°",
+            "Р В·Р В°Р С”Р В°Р В·Р С•Р Р† Р Р…Р Вµ Р Т‘Р В°Р В»Р С‘",
+            "РЎвЂЎР В°РЎРѓ Р С—Р С•РЎРѓР С‘Р Т‘Р ВµР В»",
+            "Р Т‘Р С•Р В»Р С–Р С• Р В±Р ВµР В· Р В·Р В°Р С”Р В°Р В·Р С•Р Р†",
+            "Р Р…Р ВµРЎвЂљ Р В·Р В°Р С”Р В°Р В·Р В°",
         },
     }
     for topic, keywords in topic_keywords.items():
         if any(keyword in normalized for keyword in keywords):
             return topic
-    return active_topic if active_topic and normalized in {"сделал", "дальше", "готово", "получилось"} else None
+    return active_topic if active_topic and normalized in {"РЎРѓР Т‘Р ВµР В»Р В°Р В»", "Р Т‘Р В°Р В»РЎРЉРЎв‚¬Р Вµ", "Р С–Р С•РЎвЂљР С•Р Р†Р С•", "Р С—Р С•Р В»РЎС“РЎвЂЎР С‘Р В»Р С•РЎРѓРЎРЉ"} else None
 
 
 def _application_status_from_state(state: DialogueState) -> str:
@@ -3455,22 +3715,22 @@ def _application_status_from_state(state: DialogueState) -> str:
         return "completed"
     return "collecting_data"
 DUPLICATE_REJECTED_REPLY = (
-    "Такой водитель уже зарегистрирован.\n\n"
-    "Доступные действия:\n"
-    "1. Стать самозанятым\n"
-    "2. Изменить данные\n"
-    "3. Сменить автомобиль\n"
-    "4. Помощь со входом\n"
-    "5. Связаться с менеджером"
+    "Р СћР В°Р С”Р С•Р в„– Р Р†Р С•Р Т‘Р С‘РЎвЂљР ВµР В»РЎРЉ РЎС“Р В¶Р Вµ Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р С‘РЎР‚Р С•Р Р†Р В°Р Р….\n\n"
+    "Р вЂќР С•РЎРѓРЎвЂљРЎС“Р С—Р Р…РЎвЂ№Р Вµ Р Т‘Р ВµР в„–РЎРѓРЎвЂљР Р†Р С‘РЎРЏ:\n"
+    "1. Р РЋРЎвЂљР В°РЎвЂљРЎРЉ РЎРѓР В°Р СР С•Р В·Р В°Р Р…РЎРЏРЎвЂљРЎвЂ№Р С\n"
+    "2. Р ВР В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ\n"
+    "3. Р РЋР СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•Р СР С•Р В±Р С‘Р В»РЎРЉ\n"
+    "4. Р СџР С•Р СР С•РЎвЂ°РЎРЉ РЎРѓР С• Р Р†РЎвЂ¦Р С•Р Т‘Р С•Р С\n"
+    "5. Р РЋР Р†РЎРЏР В·Р В°РЎвЂљРЎРЉРЎРѓРЎРЏ РЎРѓ Р СР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚Р С•Р С"
 )
 
 
 def _existing_driver_options_reply() -> str:
     return (
-        "Понял, вы уже подключены. Что нужно сделать?\n"
-        "1. Вывод денег\n"
-        "2. Вход в Яндекс Про\n"
-        "3. Тарифы\n"
-        "4. Изменить авто/документы\n"
-        "5. Менеджер"
+        "Р СџР С•Р Р…РЎРЏР В», Р Р†РЎвЂ№ РЎС“Р В¶Р Вµ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р…РЎвЂ№. Р В§РЎвЂљР С• Р Р…РЎС“Р В¶Р Р…Р С• РЎРѓР Т‘Р ВµР В»Р В°РЎвЂљРЎРЉ?\n"
+        "1. Р вЂ™РЎвЂ№Р Р†Р С•Р Т‘ Р Т‘Р ВµР Р…Р ВµР С–\n"
+        "2. Р вЂ™РЎвЂ¦Р С•Р Т‘ Р Р† Р Р‡Р Р…Р Т‘Р ВµР С”РЎРѓ Р СџРЎР‚Р С•\n"
+        "3. Р СћР В°РЎР‚Р С‘РЎвЂћРЎвЂ№\n"
+        "4. Р ВР В·Р СР ВµР Р…Р С‘РЎвЂљРЎРЉ Р В°Р Р†РЎвЂљР С•/Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљРЎвЂ№\n"
+        "5. Р СљР ВµР Р…Р ВµР Т‘Р В¶Р ВµРЎР‚"
     )

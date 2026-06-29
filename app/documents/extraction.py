@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
 from typing import Any
 
+from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
@@ -49,6 +51,10 @@ class DocumentExtractionResult(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     contains_both_license_sides: bool = False
     additional_document_types: list[str] = Field(default_factory=list)
+    provider_name: str | None = None
+    provider_status: str = "empty"
+    provider_chain: list[str] = Field(default_factory=list)
+    failure_reason: str | None = None
 
 
 DOCUMENT_TYPES = {
@@ -115,14 +121,48 @@ class DocumentExtractionService:
         expected_document_type: str,
     ) -> DocumentExtractionResult:
         if not self.is_enabled():
-            return DocumentExtractionResult()
+            return DocumentExtractionResult(
+                provider_status="disabled",
+                failure_reason="document_extraction_disabled",
+            )
         settings = get_settings()
+        failures: list[str] = []
         if settings.gemini_api_key and genai is not None:
             try:
-                return self._extract_with_gemini(image_bytes, mime_type=mime_type, expected_document_type=expected_document_type)
+                result = self._extract_with_gemini(
+                    image_bytes,
+                    mime_type=mime_type,
+                    expected_document_type=expected_document_type,
+                )
+                if self._has_meaningful_extraction(result):
+                    result.provider_status = "success"
+                    return result
+                failures.append("gemini_empty")
             except Exception as exc:
                 logger.warning("Gemini document extraction failed: %s", exc)
-        return DocumentExtractionResult()
+                failures.append(f"gemini_error:{exc}")
+        if settings.openai_api_key:
+            try:
+                result = self._extract_with_openai(
+                    image_bytes,
+                    mime_type=mime_type,
+                    expected_document_type=expected_document_type,
+                )
+                if self._has_meaningful_extraction(result):
+                    if failures:
+                        result.provider_status = "fallback_success"
+                    else:
+                        result.provider_status = "success"
+                    return result
+                failures.append("openai_empty")
+            except Exception as exc:
+                logger.warning("OpenAI document extraction failed: %s", exc)
+                failures.append(f"openai_error:{exc}")
+        return DocumentExtractionResult(
+            provider_status="provider_error" if any("error:" in item for item in failures) else "empty",
+            provider_chain=failures,
+            failure_reason=";".join(failures) if failures else "empty_result",
+        )
 
     def _extract_with_gemini(
         self,
@@ -155,6 +195,9 @@ class DocumentExtractionService:
             return DocumentExtractionResult()
         payload = json.loads(raw_text)
         parsed = DocumentExtractionResult.model_validate(payload)
+        parsed.provider_name = "gemini"
+        parsed.provider_chain = ["gemini"]
+        parsed.provider_status = "success"
         if parsed.document_type not in DOCUMENT_TYPES:
             parsed.document_type = expected_document_type
         parsed.additional_document_types = [
@@ -163,6 +206,63 @@ class DocumentExtractionService:
             if item in DOCUMENT_TYPES and item not in {"unknown", parsed.document_type}
         ]
         return parsed
+
+    def _extract_with_openai(
+        self,
+        image_bytes: bytes,
+        *,
+        mime_type: str | None,
+        expected_document_type: str,
+    ) -> DocumentExtractionResult:
+        settings = get_settings()
+        client = OpenAI(api_key=settings.openai_api_key)
+        prompt = EXTRACTION_PROMPT.format(expected_type=expected_document_type)
+        media_type = mime_type or "image/jpeg"
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        response = client.chat.completions.create(
+            model=settings.openai_model,
+            temperature=0.1,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{encoded}"},
+                        },
+                    ],
+                }
+            ],
+        )
+        raw_text = response.choices[0].message.content or ""
+        if not raw_text:
+            return DocumentExtractionResult(
+                provider_name="openai",
+                provider_status="empty",
+                provider_chain=["openai"],
+                failure_reason="empty_openai_response",
+            )
+        payload = json.loads(raw_text)
+        parsed = DocumentExtractionResult.model_validate(payload)
+        parsed.provider_name = "openai"
+        parsed.provider_chain = ["openai"]
+        parsed.provider_status = "success"
+        if parsed.document_type not in DOCUMENT_TYPES:
+            parsed.document_type = expected_document_type
+        parsed.additional_document_types = [
+            item
+            for item in parsed.additional_document_types
+            if item in DOCUMENT_TYPES and item not in {"unknown", parsed.document_type}
+        ]
+        return parsed
+
+    @staticmethod
+    def _has_meaningful_extraction(result: DocumentExtractionResult) -> bool:
+        if result.document_type and result.document_type != "unknown":
+            return True
+        return bool(normalize_extracted_fields(result, document_type=result.document_type or "unknown")[0])
 
 
 def normalize_extracted_fields(

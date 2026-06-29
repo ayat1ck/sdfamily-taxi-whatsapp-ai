@@ -23,7 +23,9 @@ from app.integrations.google_sheets import GoogleSheetsClient
 from app.integrations.yandex.client import YandexPartialSubmissionError
 from app.integrations.yandex.service import YandexSubmissionService
 from app.messages.models import Message
+from app.unknown_intents.models import UnknownIntent
 from app.messages.service import create_message
+from app.unknown_intents.service import list_unknown_intents as list_unknown_intents_service
 from app.utils.validators import normalize_plate_number, normalize_service_class
 from app.vehicles.models import Vehicle
 from app.vehicles.service import get_or_create_vehicle
@@ -202,6 +204,17 @@ def dashboard_stats(db: Session) -> dict[str, Any]:
     return {
         "new_today": db.scalar(select(func.count(Driver.id)).where(Driver.created_at >= today)) or 0,
         "active": db.scalar(select(func.count(Driver.id)).where(Driver.dialog_mode != "closed")) or 0,
+        "active_registrations": db.scalar(select(func.count(Driver.id)).where(Driver.state.like("ask_%"))) or 0,
+        "awaiting_manager": db.scalar(select(func.count(Driver.id)).where(Driver.requires_attention.is_(True))) or 0,
+        "fallback_ge_3": db.scalar(select(func.count(Driver.id)).where(Driver.fallback_count >= 3)) or 0,
+        "stale_support_contexts": db.scalar(
+            select(func.count(Driver.id)).where(Driver.support_context_json.is_not(None)).where(Driver.last_message_at < datetime.utcnow() - timedelta(hours=24))
+        ) or 0,
+        "ocr_failures_24h": db.scalar(
+            select(func.count(ConversationEvent.id))
+            .where(ConversationEvent.event_type == "registration_debug_trace")
+            .where(ConversationEvent.created_at >= today)
+        ) or 0,
         "waiting_documents": db.scalar(select(func.count(Application.id)).where(Application.status == "waiting_documents"))
         or 0,
         "duplicates": db.scalar(select(func.count(Driver.id)).where(Driver.duplicate_flag.is_(True))) or 0,
@@ -214,6 +227,10 @@ def dashboard_stats(db: Session) -> dict[str, Any]:
         "recent_events": recent_events,
         "recent_jobs": integration_jobs,
     }
+
+
+def list_unknown_intents(db: Session, *, state: str = "", limit: int = 100) -> list[UnknownIntent]:
+    return list_unknown_intents_service(db, state=state, limit=limit)
 
 
 def serialize_message(message: Message) -> dict[str, Any]:

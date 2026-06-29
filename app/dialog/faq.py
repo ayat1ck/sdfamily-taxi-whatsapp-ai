@@ -773,7 +773,16 @@ def build_office_invite_reply(office_address: str) -> str:
 def classify_dialog_intent(message: str, *, current_state: str | None = None) -> str:
     text = normalize_text_token(repair_mojibake(message)).strip(" ?!.,")
     if not text:
-        return "smalltalk"
+        return "registration" if current_state and current_state != DialogueState.NEW.value else "smalltalk"
+
+    if text in {"условия", "какие условия", "комиссия", "тариф", "тарифы", "выплата", "выплаты"}:
+        return "faq"
+    if text in {"вход", "вход в яндекс", "вход в яндекс про", "яндекс про", "логин"}:
+        return "faq"
+    if text in {"тіркелу", "тіркеу", "тіркелу керек", "тыркелу", "тыркеу", "тиркейелин дегем"}:
+        return "registration"
+    if text in {"не вижу парк", "нет парка", "не отображается парк"}:
+        return "application_status"
 
     if any(marker in text for marker in (
         "я уже зарегистр",

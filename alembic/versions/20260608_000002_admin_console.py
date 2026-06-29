@@ -31,13 +31,14 @@ def upgrade() -> None:
     op.add_column("messages", sa.Column("is_read_by_admin", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column("messages", sa.Column("read_at", sa.DateTime(), nullable=True))
 
-    op.add_column("documents", sa.Column("message_id", sa.Integer(), nullable=True))
-    op.add_column("documents", sa.Column("file_name", sa.String(length=255), nullable=True))
-    op.add_column("documents", sa.Column("mime_type", sa.String(length=128), nullable=True))
-    op.add_column("documents", sa.Column("storage_provider", sa.String(length=64), nullable=True))
-    op.add_column("documents", sa.Column("storage_path", sa.String(length=512), nullable=True))
-    op.create_foreign_key("fk_documents_message_id", "documents", "messages", ["message_id"], ["id"])
-    op.create_index("ix_documents_message_id", "documents", ["message_id"], unique=False)
+    with op.batch_alter_table("documents") as batch_op:
+        batch_op.add_column(sa.Column("message_id", sa.Integer(), nullable=True))
+        batch_op.add_column(sa.Column("file_name", sa.String(length=255), nullable=True))
+        batch_op.add_column(sa.Column("mime_type", sa.String(length=128), nullable=True))
+        batch_op.add_column(sa.Column("storage_provider", sa.String(length=64), nullable=True))
+        batch_op.add_column(sa.Column("storage_path", sa.String(length=512), nullable=True))
+        batch_op.create_foreign_key("fk_documents_message_id", "messages", ["message_id"], ["id"])
+        batch_op.create_index("ix_documents_message_id", ["message_id"], unique=False)
 
     op.create_table(
         "admin_accounts",
@@ -115,13 +116,14 @@ def downgrade() -> None:
     op.drop_index("ix_admin_accounts_username", table_name="admin_accounts")
     op.drop_table("admin_accounts")
 
-    op.drop_index("ix_documents_message_id", table_name="documents")
-    op.drop_constraint("fk_documents_message_id", "documents", type_="foreignkey")
-    op.drop_column("documents", "storage_path")
-    op.drop_column("documents", "storage_provider")
-    op.drop_column("documents", "mime_type")
-    op.drop_column("documents", "file_name")
-    op.drop_column("documents", "message_id")
+    with op.batch_alter_table("documents") as batch_op:
+        batch_op.drop_index("ix_documents_message_id")
+        batch_op.drop_constraint("fk_documents_message_id", type_="foreignkey")
+        batch_op.drop_column("storage_path")
+        batch_op.drop_column("storage_provider")
+        batch_op.drop_column("mime_type")
+        batch_op.drop_column("file_name")
+        batch_op.drop_column("message_id")
 
     op.drop_column("messages", "read_at")
     op.drop_column("messages", "is_read_by_admin")
