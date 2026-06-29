@@ -673,6 +673,12 @@ class DialogueEngine:
                 application,
                 "Файл получил. Для исправления данных напишите новое значение текстом или попросите менеджера.",
             )
+        if media_context == "text_registration_context":
+            current_prompt = PROMPTS.get(state, "")
+            reply = "Р¤РѕС‚Рѕ РїРѕР»СѓС‡РёР». РЎРµР№С‡Р°СЃ Р¶РґСѓ РѕС‚РІРµС‚ С‚РµРєСЃС‚РѕРј РЅР° С‚РµРєСѓС‰РёР№ С€Р°Рі."
+            if current_prompt:
+                reply = f"{reply}\n\n{current_prompt}"
+            return self._respond(db, driver, application, reply)
         if media_context == "unknown_context":
             return self._respond(
                 db,
@@ -839,8 +845,10 @@ class DialogueEngine:
             return "support_context"
         if self._get_pending_field_edit(driver) or state in {DialogueState.CONFIRM_DATA, DialogueState.YANDEX_ERROR}:
             return "correction_context"
-        if state == DialogueState.NEW or state in DOCUMENT_STATE_MAP or is_registration_collecting_state(state):
+        if state == DialogueState.NEW or state in DOCUMENT_STATE_MAP:
             return "registration_context"
+        if is_registration_collecting_state(state):
+            return "text_registration_context"
         return "unknown_context"
 
     def _check_duplicate_constraints(
