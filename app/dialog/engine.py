@@ -305,6 +305,30 @@ class DialogueEngine:
                 decision_source="backend_router",
             )
             normalized_new_message = normalize_text_token(incoming.text or "")
+            if normalized_new_message in {"2", "условия", "условие", "тарифы", "комиссия"}:
+                faq_reply = resolve_faq_replies(
+                    "какие условия",
+                    self.ai.knowledge_base,
+                    office_address=self.settings.public_site_address,
+                ) or FALLBACK_MANAGER_REPLY
+                return self._respond(db, driver, application, self._format_new_state_assistant_reply(faq_reply))
+
+            if normalized_new_message in {
+                "3",
+                "вход",
+                "вход в яндекс про",
+                "яндекс про",
+                "помощь со входом",
+                "логин",
+            }:
+                reply = (
+                    "Помогу со входом в Яндекс Про.\n\n"
+                    "Напишите, что именно не получается:\n"
+                    "1. Не приходит SMS\n"
+                    "2. Не вижу парк\n"
+                    "3. Ошибка при входе"
+                )
+                return self._respond(db, driver, application, self._format_new_state_assistant_reply(reply))
             if any(marker in normalized_new_message for marker in ("тыркел", "тркел", "тыркеу", "тркеу")):
                 create_conversation_event(db, driver, "started_onboarding")
                 set_application_status(db, application, "collecting_data")
