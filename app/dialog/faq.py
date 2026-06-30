@@ -115,8 +115,8 @@ KAZAKH_SUPPORT_MARKERS = (
 
 PAYOUT_WAITING_REPLY = (
     "Понял. По выплатам сейчас просим немного подождать — скоро всё будет готово.\n"
-    "По вопросам выплат колл-центр: +77071870107.\n"
-    "Менеджер: +77066497040."
+    "По вопросам выплат колл-центр: +77761854607.\n"
+    "Менеджер: +77761854607."
 )
 
 SMALLTALK_REPLY = (
@@ -139,6 +139,14 @@ class FaqIntentRoute:
 
 
 FAQ_INTENT_ROUTES: tuple[FaqIntentRoute, ...] = (
+    FaqIntentRoute(("50", "заказ"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("1000", "заказ"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("200", "заказ"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("20", "тысяч", "заказ"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("5", "тысяч", "заказ"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("приветствен", "бонус"), "park_info", "какие бонусы", 2),
+    FaqIntentRoute(("набор", "водител"), "park_info", "что дают за регистрацию", 2),
+    FaqIntentRoute(("приветствен", "бокс"), "park_info", "что дают за регистрацию", 2),
     FaqIntentRoute(("получ", "стаж"), "park_info", "какие бонусы", 2),
     FaqIntentRoute(("получ", "бонус"), "park_info", "какие бонусы", 2),
     FaqIntentRoute(("получ", "приз"), "park_info", "какие бонусы", 2),

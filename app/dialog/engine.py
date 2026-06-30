@@ -76,6 +76,8 @@ from app.whatsapp.parser import ParsedWhatsAppMessage
 
 logger = get_logger(__name__)
 
+NON_WORD_INPUT_RE = re.compile(r"^[\W_]+$", re.UNICODE)
+
 SUPPORT_INTENTS = {
     "existing_driver_support",
     "human_operator",
@@ -189,6 +191,42 @@ class DialogueEngine:
         state = DialogueState(driver.state or DialogueState.NEW.value)
         self._touch_support_context(driver)
 
+        if (
+            self._is_active_flow(state)
+            and incoming.message_type == "text"
+            and self._is_non_answer_text(incoming.text or "")
+        ):
+            self._register_fallback(
+                db,
+                driver,
+                application,
+                state_before=state.value,
+                reason="non_answer_text_in_active_flow",
+                message_id=incoming_message.id,
+                message_text=incoming.text or "",
+                message_type=incoming.message_type,
+            )
+            self._record_registration_debug_event(
+                db,
+                driver,
+                state_before=state.value,
+                message_type=incoming.message_type,
+                media_context="text_message",
+                detected_document_type=None,
+                extracted_fields={},
+                state_after=state.value,
+                submit_called=False,
+                message_id=incoming_message.id,
+                mime_type=incoming.mime_type,
+                debug_source="non_answer_text_in_active_flow",
+            )
+            return self._respond(
+                db,
+                driver,
+                application,
+                self._repeat_current_question(state, "Нужен ответ по текущему шагу."),
+            )
+
         pending_menu_reply = self._handle_pending_menu(
             db,
             driver,
@@ -227,7 +265,7 @@ class DialogueEngine:
             return self._respond(db, driver, application, DUPLICATE_REJECTED_REPLY)
 
         if incoming.message_type == "unsupported":
-            return self._respond(db, driver, application, "Р СџР С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С‘Р Р†Р В°РЎР‹РЎвЂљРЎРѓРЎРЏ РЎвЂљР С•Р В»РЎРЉР С”Р С• РЎвЂљР ВµР С”РЎРѓРЎвЂљ, Р С‘Р В·Р С•Р В±РЎР‚Р В°Р В¶Р ВµР Р…Р С‘Р Вµ Р С‘ Р Т‘Р С•Р С”РЎС“Р СР ВµР Р…РЎвЂљ.")
+            return self._respond(db, driver, application, "Поддерживаются только текст, изображение и документ.")
 
         support_menu_reply = self._handle_stateful_support_menu(
             db,
@@ -320,6 +358,26 @@ class DialogueEngine:
             return self._handle_yandex_pro_followup(db, driver, application, state, incoming.text or "", incoming_message.id)
 
         if state == DialogueState.NEW:
+            normalized_new_message = normalize_text_token(incoming.text or "")
+            deterministic_intent = classify_dialog_intent(incoming.text or "", current_state=state.value)
+            if normalized_new_message == "2":
+                faq_reply = resolve_faq_replies(
+                    "какие условия",
+                    self.ai.knowledge_base,
+                    office_address=self.settings.public_site_address,
+                ) or FALLBACK_MANAGER_REPLY
+                return self._respond(db, driver, application, self._format_new_state_assistant_reply(faq_reply))
+
+            if deterministic_intent == "registration" and _looks_like_registration_start_request(incoming.text or ""):
+                create_conversation_event(db, driver, "started_onboarding")
+                set_application_status(db, application, "collecting_data")
+                update_driver_state(db, driver, DialogueState.ASK_FULL_NAME.value)
+                return self._respond(
+                    db,
+                    driver,
+                    application,
+                    self._build_registration_start_reply("Отлично! Начинаем регистрацию."),
+                )
             ai_result = self.ai.respond(state.value, incoming.text or "", driver)
             if ai_result.confidence < 0.75 and ai_result.intent not in {"faq", "help", "smalltalk"}:
                 ai_result.action = "ask_clarification"
@@ -2694,6 +2752,12 @@ class DialogueEngine:
             return current_prompt
         return f"{base_reply.strip()}\n\n{current_prompt}"
 
+    def _is_non_answer_text(self, message_text: str) -> bool:
+        normalized = normalize_text_token(message_text).strip()
+        if not normalized:
+            return True
+        return bool(NON_WORD_INPUT_RE.fullmatch(normalized))
+
     def _extract_city_fallback(self, message_text: str) -> str | None:
         cleaned = re.sub(r"\s+", " ", (message_text or "").strip(" \t\r\n.,!?;:()[]{}\"'")).strip()
         if not cleaned:
@@ -3590,6 +3654,8 @@ def _looks_like_registration_start_request(text: str) -> bool:
     normalized = normalize_text_token(text)
     if not normalized:
         return False
+    if any(marker in normalized for marker in ("регист", "зарег", "подключ", "тіркел", "тірке", "тыркел", "тырке", "жазылай", "жазыл")):
+        return True
     if normalized in {"1", "РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ", "РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµР В»РЎС“", "РЎвЂљРЎвЂ“РЎР‚Р С”Р ВµРЎС“", "РЎвЂљРЎвЂ№РЎР‚Р С”Р ВµР В»РЎС“", "РЎвЂљРЎвЂ№РЎР‚Р С”Р ВµРЎС“"}:
         return True
     if any(marker in normalized for marker in ("РЎС“Р В¶Р Вµ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎ", "РЎС“Р В¶Р Вµ Р В·Р В°РЎР‚Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚", "Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР ВµР Р… РЎС“Р В¶Р Вµ", "Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎРЎвЂР Р… РЎС“Р В¶Р Вµ")):

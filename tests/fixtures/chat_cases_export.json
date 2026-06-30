@@ -1,0 +1,95 @@
+{
+  "generated_from": "C:\\Users\\ayat_\\Downloads\\chats.json",
+  "cases": [
+    {
+      "name": "export_menu_option_two_7447",
+      "phone": "+77777707447",
+      "messages": [
+        "Здравствуйте",
+        "2"
+      ],
+      "expected": {
+        "final_state": "new",
+        "application_status": "collecting_data",
+        "reply_contains": [
+          {
+            "step": 1,
+            "text": "2%"
+          }
+        ],
+        "reply_not_contains": [
+          {
+            "step": 1,
+            "text": "Не могу точно определить проблему"
+          }
+        ]
+      }
+    },
+    {
+      "name": "export_kazakh_registration_5608",
+      "phone": "+77083385608",
+      "messages": [
+        "жазылайн деп едим"
+      ],
+      "expected": {
+        "final_state": "ask_full_name"
+      }
+    },
+    {
+      "name": "export_kazakh_registration_1700",
+      "phone": "+77083851700",
+      "messages": [
+        "Тыркелу керек"
+      ],
+      "expected_failure": true,
+      "expected": {
+        "final_state": "ask_full_name"
+      }
+    },
+    {
+      "name": "export_bonus_question_7191",
+      "phone": "+77776767191",
+      "messages": [
+        "Какие бонусы?"
+      ],
+      "expected": {
+        "final_state": "new",
+        "application_status": "collecting_data",
+        "reply_contains": [
+          {
+            "step": 0,
+            "text": "5000"
+          }
+        ],
+        "reply_not_contains": [
+          {
+            "step": 0,
+            "text": "После входа в Яндекс Про"
+          }
+        ]
+      }
+    },
+    {
+      "name": "export_kazakh_registration_0031",
+      "phone": "+77751910031",
+      "messages": [
+        "Осы такса паркке тіркелейін деп едім"
+      ],
+      "expected_failure": true,
+      "expected": {
+        "final_state": "ask_full_name"
+      }
+    },
+    {
+      "name": "export_kazakh_registration_0091",
+      "phone": "+77071500091",
+      "messages": [
+        "Таксопаркка тіркелин деп едім"
+      ],
+      "expected_failure": true,
+      "expected": {
+        "final_state": "ask_full_name"
+      }
+    }
+  ]
+}

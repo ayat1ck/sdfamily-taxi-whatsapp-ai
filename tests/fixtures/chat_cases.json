@@ -1,0 +1,126 @@
+{
+  "cases": [
+    {
+      "name": "explicit_registration_then_emoji_keeps_step",
+      "phone": "+77000000001",
+      "messages": [
+        "Регистрация",
+        "👋🏻"
+      ],
+      "expected": {
+        "final_state": "ask_full_name",
+        "application_status": "collecting_data",
+        "reply_not_contains": [
+          {
+            "step": 1,
+            "text": "Что хотите сделать сейчас"
+          }
+        ],
+        "state_at_step": [
+          {
+            "step": 0,
+            "state": "ask_full_name"
+          },
+          {
+            "step": 1,
+            "state": "ask_full_name"
+          }
+        ]
+      }
+    },
+    {
+      "name": "bonus_and_box_questions_route_to_faq",
+      "phone": "+77000000002",
+      "messages": [
+        "За 50 заказов 5 тысяч?",
+        "Набор для водителей есть?"
+      ],
+      "expected": {
+        "final_state": "new",
+        "application_status": "collecting_data",
+        "reply_contains": [
+          {
+            "step": 0,
+            "text": "5000"
+          },
+          {
+            "step": 1,
+            "text": "бокс"
+          }
+        ],
+        "reply_not_contains": [
+          {
+            "step": 0,
+            "text": "После входа в Яндекс Про"
+          }
+        ]
+      }
+    },
+    {
+      "name": "message_history_is_persisted",
+      "phone": "+77000000005",
+      "messages": [
+        "Здравствуйте",
+        "Регистрация"
+      ],
+      "expected": {
+        "final_state": "ask_full_name",
+        "application_status": "collecting_data",
+        "message_count": 4
+      }
+    },
+    {
+      "name": "kazakh_registration_phrase_should_start_flow",
+      "phone": "+77000000011",
+      "messages": [
+        "жазылайн деп едим"
+      ],
+      "expected": {
+        "final_state": "ask_full_name"
+      }
+    },
+    {
+      "name": "manager_vacancy_should_escalate_cleanly",
+      "phone": "+77000000003",
+      "messages": [
+        "Саламатсыз ба!",
+        "У вас есть вакансия на менеджера"
+      ],
+      "expected": {
+        "final_state": "new",
+        "application_status": "awaiting_manager_review",
+        "requires_attention": true,
+        "reply_not_contains": [
+          {
+            "step": 1,
+            "text": "�"
+          }
+        ]
+      }
+    },
+    {
+      "name": "menu_option_two_should_open_conditions",
+      "phone": "+77000000004",
+      "messages": [
+        "Здравствуйте",
+        "2"
+      ],
+      "expected": {
+        "final_state": "new",
+        "application_status": "collecting_data",
+        "reply_contains": [
+          {
+            "step": 1,
+            "text": "2%"
+          }
+        ],
+        "reply_not_contains": [
+          {
+            "step": 1,
+            "text": "Не могу точно определить проблему"
+          }
+        ]
+      }
+    }
+  ]
+}

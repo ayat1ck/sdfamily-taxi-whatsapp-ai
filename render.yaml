@@ -18,7 +18,9 @@ services:
       - key: PUBLIC_SITE_SUPPORT_EMAIL
         value: sdfamily@list.ru
       - key: PUBLIC_SITE_SUPPORT_PHONE
-        value: "+77071870107"
+        value: "+77761854607"
+      - key: PUBLIC_SITE_MANAGER_PHONE
+        value: "+77761854607"
       - key: PUBLIC_SITE_WHATSAPP_PHONE
         value: "+77766170666"
       - key: PUBLIC_SITE_ADDRESS

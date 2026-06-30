@@ -68,6 +68,21 @@ class RoutingClassificationTests(unittest.TestCase):
         self.assertEqual(menu_map["4"], "driver_update_request")
         self.assertEqual(menu_map["5"], "human_operator")
 
+    def test_bonus_and_box_questions_route_to_faq(self):
+        cases = [
+            ("За 50 заказов 5 тысяч?", "faq"),
+            ("За 200 заказов 20 тысяч есть?", "faq"),
+            ("Приветственный бокс есть?", "faq"),
+            ("Набор для водителей есть?", "faq"),
+            ("У вас есть вакансия на менеджера", "human_operator"),
+        ]
+        for message, expected_intent in cases:
+            with self.subTest(message=message):
+                self.assertEqual(
+                    classify_dialog_intent(message, current_state=DialogueState.NEW.value),
+                    expected_intent,
+                )
+
 
 class RoutingStateInvariantTests(unittest.TestCase):
     def test_dummy_driver_shape_matches_routing_expectations(self):
