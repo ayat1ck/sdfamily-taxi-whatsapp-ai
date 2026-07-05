@@ -1,0 +1,150 @@
+{
+  "name": "Manager Escalation",
+  "nodes": [
+    {
+      "id": "mgr_webhook_1",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 260],
+      "parameters": {
+        "path": "manager-escalation",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "mgr_normalize_1",
+      "name": "Normalize Escalation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 260],
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nreturn [{\n  json: {\n    phone: body.phone || body.message?.phone || body.message?.from || body.contact_phone || null,\n    driver_id: body.driver_id || body.state?.driver_id || null,\n    intent: body.intent || body.ai?.intent || 'human_operator',\n    reason: body.reason || body.ai?.required_action || body.ai?.reasoning_summary || 'manual escalation',\n    message: body.message?.text || body.reply_text || body.ai?.reply || '',\n    source_message_id: body.message_id || body.message?.message_id || null,\n    raw_payload: body,\n    topic: body.topic || body.ai?.intent || 'human_operator',\n    priority: body.priority || 1\n  }\n}];"
+      }
+    },
+    {
+      "id": "mgr_save_ticket_1",
+      "name": "Create Manager Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [780, 260],
+      "credentials": {
+        "postgres": {
+          "name": "Postgres SD Family Taxi"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO manager_tickets (phone, driver_id, topic, reason, status, priority, source_message_id, created_at, updated_at) VALUES ('{{ $json.phone }}', {{ $json.driver_id || 'NULL' }}, '{{ $json.topic.replace(/'/g, \"''\") }}', '{{ $json.reason.replace(/'/g, \"''\") }}', 'open', {{ $json.priority || 1 }}, {{ $json.source_message_id || 'NULL' }}, NOW(), NOW()) RETURNING id;"
+      }
+    },
+    {
+      "id": "mgr_update_state_1",
+      "name": "Set Manual Mode",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1040, 260],
+      "credentials": {
+        "postgres": {
+          "name": "Postgres SD Family Taxi"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE driver_states SET dialog_mode = 'manual', requires_attention = TRUE, last_intent = '{{ $json.intent }}', updated_at = NOW() WHERE phone = '{{ $json.phone }}';"
+      }
+    },
+    {
+      "id": "mgr_save_message_1",
+      "name": "Log Escalation Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1300, 260],
+      "credentials": {
+        "postgres": {
+          "name": "Postgres SD Family Taxi"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversation_messages (phone, driver_id, direction, sender_type, message_type, text, provider_message_id, delivery_status, raw_payload, created_at, updated_at) VALUES ('{{ $json.phone }}', {{ $json.driver_id || 'NULL' }}, 'outgoing', 'system', 'text', 'Ваш запрос передан менеджеру. Ожидайте ответа.', NULL, 'pending', '{{ JSON.stringify($json.raw_payload).replace(/'/g, \"''\") }}'::jsonb, NOW(), NOW()) RETURNING id;"
+      }
+    },
+    {
+      "id": "mgr_reply_1",
+      "name": "Build Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 260],
+      "parameters": {
+        "jsCode": "return [{ json: { reply: 'Ваш запрос передан менеджеру. Ожидайте ответа.' } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Escalation": {
+      "main": [
+        [
+          {
+            "node": "Create Manager Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Manager Ticket": {
+      "main": [
+        [
+          {
+            "node": "Set Manual Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Manual Mode": {
+      "main": [
+        [
+          {
+            "node": "Log Escalation Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Escalation Message": {
+      "main": [
+        [
+          {
+            "node": "Build Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "sd-family-taxi-migration-layer"
+  }
+}

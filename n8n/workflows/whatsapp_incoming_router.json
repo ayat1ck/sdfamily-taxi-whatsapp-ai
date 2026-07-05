@@ -1,0 +1,610 @@
+{
+  "name": "WhatsApp Incoming Router",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "whatsapp-incoming-router",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c4044af3-092b-4fac-b04f-2ab078b6f926",
+      "name": "Verify Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [48, 2576],
+      "webhookId": "4288784f-91b2-49b2-b577-a5cc75d4c54f"
+    },
+    {
+      "parameters": {
+        "jsCode": "const mode = $json.query?.['hub.mode'] || $json.query?.hub_mode || $json.query?.mode || '';\nconst verifyToken = $json.query?.['hub.verify_token'] || $json.query?.hub_verify_token || $json.query?.verify_token || '';\nconst challenge = $json.query?.['hub.challenge'] || $json.query?.hub_challenge || $json.query?.challenge || '';\nconst expectedToken = 'sdfamily_meta_verify_2026';\nconst ok = mode === 'subscribe' && verifyToken === expectedToken;\nreturn [{ json: { ok, body: ok ? String(challenge || '') : 'Forbidden', statusCode: ok ? 200 : 403 } }];"
+      },
+      "id": "760f8e14-6a7b-47d8-9c1e-7efc3000bd1d",
+      "name": "Check Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, 2576]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{$json.body}}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          }
+        }
+      },
+      "id": "54dffb6b-61dd-4efe-af55-975f54252b8f",
+      "name": "Respond Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [576, 2576]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-incoming-router",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1ff39137-5b1d-4813-8c1e-91b5a048864b",
+      "name": "Incoming Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [48, 2928],
+      "webhookId": "804cf247-e246-4138-988c-0ed03c5eee14"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nconst entry = Array.isArray(body.entry) ? body.entry[0] : null;\nconst change = entry && Array.isArray(entry.changes) ? entry.changes[0] : null;\nconst value = change?.value ?? {};\nconst message = Array.isArray(value.messages) ? value.messages[0] : null;\nconst status = Array.isArray(value.statuses) ? value.statuses[0] : null;\nif (!message) {\n  return [{ json: { ignored: true, reason: 'no_message', raw_payload: body, status: status || null } }];\n}\nconst phone = message?.from || value?.contacts?.[0]?.wa_id || null;\nconst messageType = message?.type || 'unknown';\nconst text = messageType === 'text' ? (message?.text?.body || '') : '';\nconst mediaId = message?.image?.id || message?.document?.id || null;\nconst mimeType = message?.image?.mime_type || message?.document?.mime_type || null;\nconst fileName = message?.document?.filename || null;\nreturn [{ json: { ignored: false, message_id: message?.id || null, phone, message_type: messageType, text, media_id: mediaId, mime_type: mimeType, file_name: fileName, has_attachment: Boolean(mediaId || messageType === 'image' || messageType === 'document'), received_at: new Date().toISOString(), raw_payload: body } }];"
+      },
+      "id": "ac904e33-6a4c-40e8-90e5-3a26931b178b",
+      "name": "Filter Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, 2928]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "506c01e3-28d1-4da9-abb8-c7d7105e05b0",
+              "leftValue": "={{$json.ignored}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "408d2771-055d-41b5-8e3e-92a76d5dc676",
+      "name": "Ignore Status Update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [576, 2928]
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          }
+        }
+      },
+      "id": "5864389c-f748-4bf2-8f05-b1ffeba0839b",
+      "name": "Respond Ignored",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [832, 2784]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input_row AS (SELECT '{{ $json.phone }}'::text AS phone, '{{ $json.message_id }}'::text AS message_id, '{{ $json.message_type }}'::text AS message_type, '{{ $json.text.replace(/'/g, \"''\") }}'::text AS text, '{{ JSON.stringify($json.raw_payload).replace(/'/g, \"''\") }}'::jsonb AS raw_payload, '{{ $json.media_id || '' }}'::text AS media_id, '{{ $json.mime_type || '' }}'::text AS mime_type, '{{ $json.file_name || '' }}'::text AS file_name, '{{ $json.received_at }}'::timestamptz AS received_at), existing_state AS (SELECT * FROM driver_states WHERE phone = '{{ $json.phone }}' LIMIT 1), inserted_state AS (INSERT INTO driver_states (phone, state, dialog_mode, support_context, pending_correction_context, last_intent, last_message_at, application_status, requires_attention, created_at, updated_at) SELECT phone, 'new', 'auto', NULL, NULL, NULL, NOW(), 'collecting_data', false, NOW(), NOW() FROM input_row ON CONFLICT (phone) DO UPDATE SET updated_at = NOW() RETURNING *) SELECT COALESCE((SELECT row_to_json(existing_state) FROM existing_state), (SELECT row_to_json(inserted_state) FROM inserted_state)) AS state, (SELECT row_to_json(input_row) FROM input_row) AS message;",
+        "options": {}
+      },
+      "id": "b3a1a498-75b3-45ed-a887-a4a28c36f530",
+      "name": "Load or Create State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [832, 2960],
+      "credentials": {
+        "postgres": {
+          "id": "oxwlnebBYbOhgHyP",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $json;\nconst state = row.state || {};\nconst message = row.message || {};\nlet supportContext = state.support_context || null;\nlet pendingCorrectionContext = state.pending_correction_context || null;\nif (typeof supportContext === 'string' && supportContext) {\n  try { supportContext = JSON.parse(supportContext); } catch (e) {}\n}\nif (typeof pendingCorrectionContext === 'string' && pendingCorrectionContext) {\n  try { pendingCorrectionContext = JSON.parse(pendingCorrectionContext); } catch (e) {}\n}\nreturn [{ json: { message, state, support_context: supportContext, pending_correction_context: pendingCorrectionContext } }];"
+      },
+      "id": "cf647ffc-740a-492c-948a-71a04d206d47",
+      "name": "Build Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1088, 2960]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "e751f5a5-01f0-433d-960d-e37440fe90fa",
+              "leftValue": "={{($json.state.dialog_mode === 'manual' || $json.state.requires_attention === true).toString()}}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cf14ddc2-7638-43b6-892f-0c58ed5336e2",
+      "name": "Manual Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, 2960]
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          }
+        }
+      },
+      "id": "e19b837f-a5db-4b04-8382-93e45c033b66",
+      "name": "Respond Manual",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1616, 2816]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=YOUR_GEMINI_API_KEY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"You are a strict JSON router. Return only valid JSON and nothing else.\\n\\nReturn only this schema:\\n{\\n  \\\"intent\\\": \\\"faq\\\",\\n  \\\"confidence\\\": 0.95,\\n  \\\"reply\\\": \\\"Текст ответа\\\",\\n  \\\"required_action\\\": \\\"reply\\\",\\n  \\\"requires_manager\\\": false,\\n  \\\"next_state\\\": \\\"new\\\"\\n}\\n\\nINPUT:\\n\" + JSON.stringify({ message: $json.message, state: $json.state, support_context: $json.support_context, pending_correction_context: $json.pending_correction_context })}]}],\"generationConfig\":{\"temperature\":0.2,\"responseMimeType\":\"application/json\"}}",
+        "options": {}
+      },
+      "id": "240e6574-846c-4798-98eb-5af0570de7e5",
+      "name": "AI Router",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1616, 3008]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json;\nconst aiRaw = response.candidates?.[0]?.content?.parts?.[0]?.text || response.body?.candidates?.[0]?.content?.parts?.[0]?.text || response.output_text || response.content || '';\nconst cleaned = String(aiRaw || '').trim().replace(/^```json\\s*/i, '').replace(/^```\\s*/i, '').replace(/\\s*```\\s*$/i, '');\nlet ai = null;\nlet invalidReason = null;\ntry {\n  ai = JSON.parse(cleaned);\n} catch (error) {\n  invalidReason = 'invalid_json';\n}\nconst fallbackAi = { intent: 'unknown', confidence: 0, reply: 'Передаю вопрос менеджеру', required_action: 'reply', requires_manager: true, next_state: 'new' };\nconst validIntents = new Set(['registration','existing_driver_support','human_operator','payout_support','tariff_support','yandex_problem','application_status','driver_update_request','smz_request','blocking_priority_support','rental_car_question','courier_registration','faq','unknown']);\nconst parsed = ai && validIntents.has(ai.intent) ? ai : fallbackAi;\nconst confidence = Number(parsed?.confidence ?? 0);\nconst isValid = !invalidReason && parsed && validIntents.has(parsed.intent) && confidence >= 0 && confidence <= 1 && typeof parsed.reply === 'string' && typeof parsed.required_action === 'string' && typeof parsed.requires_manager === 'boolean';\nreturn [{ json: { ai: isValid ? parsed : fallbackAi, ai_raw_response: aiRaw || '', confidence: Number((isValid ? parsed : fallbackAi).confidence ?? 0), is_valid: isValid, invalid_reason: isValid ? null : invalidReason || 'schema_validation_failed', message: $node['Build Context'].json.message, state: $node['Build Context'].json.state, support_context: $node['Build Context'].json.support_context, pending_correction_context: $node['Build Context'].json.pending_correction_context } }];"
+      },
+      "id": "a7ee5eca-003f-4fb1-a69a-a96de9e2a1c3",
+      "name": "Validate JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1872, 3024]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "d0f33cde-10b6-48b4-a2ac-1d2d4dca91d0",
+              "leftValue": "={{$json.is_valid}}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b4011894-3c4c-4d0a-b868-23b54ee8c4e1",
+      "name": "IF Invalid JSON",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2128, 2928]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.confidence}}",
+              "operation": "smaller",
+              "value2": 0.65
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "09a63374-98a2-457a-88bd-da555e5a16b0",
+      "name": "IF Low Confidence",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2128, 3120]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ai = $json.ai || { intent: 'unknown', confidence: 0, reply: 'Передаю вопрос менеджеру', required_action: 'reply', requires_manager: true, next_state: 'new' };\nconst state = $json.state || {};\nconst message = $json.message || {};\nconst nextState = ai.next_state || state.state || 'new';\nconst manual = ai.requires_manager || ai.intent === 'human_operator' || ai.intent === 'blocking_priority_support';\nconst supportContext = (ai.intent === 'yandex_problem' || ai.intent === 'payout_support' || ai.intent === 'blocking_priority_support') ? { topic: ai.intent, source_message: message.text || '', created_at: new Date().toISOString() } : ($json.support_context || null);\nconst pendingCorrectionContext = ai.intent === 'driver_update_request' ? { field: ai.extracted_fields?.field || null, source_message: message.text || '', created_at: new Date().toISOString() } : ($json.pending_correction_context || null);\nreturn [{ json: { ...$json, final_state: nextState, final_dialog_mode: manual ? 'manual' : (state.dialog_mode || 'auto'), final_requires_attention: Boolean(manual), final_support_context: supportContext, final_pending_correction_context: pendingCorrectionContext, reply_text: ai.reply, ai_request: { message: $json.message, state: $json.state, support_context: $json.support_context, pending_correction_context: $json.pending_correction_context }, ai_response: ai } }];"
+      },
+      "id": "08170d52-82af-4b73-aaea-1bd5e3e00841",
+      "name": "Prepare Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2656, 3024]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE driver_states SET state = '{{ $json.final_state }}', dialog_mode = '{{ $json.final_dialog_mode }}', support_context = {{ $json.final_support_context ? `'${JSON.stringify($json.final_support_context).replace(/'/g, \"''\")}'::jsonb` : 'NULL' }}, pending_correction_context = {{ $json.final_pending_correction_context ? `'${JSON.stringify($json.final_pending_correction_context).replace(/'/g, \"''\")}'::jsonb` : 'NULL' }}, last_intent = '{{ $json.ai.intent }}', last_message_at = NOW(), application_status = COALESCE(application_status, 'collecting_data'), requires_attention = {{ $json.final_requires_attention }}, updated_at = NOW() WHERE phone = '{{ $json.message.phone }}';",
+        "options": {}
+      },
+      "id": "1fcf5912-df03-450f-ae5a-0bca44b6fb5b",
+      "name": "Save State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [2912, 3024],
+      "credentials": {
+        "postgres": {
+          "id": "oxwlnebBYbOhgHyP",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversation_messages (phone, driver_id, direction, sender_type, message_type, text, provider_message_id, delivery_status, raw_payload, created_at) SELECT '{{ $json.message.phone }}', ds.driver_id, 'outgoing', 'bot', 'text', '{{ $json.reply_text.replace(/'/g, \"''\") }}', NULL, 'pending', '{{ JSON.stringify({ ai_request: $json.ai_request, ai_response: $json.ai_response, parsed_json: $json.ai, source: \"n8n\" }).replace(/'/g, \"''\") }}'::jsonb, NOW() FROM driver_states ds WHERE ds.phone = '{{ $json.message.phone }}' LIMIT 1;",
+        "options": {}
+      },
+      "id": "052b20ca-3834-42da-b316-ac5e97372ffb",
+      "name": "Save Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [3168, 3024],
+      "credentials": {
+        "postgres": {
+          "id": "oxwlnebBYbOhgHyP",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.WHATSAPP_API_BASE_URL + '/' + $env.WHATSAPP_PHONE_NUMBER_ID + '/messages'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + $env.WHATSAPP_ACCESS_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={\"messaging_product\":\"whatsapp\",\"to\":$json.message.phone,\"type\":\"text\",\"text\":{\"body\":$json.reply_text}}",
+        "options": {}
+      },
+      "id": "95a7de40-5f85-45d6-a488-d370680699d8",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3440, 3024]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversation_messages SET delivery_status = 'sent', provider_message_id = COALESCE(provider_message_id, '{{ $json.messages?.[0]?.id || $json.id || \"\" }}'), raw_payload = COALESCE(raw_payload, '{}'::jsonb) || '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb WHERE id = (SELECT id FROM conversation_messages WHERE phone = '{{ $node[\"Save Message\"].json.message.phone }}' AND direction = 'outgoing' ORDER BY id DESC LIMIT 1);",
+        "options": {}
+      },
+      "id": "ebaeb379-fca6-4f0c-8e16-fdc456f18686",
+      "name": "Log Delivery",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [3696, 3024],
+      "credentials": {
+        "postgres": {
+          "id": "oxwlnebBYbOhgHyP",
+          "name": "Postgres account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b1315952-58a7-4c36-807b-1390a328a227",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3952, 3024]
+    }
+  ],
+  "connections": {
+    "Verify Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Verify Token": {
+      "main": [
+        [
+          {
+            "node": "Respond Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Incoming Webhook": {
+      "main": [
+        [
+          {
+            "node": "Filter Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Payload": {
+      "main": [
+        [
+          {
+            "node": "Ignore Status Update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ignore Status Update?": {
+      "main": [
+        [
+          {
+            "node": "Respond Ignored",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load or Create State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load or Create State": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "Manual Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Mode?": {
+      "main": [
+        [
+          {
+            "node": "Respond Manual",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Router": {
+      "main": [
+        [
+          {
+            "node": "Validate JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate JSON": {
+      "main": [
+        [
+          {
+            "node": "IF Invalid JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Invalid JSON": {
+      "main": [
+        [],
+        [
+          {
+            "node": "IF Low Confidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Low Confidence": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Prepare Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Reply": {
+      "main": [
+        [
+          {
+            "node": "Save State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save State": {
+      "main": [
+        [
+          {
+            "node": "Save Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Message": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Reply": {
+      "main": [
+        [
+          {
+            "node": "Log Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Delivery": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bc231889ef7b81cd747528fdeef96e7d6fb31fd8999fca03bcd3ae2d6987b7b3"
+  }
+}

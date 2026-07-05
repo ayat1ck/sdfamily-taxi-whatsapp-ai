@@ -1,0 +1,152 @@
+{
+  "name": "WhatsApp Verify",
+  "nodes": [
+    {
+      "id": "verify_webhook_1",
+      "name": "Verify Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ],
+      "parameters": {
+        "path": "whatsapp-verify",
+        "httpMethod": "GET",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "verify_code_1",
+      "name": "Check Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const mode = $json.query?.['hub.mode'] || $json.query?.hub_mode || $json.query?.mode || '';\nconst verifyToken = $json.query?.['hub.verify_token'] || $json.query?.hub_verify_token || $json.query?.verify_token || '';\nconst challenge = $json.query?.['hub.challenge'] || $json.query?.hub_challenge || $json.query?.challenge || '';\nconst expectedToken = 'sdfamily_meta_verify_2026';\nconst ok = mode === 'subscribe' && verifyToken === expectedToken;\nreturn [{ json: { ok, challenge: challenge || '', statusCode: ok ? 200 : 403, body: ok ? String(challenge || '') : 'Forbidden' } }];"
+      }
+    },
+    {
+      "id": "verify_if_1",
+      "name": "Token OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.ok}}",
+              "value2": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "verify_response_ok_1",
+      "name": "Respond Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        220
+      ],
+      "parameters": {
+        "responseBody": "={{$json.body}}",
+        "options": {
+          "responseCode": "={{$json.statusCode}}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "verify_response_fail_1",
+      "name": "Respond Forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        380
+      ],
+      "parameters": {
+        "responseBody": "Forbidden",
+        "options": {
+          "responseCode": 403,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Verify Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Verify Token": {
+      "main": [
+        [
+          {
+            "node": "Token OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token OK?": {
+      "main": [
+        [
+          {
+            "node": "Respond Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "sd-family-taxi-migration-layer"
+  }
+}

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     app_host: str = "http://localhost:8000"
+    admin_base_url: str = "http://localhost:8000"
     strict_config: bool = False
     database_url: str = Field(default="sqlite:///./taxi_ai_manager.db", alias="DATABASE_URL")
     admin_username: str = "admin"
@@ -35,6 +36,8 @@ class Settings(BaseSettings):
     ai_provider: str = "openai"
     llm_mode: str = "faq_only"
     llm_faq_assist_enabled: bool = False
+    use_dialog_v2: bool = False
+    use_dialog_v2_phone_allowlist: str | None = None
     openai_model: str = "gpt-4o-mini"
     gemini_model: str = "gemini-2.5-flash"
     document_extraction_enabled: bool = True

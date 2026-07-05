@@ -1,0 +1,71 @@
+{
+  "name": "Support Router",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Start",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "rules": [
+          {
+            "value1": "={{$json.intent}}",
+            "operation": "equal",
+            "value2": "payout_support"
+          },
+          {
+            "value1": "={{$json.intent}}",
+            "operation": "equal",
+            "value2": "tariff_support"
+          },
+          {
+            "value1": "={{$json.intent}}",
+            "operation": "equal",
+            "value2": "yandex_problem"
+          },
+          {
+            "value1": "={{$json.intent}}",
+            "operation": "equal",
+            "value2": "faq"
+          }
+        ]
+      },
+      "id": "2",
+      "name": "Switch Support Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        500,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Switch Support Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "sd-family-taxi-migration-layer"
+  }
+}

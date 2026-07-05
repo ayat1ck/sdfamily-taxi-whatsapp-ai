@@ -38,6 +38,7 @@ from app.integrations.yandex.catalog import (
     resolve_model_input,
 )
 from app.utils.logger import get_logger
+from app.utils.text import repair_mojibake
 from app.utils.validators import (
     build_car_model_clarification_message,
     detect_car_model_clarification,
@@ -75,15 +76,15 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-CASUAL_SMALLTALK_REPLY = (
-    "Здравствуйте! Могу помочь с регистрацией в SD Family Taxi.\n\n"
-    "Что хотите сделать сейчас:\n"
-    "1. Регистрация\n"
-    "2. Узнать условия\n"
-    "3. Помощь со входом в Яндекс Про\n\n"
-    "Если хотите зарегистрироваться, просто напишите: Регистрация"
-)
-SHORT_SUPPORT_REPLY = "Понял. Уточните, что именно не получается — помогу по шагам."
+CASUAL_SMALLTALK_REPLY = """Здравствуйте! Могу помочь с регистрацией в SD Family Taxi.
+
+Что хотите сделать сейчас:
+1. Регистрация
+2. Узнать условия
+3. Помощь со входом в Яндекс Про
+
+Если хотите зарегистрироваться, просто напишите: Регистрация"""
+SHORT_SUPPORT_REPLY = "Понял. Уточните, что именно не получается - помогу по шагам."
 
 
 @dataclass
@@ -1458,7 +1459,7 @@ def _clarification_reply(current_state: DialogueState) -> str:
         DialogueState.CONFIRM_DATA: "РќР°РїРёС€РёС‚Рµ, РєР°РєРѕРµ РїРѕР»Рµ РёСЃРїСЂР°РІРёС‚СЊ Рё РЅР° РєР°РєРѕРµ Р·РЅР°С‡РµРЅРёРµ. РќР°РїСЂРёРјРµСЂ: РёСЃРїСЂР°РІСЊ РіРѕСЂРѕРґ РЅР° РђР»РјР°С‚С‹.",
     }
     if current_state in clean_custom:
-        return clean_custom[current_state]
+        return repair_mojibake(clean_custom[current_state])
     custom = {
         DialogueState.ASK_FULL_NAME: "РќР°РїРёС€РёС‚Рµ РІР°С€Рµ Р¤РРћ РїРѕР»РЅРѕСЃС‚СЊСЋ. РќР°РїСЂРёРјРµСЂ: РђР±Р°Р№ РђСЏС‚ Р–Р°РЅС‹Р±РµРєСѓР»С‹.",
         DialogueState.ASK_PHONE: "РЈРєР°Р¶РёС‚Рµ РєРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ С‚РµР»РµС„РѕРЅР° РІ С„РѕСЂРјР°С‚Рµ +7XXXXXXXXXX.",
