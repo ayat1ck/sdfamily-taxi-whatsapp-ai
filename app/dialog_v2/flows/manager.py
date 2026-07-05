@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.config import settings
+from app.config import get_settings
 from app.dialog_v2.event_bus import EventBus
 from app.dialog_v2.response import StructuredReply
 from app.messages.models import Message
@@ -30,6 +30,7 @@ class ManagerHandoffFlow:
             return []
 
     def _admin_url(self, driver) -> str:
+        settings = get_settings()
         base = (settings.admin_base_url or settings.app_host or "").rstrip("/")
         return f"{base}/admin/chats/{driver.id}"
 
