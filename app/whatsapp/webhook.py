@@ -107,6 +107,8 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
             # Lock the driver row so registration_draft updates are applied in order.
             driver = db.scalar(select(Driver).where(Driver.id == driver.id).with_for_update()) or driver
         application = db.scalar(select(Application).where(Application.driver_id == driver.id))
+        if use_dialog_v2 and driver.dialog_mode == "manual":
+            driver.dialog_mode = "bot_active"
         if driver.dialog_mode in {"manual", "paused", "closed"}:
             driver.last_message_at = datetime.utcnow()
             driver.unread_count = (driver.unread_count or 0) + 1

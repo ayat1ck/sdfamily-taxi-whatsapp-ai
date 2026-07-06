@@ -49,11 +49,11 @@ class ManagerHandoffFlow:
             "last_messages": self._last_messages(db, driver),
             "admin_url": self._admin_url(driver),
         }
-        context["dialog_mode"] = "manual"
+        context["dialog_mode"] = "bot_active"
         context["manager_ticket"] = ticket
         context["manager_alert"] = alert
         driver.support_context_json = context
-        driver.dialog_mode = "manual"
+        driver.dialog_mode = "bot_active"
         driver.requires_attention = True
 
         reply = StructuredReply(

@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = "changeme"
     whatsapp_api_base_url: str = "https://graph.facebook.com/v20.0"
 
+    telegram_bot_token: str | None = None
+    telegram_manager_chat_id: str | None = None
+    telegram_api_base_url: str = "https://api.telegram.org"
+
     google_service_account_json: str | None = None
     google_service_account_json_base64: str | None = None
     google_drive_folder_id: str | None = None

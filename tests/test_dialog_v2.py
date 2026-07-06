@@ -608,7 +608,7 @@ class DialogV2Tests(unittest.TestCase):
 
             self.assertEqual(reply.flow, "manager")
             self.assertTrue(reply.requires_manager)
-            self.assertEqual(driver.dialog_mode, "manual")
+            self.assertEqual(driver.dialog_mode, "bot_active")
 
     def test_global_show_summary_and_missing_during_registration(self):
         with self.SessionLocal() as db:

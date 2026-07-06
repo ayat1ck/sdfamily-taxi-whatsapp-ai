@@ -91,7 +91,8 @@ class DialogV2SerializerTests(unittest.TestCase):
             patch("app.whatsapp.webhook.handle_message_v2") as handle_mock, \
             patch("app.whatsapp.webhook.sender") as sender_mock, \
             patch("app.whatsapp.webhook.create_integration_job") as create_job_mock, \
-            patch("app.whatsapp.webhook.finish_integration_job") as finish_job_mock:
+            patch("app.whatsapp.webhook.finish_integration_job") as finish_job_mock, \
+            patch("app.whatsapp.webhook.notify_manager_stub") as notify_manager_mock:
             settings = SimpleNamespace(use_dialog_v2=True, whatsapp_access_token="token", whatsapp_phone_number_id="123")
             get_settings_mock.return_value = settings
             parse_mock.return_value = [SimpleNamespace(sender_phone="+77001112233", message_type="text", text="оператор", provider_message_id="wamid-1", raw_payload=payload)]
@@ -122,6 +123,7 @@ class DialogV2SerializerTests(unittest.TestCase):
             messages = db.scalars(select(app.messages.models.Message).where(app.messages.models.Message.driver_id == driver.id)).all()
             self.assertTrue(any(m.direction == "outgoing" for m in messages))
             finish_job_mock.assert_called()
+            notify_manager_mock.assert_called()
 
     def test_webhook_falls_back_to_text_when_interactive_send_fails(self):
         payload = {
@@ -150,7 +152,8 @@ class DialogV2SerializerTests(unittest.TestCase):
             patch("app.whatsapp.webhook.handle_message_v2") as handle_mock, \
             patch("app.whatsapp.webhook.sender") as sender_mock, \
             patch("app.whatsapp.webhook.create_integration_job") as create_job_mock, \
-            patch("app.whatsapp.webhook.finish_integration_job") as finish_job_mock:
+            patch("app.whatsapp.webhook.finish_integration_job") as finish_job_mock, \
+            patch("app.whatsapp.webhook.notify_manager_stub") as notify_manager_mock:
             settings = SimpleNamespace(use_dialog_v2=True, whatsapp_access_token="token", whatsapp_phone_number_id="123")
             get_settings_mock.return_value = settings
             parse_mock.return_value = [SimpleNamespace(sender_phone="+77001112233", message_type="text", text="оператор", provider_message_id="wamid-2", raw_payload=payload)]
@@ -177,6 +180,7 @@ class DialogV2SerializerTests(unittest.TestCase):
             self.assertEqual(response["status"], "ok")
             self.assertEqual(sender_mock.send_payload.call_count, 2)
             self.assertTrue(any(m.delivery_status == "error" or m.delivery_status == "sent" for m in db.scalars(select(app.messages.models.Message).where(app.messages.models.Message.driver_id == driver.id)).all()))
+            notify_manager_mock.assert_called()
 
     def test_build_v2_trace_contains_expected_fields(self):
         reply = StructuredReply(

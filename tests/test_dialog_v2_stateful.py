@@ -115,6 +115,7 @@ class DialogV2StatefulTests(unittest.TestCase):
             self.assertTrue(reply.requires_manager)
             self.assertEqual(driver.support_context_json["manager_ticket"]["reason"], "не могу вывести деньги")
             self.assertEqual(driver.support_context_json["manager_alert"]["reason"], "не могу вывести деньги")
+            self.assertEqual(driver.dialog_mode, "bot_active")
 
     def test_every_flow_returns_structured_reply(self):
         with self.SessionLocal() as db:
