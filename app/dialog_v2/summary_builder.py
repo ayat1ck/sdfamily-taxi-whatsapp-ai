@@ -33,28 +33,40 @@ class SummaryBuilder:
         driver = draft.get("driver", {})
         vehicle = draft.get("vehicle", {})
         documents = draft.get("documents", {})
+        dash = "—"
         lines = [
             "Проверьте данные:",
-            f"ФИО: {driver.get('full_name') or '—'}",
-            f"ИИН: {driver.get('iin') or '—'}",
-            f"Дата рождения: {driver.get('birth_date') or '—'}",
-            f"Телефон: {driver.get('phone') or '—'}",
-            f"Город: {driver.get('city') or '—'}",
-            f"Адрес: {driver.get('address') or '—'}",
-            f"Стаж: {driver.get('driving_experience_since') or '—'}",
-            f"ВУ: {driver.get('driver_license_number') or '—'}",
-            f"Авто: {vehicle.get('brand') or '—'} {vehicle.get('model') or ''}".strip(),
-            f"Госномер: {vehicle.get('plate_number') or '—'}",
-            f"СТС: {vehicle.get('registration_certificate') or '—'}",
-            f"Цвет: {vehicle.get('color') or '—'}",
-            "Документы:",
+            f"ФИО: {driver.get('full_name') or dash}",
+            f"ИИН: {driver.get('iin') or dash}",
+            f"Дата рождения: {driver.get('birth_date') or dash}",
+            f"Телефон: {driver.get('phone') or dash}",
+            f"Город: {driver.get('city') or dash}",
         ]
-        for key in ("driver_license", "id_card", "vehicle_registration_doc", "selfie_with_license"):
+        if driver.get("address"):
+            lines.append(f"Адрес: {driver.get('address')}")
+        lines.extend(
+            [
+                f"Стаж: {driver.get('driving_experience_since') or dash}",
+                f"ВУ: {driver.get('driver_license_number') or dash}",
+                f"Авто: {vehicle.get('brand') or dash} {vehicle.get('model') or ''}".strip(),
+                f"Госномер: {vehicle.get('plate_number') or dash}",
+                f"СТС: {vehicle.get('registration_certificate') or dash}",
+                f"Цвет: {vehicle.get('color') or dash}",
+                "Документы:",
+            ]
+        )
+        for key in ("driver_license", "vehicle_registration_doc"):
             status = "есть" if documents.get(key) else "нет"
             lines.append(f"- {self._doc_label(key)}: {status}")
+        for key in ("id_card", "selfie_with_license"):
+            if documents.get(key):
+                lines.append(f"- {self._doc_label(key)}: есть")
+        if draft.get("ready_for_yandex") or draft.get("is_registration_complete"):
+            lines.append("")
+            lines.append("Статус: анкета готова к отправке в Яндекс.")
         lines.append("")
         lines.append('Если всё верно, напишите "Подтверждаю".')
-        lines.append("Если нужно исправить — напишите, что изменить.")
+        lines.append("Если нужно исправить - напишите, что изменить.")
         return "\n".join(lines)
 
     def build_missing_text(self, missing_fields: list[str]) -> str:

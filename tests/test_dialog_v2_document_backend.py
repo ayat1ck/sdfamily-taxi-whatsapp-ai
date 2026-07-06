@@ -52,6 +52,7 @@ class DialogV2DocumentBackendTests(unittest.TestCase):
                 "driver_license_issue_date": "2023-05-12",
                 "driver_license_expires_at": "2033-05-11",
                 "driving_experience_since": "2023-05-12",
+                "city": "Astana",
             },
             "vehicle": {
                 "brand": "Lada",

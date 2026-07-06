@@ -102,6 +102,12 @@ def _store_draft(driver, draft: dict) -> None:
     flag_modified(driver, "support_context_json")
 
 
+def _prepare_draft_for_missing_check(driver, draft: dict) -> None:
+    draft.setdefault("driver", {})
+    if not draft["driver"].get("phone"):
+        draft["driver"]["phone"] = driver.phone or driver.whatsapp_phone
+
+
 def _normalize_text(value: str | None) -> str:
     return normalize_text_token(repair_mojibake(value or ""))
 
@@ -211,6 +217,7 @@ class RegistrationFlow:
             confidence=resolved.confidence,
         )
         merged = merge_result.draft
+        _prepare_draft_for_missing_check(driver, merged)
         merged["last_document"] = {
             "file_name": message.filename,
             "mime_type": mime_type,
@@ -268,6 +275,7 @@ class RegistrationFlow:
 
     def start(self, db, driver, application) -> StructuredReply:
         draft = _ensure_registration_context(driver)
+        _prepare_draft_for_missing_check(driver, draft)
         driver.state = DialogV2State.REGISTRATION_DOCUMENT_COLLECTION
         set_application_status(db, application, "waiting_documents")
         _store_draft(driver, draft)
@@ -376,6 +384,9 @@ class RegistrationFlow:
             DialogV2State.REGISTRATION_CONFIRMATION,
             DialogV2State.READY_TO_SEND_YANDEX,
         }:
+            current_missing = self.missing.calculate(draft)
+            if "city" in current_missing and len(current_missing) == 1 and text:
+                draft.setdefault("driver", {})["city"] = text
             self.missing.calculate(draft)
             _store_draft(driver, draft)
             missing = draft["missing_fields"]

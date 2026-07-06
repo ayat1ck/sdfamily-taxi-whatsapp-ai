@@ -10,6 +10,7 @@ class MissingFieldsCalculator:
         "full_name",
         "iin",
         "birth_date",
+        "city",
         "driver_license_number",
         "driver_license_issue_date",
         "driver_license_expires_at",
