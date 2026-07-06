@@ -37,6 +37,8 @@ def build_v2_trace(
         "pending_action_after": pending_action_after,
         "global_intent": metadata.get("global_intent"),
         "global_action": metadata.get("global_action"),
+        "faq_source": metadata.get("faq_source"),
+        "faq_matched_key": metadata.get("faq_matched_key"),
         "draft_ready_for_yandex": metadata.get("draft_ready_for_yandex"),
         "missing_fields": metadata.get("missing_fields"),
         "reply_type": reply.type if reply else None,
