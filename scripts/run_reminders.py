@@ -5,15 +5,21 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.ai_traces.models import MessageAITrace  # noqa: F401
 from app.applications.models import Application
 from app.applications.service import set_application_status
+from app.audit.models import ApplicationAuditLog  # noqa: F401
 from app.conversation_events.service import create_conversation_event
 from app.database.session import SessionLocal
 from app.dialog.engine import DialogueEngine
 from app.dialog.prompts import PROMPTS
 from app.dialog.states import DialogueState
+from app.documents.models import Document  # noqa: F401
 from app.drivers.models import Driver
+from app.integration_jobs.models import IntegrationJob  # noqa: F401
 from app.messages.service import create_message
+from app.unknown_intents.models import UnknownIntent  # noqa: F401
+from app.vehicles.models import Vehicle  # noqa: F401
 from app.whatsapp.sender import WhatsAppSender
 
 
