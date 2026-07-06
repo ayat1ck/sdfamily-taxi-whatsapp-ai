@@ -159,14 +159,25 @@ class RegistrationFlow:
             return "driver_license"
         return document_type or "unknown"
 
-    def _apply_extraction(self, db, driver, message, draft: dict, document_type: str, media_bytes: bytes | None = None, mime_type: str | None = None) -> tuple[str, dict[str, str], list[str]]:
+    def _apply_extraction(
+        self,
+        db,
+        driver,
+        message,
+        draft: dict,
+        document_type: str,
+        media_bytes: bytes | None = None,
+        mime_type: str | None = None,
+        extraction=None,
+    ) -> tuple[str, dict[str, str], list[str]]:
         if media_bytes is None:
             media_bytes, fetched_mime_type = self._fetch_media_bytes(message)
             mime_type = mime_type or fetched_mime_type
         else:
             media_bytes = media_bytes if media_bytes is not None else b""
         mime_type = mime_type or message.mime_type
-        extraction = self.extractor.extract(media_bytes, mime_type=mime_type, expected_document_type=document_type)
+        if extraction is None:
+            extraction = self.extractor.extract(media_bytes, mime_type=mime_type, expected_document_type=document_type)
         extraction.document_type = self._canonical_document_type(extraction.document_type)
         normalized_fields, _ = normalize_extracted_fields(extraction, document_type=extraction.document_type or document_type)
         ocr_text = " ".join(
@@ -303,6 +314,7 @@ class RegistrationFlow:
                 resolved.document_type,
                 media_bytes=media_bytes,
                 mime_type=media_mime_type,
+                extraction=extraction,
             )
             driver.state = DialogV2State.REGISTRATION_MISSING_FIELDS if missing_fields else DialogV2State.REGISTRATION_CONFIRMATION
             reply = self._post_document_reply(resolved_type, extracted_fields, missing_fields, draft)
