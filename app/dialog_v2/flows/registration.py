@@ -261,6 +261,8 @@ class RegistrationFlow:
                 "document_type": document_type,
                 "extracted_fields": extracted_fields,
                 "missing_fields": missing_fields,
+                "is_registration_complete": not missing_fields,
+                "ready_for_yandex": not missing_fields,
             },
         )
 
@@ -383,7 +385,12 @@ class RegistrationFlow:
                     text=self.summary.build_missing_text(missing),
                     next_flow=DialogV2State.REGISTRATION_MISSING_FIELDS,
                     flow_state=DialogV2State.REGISTRATION_MISSING_FIELDS,
-                    metadata={"intent": "missing_fields", "missing_fields": missing},
+                    metadata={
+                        "intent": "missing_fields",
+                        "missing_fields": missing,
+                        "is_registration_complete": False,
+                        "ready_for_yandex": False,
+                    },
                 )
                 return reply
             driver.state = DialogV2State.REGISTRATION_CONFIRMATION
@@ -392,7 +399,12 @@ class RegistrationFlow:
                 text=self._final_summary(draft),
                 next_flow=DialogV2State.REGISTRATION_CONFIRMATION,
                 flow_state=DialogV2State.REGISTRATION_CONFIRMATION,
-                metadata={"intent": "summary", "draft": draft},
+                metadata={
+                    "intent": "summary",
+                    "draft": draft,
+                    "is_registration_complete": True,
+                    "ready_for_yandex": True,
+                },
             )
 
         if message.message_type in {"image", "document"}:

@@ -4,7 +4,6 @@ from __future__ import annotations
 class MissingFieldsCalculator:
     REQUIRED_DOCUMENTS = (
         "driver_license",
-        "id_card",
         "vehicle_registration_doc",
     )
     DRIVER_FIELDS = (
@@ -42,7 +41,10 @@ class MissingFieldsCalculator:
         for field in self.VEHICLE_FIELDS:
             if not vehicle.get(field):
                 missing.append(field)
+        is_complete = not missing
         draft["missing_fields"] = missing
+        draft["is_registration_complete"] = is_complete
+        draft["ready_for_yandex"] = is_complete
         return missing
 
     def _document_flags(self, documents: dict) -> dict[str, bool]:

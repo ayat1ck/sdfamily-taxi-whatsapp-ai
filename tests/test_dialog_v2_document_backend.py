@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.dialog_v2.document_types import DocumentTypeResolver
+from app.dialog_v2.draft_merger import DraftMerger
+from app.dialog_v2.missing_fields import MissingFieldsCalculator
 from app.documents.extraction import DocumentExtractionResult, DocumentExtractionService
 
 
@@ -39,6 +41,63 @@ class DialogV2DocumentBackendTests(unittest.TestCase):
             confidence=0.9,
         )
         self.assertEqual(result.document_type, "driver_license")
+
+    def test_id_card_is_not_required_for_yandex_ready_mvp(self):
+        draft = {
+            "driver": {
+                "full_name": "Test Driver",
+                "iin": "041204501406",
+                "birth_date": "2004-12-04",
+                "driver_license_number": "XT 164890",
+                "driver_license_issue_date": "2023-05-12",
+                "driver_license_expires_at": "2033-05-11",
+                "driving_experience_since": "2023-05-12",
+            },
+            "vehicle": {
+                "brand": "Lada",
+                "model": "21703",
+                "year": "2013",
+                "plate_number": "311ARP17",
+                "color": "WHITE",
+                "registration_certificate": "YA99788458",
+            },
+            "documents": {
+                "driver_license": {"received": True},
+                "id_card": None,
+                "vehicle_registration_doc": {"received": True},
+            },
+        }
+
+        missing = MissingFieldsCalculator().calculate(draft)
+
+        self.assertEqual(missing, [])
+        self.assertTrue(draft["is_registration_complete"])
+        self.assertTrue(draft["ready_for_yandex"])
+
+    def test_driver_license_issue_date_fills_experience_since(self):
+        draft = {
+            "driver": {
+                "driver_license_number": None,
+                "driver_license_issue_date": None,
+                "driving_experience_since": None,
+            },
+            "vehicle": {},
+            "documents": {"driver_license": None},
+            "confidence_by_field": {},
+        }
+
+        result = DraftMerger().merge(
+            current_draft=draft,
+            document_type="driver_license",
+            extracted_fields={
+                "driver_license_number": "XT 164890",
+                "driver_license_issue_date": "2023-05-12",
+            },
+            confidence=0.9,
+        )
+
+        self.assertEqual(result.draft["driver"]["driving_experience_since"], "2023-05-12")
+        self.assertIn("driving_experience_since", result.updated_fields)
 
     def test_openai_provider_is_first_when_configured(self):
         service = DocumentExtractionService()

@@ -80,4 +80,12 @@ class DraftMerger:
             else:
                 draft.setdefault("extra_fields", {})[key] = value
 
+        if (
+            not draft["driver"].get("driving_experience_since")
+            and draft["driver"].get("driver_license_issue_date")
+        ):
+            draft["driver"]["driving_experience_since"] = draft["driver"]["driver_license_issue_date"]
+            confidence_by_field["driving_experience_since"] = confidence_by_field.get("driver_license_issue_date", confidence)
+            updated_fields.append("driving_experience_since")
+
         return DraftMergeResult(draft=draft, updated_fields=updated_fields)
