@@ -127,37 +127,36 @@ class DocumentExtractionService:
             )
         settings = get_settings()
         failures: list[str] = []
-        if settings.gemini_api_key and genai is not None:
-            try:
-                result = self._extract_with_gemini(
-                    image_bytes,
-                    mime_type=mime_type,
-                    expected_document_type=expected_document_type,
-                )
-                if self._has_meaningful_extraction(result):
-                    result.provider_status = "success"
-                    return result
-                failures.append("gemini_empty")
-            except Exception as exc:
-                logger.warning("Gemini document extraction failed: %s", exc)
-                failures.append(f"gemini_error:{exc}")
-        if settings.openai_api_key:
-            try:
-                result = self._extract_with_openai(
-                    image_bytes,
-                    mime_type=mime_type,
-                    expected_document_type=expected_document_type,
-                )
-                if self._has_meaningful_extraction(result):
-                    if failures:
-                        result.provider_status = "fallback_success"
-                    else:
-                        result.provider_status = "success"
-                    return result
-                failures.append("openai_empty")
-            except Exception as exc:
-                logger.warning("OpenAI document extraction failed: %s", exc)
-                failures.append(f"openai_error:{exc}")
+        providers = ["openai", "gemini"] if settings.ai_provider == "openai" else ["gemini", "openai"]
+        for provider in providers:
+            if provider == "gemini" and settings.gemini_api_key and genai is not None:
+                try:
+                    result = self._extract_with_gemini(
+                        image_bytes,
+                        mime_type=mime_type,
+                        expected_document_type=expected_document_type,
+                    )
+                    if self._has_meaningful_extraction(result, expected_document_type=expected_document_type):
+                        result.provider_status = "fallback_success" if failures else "success"
+                        return result
+                    failures.append("gemini_empty")
+                except Exception as exc:
+                    logger.warning("Gemini document extraction failed: %s", exc)
+                    failures.append(f"gemini_error:{exc}")
+            if provider == "openai" and settings.openai_api_key:
+                try:
+                    result = self._extract_with_openai(
+                        image_bytes,
+                        mime_type=mime_type,
+                        expected_document_type=expected_document_type,
+                    )
+                    if self._has_meaningful_extraction(result, expected_document_type=expected_document_type):
+                        result.provider_status = "fallback_success" if failures else "success"
+                        return result
+                    failures.append("openai_empty")
+                except Exception as exc:
+                    logger.warning("OpenAI document extraction failed: %s", exc)
+                    failures.append(f"openai_error:{exc}")
         return DocumentExtractionResult(
             provider_status="provider_error" if any("error:" in item for item in failures) else "empty",
             provider_chain=failures,
@@ -259,10 +258,13 @@ class DocumentExtractionService:
         return parsed
 
     @staticmethod
-    def _has_meaningful_extraction(result: DocumentExtractionResult) -> bool:
+    def _has_meaningful_extraction(result: DocumentExtractionResult, *, expected_document_type: str) -> bool:
+        fields = normalize_extracted_fields(result, document_type=result.document_type or "unknown")[0]
+        if result.document_type == "selfie_with_license" and expected_document_type != "selfie_with_license" and not fields:
+            return False
         if result.document_type and result.document_type != "unknown":
             return True
-        return bool(normalize_extracted_fields(result, document_type=result.document_type or "unknown")[0])
+        return bool(fields)
 
 
 def normalize_extracted_fields(

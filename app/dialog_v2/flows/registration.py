@@ -13,6 +13,7 @@ from app.documents.service import upsert_document
 from app.messages.service import create_message
 from app.utils.text import repair_mojibake
 from app.utils.validators import normalize_text_token
+from app.whatsapp.media import WhatsAppMediaClient
 
 
 DOCUMENT_OPTIONS_REPLY = (
@@ -111,6 +112,7 @@ class RegistrationFlow:
         self.missing = MissingFieldsCalculator()
         self.summary = SummaryBuilder()
         self.extractor = DocumentExtractionService()
+        self.media = WhatsAppMediaClient()
         self.bus = EventBus()
 
     def _store_message(self, db, driver, message) -> None:
@@ -143,14 +145,43 @@ class RegistrationFlow:
         )
         self.bus.emit(db, driver, "document_uploaded", {"document_type": document_type, "file_name": message.filename})
 
-    def _apply_extraction(self, db, driver, message, draft: dict, document_type: str) -> tuple[str, dict[str, str], list[str]]:
-        extraction = self.extractor.extract(b"", mime_type=message.mime_type, expected_document_type=document_type)
+    def _fetch_media_bytes(self, message) -> tuple[bytes, str | None]:
+        if not message.media_id:
+            return b"", message.mime_type
+        try:
+            image_bytes, fetched_mime_type = self.media.fetch_media(message.media_id)
+            return image_bytes, fetched_mime_type or message.mime_type
+        except Exception:
+            return b"", message.mime_type
+
+    def _canonical_document_type(self, document_type: str | None) -> str:
+        if document_type in {"driver_license_front", "driver_license_back"}:
+            return "driver_license"
+        return document_type or "unknown"
+
+    def _apply_extraction(self, db, driver, message, draft: dict, document_type: str, media_bytes: bytes | None = None, mime_type: str | None = None) -> tuple[str, dict[str, str], list[str]]:
+        if media_bytes is None:
+            media_bytes, fetched_mime_type = self._fetch_media_bytes(message)
+            mime_type = mime_type or fetched_mime_type
+        else:
+            media_bytes = media_bytes if media_bytes is not None else b""
+        mime_type = mime_type or message.mime_type
+        extraction = self.extractor.extract(media_bytes, mime_type=mime_type, expected_document_type=document_type)
+        extraction.document_type = self._canonical_document_type(extraction.document_type)
         normalized_fields, _ = normalize_extracted_fields(extraction, document_type=extraction.document_type or document_type)
-        ocr_text = " ".join(str(value) for value in normalized_fields.values())
+        ocr_text = " ".join(
+            str(value)
+            for value in [
+                extraction.document_type,
+                " ".join(extraction.additional_document_types),
+                *normalized_fields.values(),
+            ]
+            if value
+        )
         resolved = self.resolver.resolve(
             current_flow="registration_document_collection",
             current_state=driver.state,
-            mime_type=message.mime_type,
+            mime_type=mime_type,
             filename=message.filename,
             extracted_fields=normalized_fields,
             ocr_text=ocr_text,
@@ -165,9 +196,13 @@ class RegistrationFlow:
         merged = merge_result.draft
         merged["last_document"] = {
             "file_name": message.filename,
-            "mime_type": message.mime_type,
+            "mime_type": mime_type,
+            "media_id": message.media_id,
             "document_type": resolved.document_type,
             "confidence": resolved.confidence,
+            "media_downloaded": bool(media_bytes),
+            "provider_status": extraction.provider_status,
+            "failure_reason": extraction.failure_reason,
         }
         merged["pending_action"] = None if resolved.document_type != "unknown" else "confirm_document_type"
         missing_fields = self.missing.calculate(merged)
@@ -179,7 +214,7 @@ class RegistrationFlow:
 
     def _unknown_document_reply(self, draft: dict, message) -> StructuredReply:
         draft["pending_action"] = "confirm_document_type"
-        draft["last_document"] = {"file_name": message.filename, "mime_type": message.mime_type}
+        draft["last_document"] = {"file_name": message.filename, "mime_type": message.mime_type, "media_id": message.media_id}
         return StructuredReply(
             text=DOCUMENT_OPTIONS_REPLY,
             next_flow=DialogV2State.REGISTRATION_DOCUMENT_COLLECTION,
@@ -236,21 +271,39 @@ class RegistrationFlow:
             return self.handle_text(db, driver, application, message)
 
         if message.message_type in {"image", "document"}:
-            extraction = self.extractor.extract(b"", mime_type=message.mime_type, expected_document_type="unknown")
+            media_bytes, media_mime_type = self._fetch_media_bytes(message)
+            extraction = self.extractor.extract(media_bytes, mime_type=media_mime_type, expected_document_type="unknown")
+            extraction.document_type = self._canonical_document_type(extraction.document_type)
             normalized_fields, _ = normalize_extracted_fields(extraction, document_type=extraction.document_type or "unknown")
             resolved = self.resolver.resolve(
                 current_flow="registration_document_collection",
                 current_state=driver.state,
-                mime_type=message.mime_type,
+                mime_type=media_mime_type,
                 filename=message.filename,
                 extracted_fields=normalized_fields,
-                ocr_text=" ".join(f"{k}:{v}" for k, v in normalized_fields.items()),
+                ocr_text=" ".join(
+                    str(value)
+                    for value in [
+                        extraction.document_type,
+                        " ".join(extraction.additional_document_types),
+                        *[f"{k}:{v}" for k, v in normalized_fields.items()],
+                    ]
+                    if value
+                ),
                 confidence=extraction.confidence,
             )
             if resolved.document_type == "unknown":
                 self._save_document(db, driver, message, "unknown", status="pending_confirmation")
                 return self._unknown_document_reply(draft, message)
-            resolved_type, extracted_fields, missing_fields = self._apply_extraction(db, driver, message, draft, resolved.document_type)
+            resolved_type, extracted_fields, missing_fields = self._apply_extraction(
+                db,
+                driver,
+                message,
+                draft,
+                resolved.document_type,
+                media_bytes=media_bytes,
+                mime_type=media_mime_type,
+            )
             driver.state = DialogV2State.REGISTRATION_MISSING_FIELDS if missing_fields else DialogV2State.REGISTRATION_CONFIRMATION
             reply = self._post_document_reply(resolved_type, extracted_fields, missing_fields, draft)
             self.bus.emit(db, driver, "summary_shown" if not missing_fields else "draft_updated", {"missing_fields": missing_fields})
@@ -262,6 +315,7 @@ class RegistrationFlow:
         last_doc = draft.get("last_document") or {}
         message.filename = last_doc.get("file_name")
         message.mime_type = last_doc.get("mime_type")
+        message.media_id = last_doc.get("media_id")
         draft["pending_action"] = None
         resolved_type, extracted_fields, missing_fields = self._apply_extraction(db, driver, message, draft, selected_type)
         driver.state = DialogV2State.REGISTRATION_MISSING_FIELDS if missing_fields else DialogV2State.REGISTRATION_CONFIRMATION
