@@ -34,6 +34,16 @@ def fake_extraction(**fields):
     )
 
 
+def fake_yandex_submit(db, driver, application):
+    application.status = "sent_to_yandex"
+    application.yandex_status = "sent_to_yandex"
+    application.yandex_driver_id = "yandex-driver-1"
+    application.yandex_vehicle_id = "yandex-vehicle-1"
+    db.add(application)
+    db.flush()
+    return application
+
+
 class DialogV2Tests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.NamedTemporaryFile(prefix="dialog-v2-", suffix=".db", delete=False)

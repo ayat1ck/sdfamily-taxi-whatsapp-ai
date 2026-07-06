@@ -4,12 +4,12 @@ from copy import deepcopy
 
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.applications.service import set_application_status
 from app.dialog_v2.flows.manager import ManagerHandoffFlow
 from app.dialog_v2.missing_fields import MissingFieldsCalculator
 from app.dialog_v2.response import StructuredReply
 from app.dialog_v2.states import DialogV2State
 from app.dialog_v2.summary_builder import SummaryBuilder
+from app.dialog_v2.yandex_auto_submit import DialogV2YandexAutoSubmit
 from app.utils.text import repair_mojibake
 from app.utils.validators import normalize_text_token
 
@@ -68,6 +68,7 @@ class GlobalIntentRouter:
         self.summary = SummaryBuilder()
         self.missing = MissingFieldsCalculator()
         self.manager = ManagerHandoffFlow()
+        self.yandex_auto_submit = DialogV2YandexAutoSubmit()
 
     def handle(self, db, driver, application, message, registration_flow=None) -> StructuredReply | None:
         pending_action = (_draft(driver) or {}).get("pending_action")
@@ -116,6 +117,9 @@ class GlobalIntentRouter:
                 self.missing.calculate(draft)
                 _save_draft(driver, draft)
                 if draft.get("ready_for_yandex"):
+                    reply = self.yandex_auto_submit.submit(db, driver, application, draft)
+                    reply.metadata.update(self._metadata("confirmation", "submit_to_yandex", driver))
+                    return reply
                     driver.state = DialogV2State.READY_TO_SEND_YANDEX
                     set_application_status(db, application, "ready_to_send_yandex")
                     return StructuredReply(

@@ -12,6 +12,7 @@ from app.dialog_v2.missing_fields import MissingFieldsCalculator
 from app.dialog_v2.response import StructuredReply
 from app.dialog_v2.states import DialogV2State
 from app.dialog_v2.summary_builder import SummaryBuilder
+from app.dialog_v2.yandex_auto_submit import DialogV2YandexAutoSubmit
 from app.documents.extraction import DocumentExtractionService, normalize_extracted_fields
 from app.documents.service import upsert_document
 from app.messages.service import create_message
@@ -126,6 +127,7 @@ class RegistrationFlow:
         self.extractor = DocumentExtractionService()
         self.media = WhatsAppMediaClient()
         self.bus = EventBus()
+        self.yandex_auto_submit = DialogV2YandexAutoSubmit()
 
     def _store_message(self, db, driver, message) -> None:
         create_message(
@@ -368,15 +370,7 @@ class RegistrationFlow:
             return self._confirm_document_type(db, driver, application, message, draft, mapping[normalized])
 
         if normalized in {"подтверждаю", "да", "ок", "ok"}:
-            driver.state = DialogV2State.READY_TO_SEND_YANDEX
-            set_application_status(db, application, "ready_to_send_yandex")
-            self.bus.emit(db, driver, "registration_confirmed", {"draft": draft})
-            return StructuredReply(
-                text="Принято. Заявка готова к следующему этапу.",
-                next_flow=DialogV2State.READY_TO_SEND_YANDEX,
-                flow_state=DialogV2State.READY_TO_SEND_YANDEX,
-                metadata={"intent": "confirmation"},
-            )
+            return self.yandex_auto_submit.submit(db, driver, application, draft)
 
         if driver.state in {
             DialogV2State.REGISTRATION_DOCUMENT_COLLECTION,
