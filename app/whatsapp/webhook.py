@@ -92,7 +92,12 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
                 replies.append({"phone": parsed.sender_phone, "reply": ""})
                 continue
 
+        use_dialog_v2 = _dialog_v2_enabled_for_sender(settings, parsed.sender_phone)
         driver = get_or_create_driver(db, parsed.sender_phone)
+        if use_dialog_v2:
+            # WhatsApp can deliver multiple media messages for the same chat concurrently.
+            # Lock the driver row so registration_draft updates are applied in order.
+            driver = db.scalar(select(Driver).where(Driver.id == driver.id).with_for_update()) or driver
         application = db.scalar(select(Application).where(Application.driver_id == driver.id))
         if driver.dialog_mode in {"manual", "paused", "closed"}:
             driver.last_message_at = datetime.utcnow()
@@ -114,7 +119,6 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
             replies.append({"phone": driver.whatsapp_phone, "reply": ""})
             continue
 
-        use_dialog_v2 = _dialog_v2_enabled_for_sender(settings, parsed.sender_phone)
         state_before = driver.state
         pending_menu_before = (driver.support_context_json or {}).get("pending_menu")
         started_at = perf_counter()
