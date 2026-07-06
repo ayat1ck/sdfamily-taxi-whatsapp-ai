@@ -107,7 +107,7 @@ services:
     name: sdfamily-taxi-reminders
     runtime: docker
     schedule: "*/30 * * * *"
-    dockerCommand: python scripts/run_reminders.py
+    dockerCommand: python -m scripts.run_reminders
     envVars:
       - key: APP_ENV
         value: production
