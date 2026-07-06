@@ -197,6 +197,8 @@ class DialogV2SerializerTests(unittest.TestCase):
             state_after="registration_document_collection",
             pending_menu_before=None,
             pending_menu_after=None,
+            pending_action_before=None,
+            pending_action_after=None,
             reply=reply,
             duration_ms=12,
         )

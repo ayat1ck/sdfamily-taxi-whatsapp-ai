@@ -7,6 +7,7 @@ from app.dialog_v2.flows.manager import ManagerHandoffFlow
 from app.dialog_v2.flows.profile_update import ProfileUpdateFlow
 from app.dialog_v2.flows.registration import RegistrationFlow
 from app.dialog_v2.flows.support import SupportFlow
+from app.dialog_v2.global_intents import GlobalIntentRouter
 from app.dialog_v2.intent import (
     looks_like_existing_driver,
     looks_like_faq,
@@ -24,6 +25,7 @@ class Router:
         self.support = SupportFlow()
         self.faq = FAQFlow()
         self.manager = ManagerHandoffFlow()
+        self.global_intents = GlobalIntentRouter()
 
     def _pending_menu(self, db, driver, application, message: ParsedWhatsAppMessage):
         context = dict(driver.support_context_json or {})
@@ -37,6 +39,10 @@ class Router:
         return None
 
     def route(self, db, driver, application, message: ParsedWhatsAppMessage) -> DialogContext:
+        global_reply = self.global_intents.handle(db, driver, application, message, registration_flow=self.registration)
+        if global_reply is not None:
+            return DialogContext(flow=global_reply.flow or "global", stage=global_reply.state or driver.state, intent=global_reply.metadata.get("intent", "global"), structured_reply=global_reply)
+
         if message.message_type in {"image", "document"}:
             reply = self.registration.handle_document(db, driver, application, message)
             return DialogContext(flow="registration", stage=driver.state, intent=reply.metadata.get("intent", "registration"), structured_reply=reply)

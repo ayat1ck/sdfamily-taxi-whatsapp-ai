@@ -551,6 +551,149 @@ class DialogV2Tests(unittest.TestCase):
             self.assertIn("Документ получил: водительское удостоверение", reply.text)
             self.assertEqual(reply.next_flow, "registration_confirmation")
 
+    def _ready_registration_draft(self):
+        return {
+            "driver": {
+                "full_name": "ХАЛИЕВ ОМАР",
+                "iin": "041204501406",
+                "birth_date": "2004-12-04",
+                "driving_experience_since": "2023-05-12",
+                "driver_license_number": "XT 164890",
+                "driver_license_issue_date": "2023-05-12",
+                "driver_license_expires_at": "2033-05-11",
+            },
+            "vehicle": {
+                "brand": "Lada",
+                "model": "21703",
+                "year": "2013",
+                "plate_number": "311ARP17",
+                "color": "WHITE",
+                "registration_certificate": "YA99788458",
+                "vin": "XTA217030E0458846",
+            },
+            "documents": {
+                "driver_license": {"received": True},
+                "id_card": None,
+                "vehicle_registration_doc": {"received": True},
+                "selfie_with_license": None,
+            },
+            "missing_fields": ["id_card"],
+            "confidence_by_field": {},
+        }
+
+    def test_global_change_driver_license_during_registration_sets_pending_action(self):
+        with self.SessionLocal() as db:
+            driver = get_or_create_driver(db, "+77000000016")
+            driver.state = "registration_missing_fields"
+            driver.support_context_json = {"registration_draft": self._ready_registration_draft()}
+            db.commit()
+
+            reply = self._send(db, driver, message_type="text", text="поменять ВУ", provider_message_id="msg-16")
+            db.commit()
+
+            draft = driver.support_context_json["registration_draft"]
+            self.assertEqual(draft["pending_action"], "replace_driver_license")
+            self.assertIn("заменим ВУ", reply.text)
+            self.assertEqual(reply.metadata["global_action"], "replace_driver_license")
+
+    def test_global_operator_during_registration_goes_to_manager(self):
+        with self.SessionLocal() as db:
+            driver = get_or_create_driver(db, "+77000000017")
+            driver.state = "registration_missing_fields"
+            driver.support_context_json = {"registration_draft": self._ready_registration_draft()}
+            db.commit()
+
+            reply = self._send(db, driver, message_type="text", text="оператор", provider_message_id="msg-17")
+            db.commit()
+
+            self.assertEqual(reply.flow, "manager")
+            self.assertTrue(reply.requires_manager)
+            self.assertEqual(driver.dialog_mode, "manual")
+
+    def test_global_show_summary_and_missing_during_registration(self):
+        with self.SessionLocal() as db:
+            driver = get_or_create_driver(db, "+77000000018")
+            driver.state = "registration_missing_fields"
+            draft = self._ready_registration_draft()
+            draft["driver"]["driving_experience_since"] = None
+            driver.support_context_json = {"registration_draft": draft}
+            db.commit()
+
+            summary_reply = self._send(db, driver, message_type="text", text="показать анкету", provider_message_id="msg-18a")
+            missing_reply = self._send(db, driver, message_type="text", text="что осталось", provider_message_id="msg-18b")
+            db.commit()
+
+            self.assertIn("Проверьте данные", summary_reply.text)
+            self.assertIn("Стаж", missing_reply.text)
+            self.assertNotIn("id_card", missing_reply.text)
+
+    def test_global_confirmation_ready_draft_moves_to_yandex_ready(self):
+        with self.SessionLocal() as db:
+            driver = get_or_create_driver(db, "+77000000019")
+            driver.state = "registration_confirmation"
+            draft = self._ready_registration_draft()
+            draft["ready_for_yandex"] = True
+            draft["is_registration_complete"] = True
+            draft["missing_fields"] = []
+            driver.support_context_json = {"registration_draft": draft}
+            db.commit()
+
+            reply = self._send(db, driver, message_type="text", text="подтверждаю", provider_message_id="msg-19")
+            db.commit()
+
+            application = db.scalar(select(Application).where(Application.driver_id == driver.id))
+            self.assertEqual(driver.state, "ready_to_send_yandex")
+            self.assertEqual(application.status, "ready_to_send_yandex")
+            self.assertTrue(reply.metadata["draft_ready_for_yandex"])
+
+    def test_old_draft_with_id_card_missing_recalculates_without_id_card(self):
+        with self.SessionLocal() as db:
+            driver = get_or_create_driver(db, "+77000000020")
+            driver.state = "registration_missing_fields"
+            driver.support_context_json = {"registration_draft": self._ready_registration_draft()}
+            db.commit()
+
+            reply = self._send(db, driver, message_type="text", text="что осталось", provider_message_id="msg-20")
+            db.commit()
+
+            draft = driver.support_context_json["registration_draft"]
+            self.assertEqual(draft["missing_fields"], [])
+            self.assertTrue(draft["ready_for_yandex"])
+            self.assertIn("ничего", reply.text.lower())
+
+    def test_pending_replace_driver_license_image_replaces_document(self):
+        with self.SessionLocal() as db, patch("app.dialog_v2.flows.registration.DocumentExtractionService.extract") as extract:
+            extract.return_value = fake_extraction(
+                document_type="driver_license",
+                driver_license_number="XT 999999",
+                driver_license_issue_date="2024-01-01",
+                driver_license_expires_at="2034-01-01",
+                confidence=0.95,
+            )
+            driver = get_or_create_driver(db, "+77000000021")
+            driver.state = "registration_missing_fields"
+            draft = self._ready_registration_draft()
+            draft["pending_action"] = "replace_driver_license"
+            driver.support_context_json = {"registration_draft": draft}
+            db.commit()
+
+            reply = self._send(
+                db,
+                driver,
+                message_type="image",
+                text=None,
+                provider_message_id="msg-21",
+                media_id="media-21",
+                mime_type="image/jpeg",
+                filename="new-vu.jpg",
+            )
+            db.commit()
+
+            draft = driver.support_context_json["registration_draft"]
+            self.assertEqual(draft["driver"]["driver_license_number"], "XT 999999")
+            self.assertIsNone(draft["pending_action"])
+            self.assertEqual(reply.metadata["global_action"], "replace_driver_license")
+
 
 if __name__ == "__main__":
     unittest.main()

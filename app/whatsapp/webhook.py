@@ -58,6 +58,14 @@ def _log_v2_trace(trace: dict[str, object]) -> None:
     logger.info("[V2] %s", trace)
 
 
+def _pending_action(driver: Driver) -> str | None:
+    draft = (driver.support_context_json or {}).get("registration_draft") or {}
+    if not isinstance(draft, dict):
+        return None
+    action = draft.get("pending_action")
+    return str(action) if action else None
+
+
 @router.get("", response_class=PlainTextResponse)
 def verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),
@@ -121,6 +129,7 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
 
         state_before = driver.state
         pending_menu_before = (driver.support_context_json or {}).get("pending_menu")
+        pending_action_before = _pending_action(driver)
         started_at = perf_counter()
         structured_reply = None
         outbound_payload = None
@@ -154,6 +163,8 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
                     state_after=state_after,
                     pending_menu_before=pending_menu_before,
                     pending_menu_after=pending_menu_after,
+                    pending_action_before=pending_action_before,
+                    pending_action_after=_pending_action(driver),
                     reply=structured_reply,
                     duration_ms=trace_duration_ms(started_at),
                 )
@@ -172,6 +183,8 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
                 state_after=driver.state,
                 pending_menu_before=pending_menu_before,
                 pending_menu_after=(driver.support_context_json or {}).get("pending_menu"),
+                pending_action_before=pending_action_before,
+                pending_action_after=_pending_action(driver),
                 reply=structured_reply,
                 duration_ms=trace_duration_ms(started_at),
                 error=error_text,

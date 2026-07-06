@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from app.utils.text import repair_mojibake
 from app.utils.validators import normalize_text_token
 
 
 def normalize_intent_text(text: str | None) -> str:
-    return normalize_text_token(text or "")
+    return normalize_text_token(repair_mojibake(text or ""))
 
 
 def looks_like_existing_driver(text: str | None) -> bool:
@@ -12,6 +13,8 @@ def looks_like_existing_driver(text: str | None) -> bool:
     return any(
         token in normalized
         for token in (
+            "я уже водитель",
+            "я уже подключен",
             "я уже водитель",
             "я уже подключен",
             "я уже подключён",
@@ -32,6 +35,10 @@ def looks_like_profile_update(text: str | None) -> bool:
             "изменить данные",
             "поменять номер",
             "изменить авто",
+            "поменять машину",
+            "изменить данные",
+            "поменять номер",
+            "изменить авто",
             "заменить стс",
             "заменить права",
             "сменить смз",
@@ -46,6 +53,9 @@ def looks_like_support_escalation(text: str | None) -> bool:
     return any(
         token in normalized
         for token in (
+            "не могу вывести деньги",
+            "оператор",
+            "менеджер",
             "не могу вывести деньги",
             "не выводятся деньги",
             "оператор",
@@ -65,6 +75,12 @@ def looks_like_faq(text: str | None) -> bool:
     return any(
         token in normalized
         for token in (
+            "какие условия",
+            "условия",
+            "комиссия",
+            "бонус",
+            "бонусы",
+            "байге",
             "какие условия",
             "условия",
             "комиссия",

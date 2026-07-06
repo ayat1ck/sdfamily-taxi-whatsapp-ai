@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from app.dialog_v2.response import StructuredReply
+from app.utils.text import repair_mojibake
+from app.utils.validators import normalize_text_token
 
 
 FAQ_KB = {
@@ -12,10 +14,18 @@ FAQ_KB = {
     "регистрация": "Для начала регистрации отправьте документы или напишите «Регистрация».",
 }
 
+FAQ_KB.update(
+    {
+        "бонус": "По бонусам и Байге условия могут меняться. Напишите менеджеру, и он подскажет актуальные акции.",
+        "бонусы": "По бонусам и Байге условия могут меняться. Напишите менеджеру, и он подскажет актуальные акции.",
+        "байге": "По Байге и бонусам условия могут меняться. Напишите менеджеру, и он подскажет актуальные акции.",
+    }
+)
+
 
 class FAQFlow:
     def handle(self, db, driver, application, message) -> StructuredReply:
-        text = (message.text or "").lower()
+        text = normalize_text_token(repair_mojibake(message.text or ""))
         for key, answer in FAQ_KB.items():
             if key in text:
                 return StructuredReply(text=answer, next_flow="faq", flow_state="faq", metadata={"intent": "faq"})
