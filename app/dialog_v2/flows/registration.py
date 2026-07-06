@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.applications.service import get_or_create_application, set_application_status
 from app.dialog_v2.document_types import DocumentTypeResolver
 from app.dialog_v2.draft_merger import DraftMerger
@@ -75,7 +79,7 @@ def _blank_draft() -> dict[str, object]:
 
 
 def _ensure_registration_context(driver) -> dict:
-    context = dict(driver.support_context_json or {})
+    context = deepcopy(driver.support_context_json or {})
     draft = context.get("registration_draft")
     if not isinstance(draft, dict):
         draft = _blank_draft()
@@ -86,14 +90,16 @@ def _ensure_registration_context(driver) -> dict:
     context["registration_draft"] = draft
     context["registration_mode"] = "document_first"
     driver.support_context_json = context
+    flag_modified(driver, "support_context_json")
     return draft
 
 
 def _store_draft(driver, draft: dict) -> None:
-    context = dict(driver.support_context_json or {})
-    context["registration_draft"] = draft
+    context = deepcopy(driver.support_context_json or {})
+    context["registration_draft"] = deepcopy(draft)
     context["registration_mode"] = "document_first"
     driver.support_context_json = context
+    flag_modified(driver, "support_context_json")
 
 
 def _normalize_text(value: str | None) -> str:

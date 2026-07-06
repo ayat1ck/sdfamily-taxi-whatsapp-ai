@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
 from datetime import datetime
 from time import perf_counter
@@ -212,11 +213,13 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
                     "outbound_payload": outbound_payload,
                     "reply": structured_reply.to_dict(),
                     "v2_trace": v2_trace,
+                    "support_context_json_snapshot": driver.support_context_json,
                 },
             )
             if structured_reply and structured_reply.manager_alert:
                 driver.support_context_json = dict(driver.support_context_json or {})
                 driver.support_context_json["v2_trace"] = v2_trace
+                flag_modified(driver, "support_context_json")
         db.commit()
         try:
             if use_dialog_v2:
