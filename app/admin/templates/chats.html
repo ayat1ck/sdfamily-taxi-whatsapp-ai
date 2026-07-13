@@ -51,6 +51,10 @@
             <div class="muted">{{ selected_driver.whatsapp_phone }}</div>
           </div>
           <div class="actions">
+            {% set wa_url = whatsapp_chat_url(selected_driver.whatsapp_phone) %}
+            {% if wa_url %}
+              <a class="button whatsapp" href="{{ wa_url }}" target="_blank" rel="noopener">WhatsApp</a>
+            {% endif %}
             <button class="secondary" onclick="switchMode('bot_active')">Бот</button>
             <button class="secondary" onclick="switchMode('manual')">Ручной</button>
             <button class="secondary" onclick="pauseChat()">Пауза</button>
@@ -182,6 +186,10 @@
             <h4 class="section-title">Профиль</h4>
             <div class="kv">
               <div><span>Телефон</span><strong>{{ selected_driver.whatsapp_phone }}</strong></div>
+              {% set wa_url = whatsapp_chat_url(selected_driver.whatsapp_phone) %}
+              {% if wa_url %}
+                <div><span>Написать</span><strong><a class="button whatsapp" href="{{ wa_url }}" target="_blank" rel="noopener">WhatsApp</a></strong></div>
+              {% endif %}
               <div><span>ФИО</span><strong>{{ selected_driver.full_name or "-" }}</strong></div>
               <div><span>Город</span><strong>{{ selected_driver.city or "-" }}</strong></div>
               <div><span>Адрес</span><strong>{{ selected_driver.address or "-" }}</strong></div>
@@ -282,11 +290,18 @@
       {% endif %}
     </aside>
 
-    <section class="chat-list">
+    <section class="chat-list" id="admin-chat-list">
+      {% set chat_query = ("?" + request.url.query) if request.url.query else "" %}
       {% for driver in drivers %}
         {% set application = driver.applications[0] if driver.applications else None %}
         {% set last_message = (driver.messages|sort(attribute='created_at'))[-1] if driver.messages else None %}
-        <a href="/admin/chats/{{ driver.id }}" class="chat-item {% if selected_driver and selected_driver.id == driver.id %}active{% endif %}">
+        {% set wa_url = whatsapp_chat_url(driver.whatsapp_phone) %}
+        <div
+          class="chat-item {% if selected_driver and selected_driver.id == driver.id %}active{% endif %}"
+          data-chat-href="/admin/chats/{{ driver.id }}{{ chat_query }}"
+          role="link"
+          tabindex="0"
+        >
           <strong>{{ driver.full_name or driver.whatsapp_phone }}</strong>
           <div class="muted">{{ driver.whatsapp_phone }}</div>
           <div style="margin:6px 0;" class="actions">
@@ -299,12 +314,79 @@
           </div>
           <div>{{ last_message.text if last_message and last_message.text else "—" }}</div>
           <div class="muted">{{ driver.last_message_at.strftime("%Y-%m-%d %H:%M:%S") if driver.last_message_at else "-" }}</div>
-        </a>
+          <div class="chat-item-actions">
+            {% if wa_url %}
+              <a class="button whatsapp" href="{{ wa_url }}" target="_blank" rel="noopener" data-stop-nav="1">WhatsApp</a>
+            {% endif %}
+          </div>
+        </div>
       {% else %}
         <div class="card muted">Нет чатов.</div>
       {% endfor %}
     </section>
   </div>
+
+  <script>
+    (function () {
+      const SCROLL_KEY = "adminChatListScroll";
+      const WINDOW_SCROLL_KEY = "adminChatWindowScroll";
+      const list = document.getElementById("admin-chat-list");
+
+      function saveChatListScroll() {
+        if (list) sessionStorage.setItem(SCROLL_KEY, String(list.scrollTop));
+        sessionStorage.setItem(WINDOW_SCROLL_KEY, String(window.scrollY || window.pageYOffset || 0));
+      }
+
+      function restoreChatListScroll() {
+        if (list) {
+          const saved = sessionStorage.getItem(SCROLL_KEY);
+          if (saved !== null) {
+            list.scrollTop = Number(saved) || 0;
+          }
+          const active = list.querySelector(".chat-item.active");
+          if (active) {
+            const top = active.offsetTop;
+            const bottom = top + active.offsetHeight;
+            const viewTop = list.scrollTop;
+            const viewBottom = viewTop + list.clientHeight;
+            if (top < viewTop || bottom > viewBottom) {
+              active.scrollIntoView({ block: "nearest", inline: "nearest" });
+            }
+          }
+        }
+        const windowSaved = sessionStorage.getItem(WINDOW_SCROLL_KEY);
+        if (windowSaved !== null && (!list || list.scrollHeight <= list.clientHeight + 4)) {
+          window.scrollTo(0, Number(windowSaved) || 0);
+        }
+      }
+
+      if (list) {
+        list.addEventListener("scroll", () => {
+          sessionStorage.setItem(SCROLL_KEY, String(list.scrollTop));
+        }, { passive: true });
+      }
+
+      document.querySelectorAll(".chat-item[data-chat-href]").forEach((item) => {
+        const openChat = () => {
+          saveChatListScroll();
+          window.location.href = item.getAttribute("data-chat-href");
+        };
+        item.addEventListener("click", (event) => {
+          if (event.target.closest("[data-stop-nav]")) return;
+          openChat();
+        });
+        item.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openChat();
+          }
+        });
+      });
+
+      restoreChatListScroll();
+      requestAnimationFrame(restoreChatListScroll);
+    })();
+  </script>
 
   {% if selected_driver and selected_application %}
   <script>

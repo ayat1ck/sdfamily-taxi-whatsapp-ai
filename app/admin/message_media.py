@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from app.messages.models import Message
@@ -62,3 +63,14 @@ def message_media_info(message: Message) -> MessageMediaInfo:
         kind=kind,
         preview_url=preview_url,
     )
+
+
+def whatsapp_chat_url(phone: str | None) -> str | None:
+    digits = re.sub(r"\D+", "", phone or "")
+    if not digits:
+        return None
+    if len(digits) == 11 and digits.startswith("8"):
+        digits = f"7{digits[1:]}"
+    elif len(digits) == 10:
+        digits = f"7{digits}"
+    return f"https://wa.me/{digits}"

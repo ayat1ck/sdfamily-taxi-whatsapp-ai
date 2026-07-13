@@ -227,10 +227,29 @@
       border: 1px solid var(--line);
       background: var(--panel);
       margin-bottom: 10px;
+      cursor: pointer;
     }
     .chat-item.active {
       border-color: var(--accent);
       background: linear-gradient(180deg, rgba(245,182,0,0.08), rgba(245,182,0,0.02));
+    }
+    .chat-item-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .chat-item-actions .button {
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+    .button.whatsapp {
+      background: #128c7e;
+      border-color: #128c7e;
+      color: #fff;
+    }
+    .button.whatsapp:hover {
+      filter: brightness(1.08);
     }
     .message-list {
       display: grid;

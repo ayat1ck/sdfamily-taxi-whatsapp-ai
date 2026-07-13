@@ -65,6 +65,13 @@ class MessageMediaTests(unittest.TestCase):
         self.assertEqual(parsed[0].media_id, "vid-1")
         self.assertEqual(parsed[1].media_id, "stk-1")
 
+    def test_whatsapp_chat_url_normalizes_kz_phone(self):
+        from app.admin.message_media import whatsapp_chat_url
+
+        self.assertEqual(whatsapp_chat_url("+7 708 405 21 07"), "https://wa.me/77084052107")
+        self.assertEqual(whatsapp_chat_url("87084052107"), "https://wa.me/77084052107")
+        self.assertIsNone(whatsapp_chat_url(""))
+
 
 if __name__ == "__main__":
     unittest.main()
