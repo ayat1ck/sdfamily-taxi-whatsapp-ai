@@ -70,9 +70,12 @@ class DraftMerger:
         if document_type == "selfie_with_license":
             return DraftMergeResult(draft=draft, updated_fields=updated_fields)
 
+        # STS / техпаспорт may list the vehicle owner, not the driver (power of attorney).
+        apply_driver_fields = document_type != "vehicle_registration_doc"
+
         for key, value in extracted_fields.items():
             if key in self.DRIVER_FIELDS:
-                if _pick_higher(draft["driver"], key, value, confidence_by_field, confidence):
+                if apply_driver_fields and _pick_higher(draft["driver"], key, value, confidence_by_field, confidence):
                     updated_fields.append(key)
             elif key in self.VEHICLE_FIELDS:
                 if _pick_higher(draft["vehicle"], key, value, confidence_by_field, confidence):

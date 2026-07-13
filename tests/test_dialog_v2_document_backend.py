@@ -5,7 +5,7 @@ from unittest.mock import patch
 from app.dialog_v2.document_types import DocumentTypeResolver
 from app.dialog_v2.draft_merger import DraftMerger
 from app.dialog_v2.missing_fields import MissingFieldsCalculator
-from app.documents.extraction import DocumentExtractionResult, DocumentExtractionService
+from app.documents.extraction import DocumentExtractionResult, DocumentExtractionService, normalize_extracted_fields
 
 
 class DialogV2DocumentBackendTests(unittest.TestCase):
@@ -99,6 +99,47 @@ class DialogV2DocumentBackendTests(unittest.TestCase):
 
         self.assertEqual(result.draft["driver"]["driving_experience_since"], "2023-05-12")
         self.assertIn("driving_experience_since", result.updated_fields)
+
+    def test_sts_owner_name_is_not_applied_to_driver(self):
+        draft = {
+            "driver": {"full_name": "Водитель Правильный"},
+            "vehicle": {},
+            "documents": {"vehicle_registration_doc": None},
+            "confidence_by_field": {"full_name": 0.5},
+        }
+        result = DraftMerger().merge(
+            current_draft=draft,
+            document_type="vehicle_registration_doc",
+            extracted_fields={
+                "full_name": "Владелец Чужой",
+                "iin": "900101300123",
+                "brand": "Toyota",
+                "model": "Camry",
+                "plate_number": "123ABC01",
+            },
+            confidence=0.99,
+        )
+        self.assertEqual(result.draft["driver"]["full_name"], "Водитель Правильный")
+        self.assertIsNone(result.draft["driver"].get("iin"))
+        self.assertEqual(result.draft["vehicle"]["brand"], "Toyota")
+        self.assertEqual(result.draft["vehicle"]["plate_number"], "123ABC01")
+        self.assertNotIn("full_name", result.updated_fields)
+
+    def test_normalize_strips_owner_identity_from_sts(self):
+        result = DocumentExtractionResult(
+            document_type="vehicle_registration_doc",
+            full_name="Владелец Чужой",
+            iin="900101300123",
+            brand="Toyota",
+            model="Camry",
+            plate_number="123ABC01",
+            confidence=0.95,
+        )
+        fields, recognized = normalize_extracted_fields(result, document_type="vehicle_registration_doc")
+        self.assertNotIn("full_name", fields)
+        self.assertNotIn("iin", fields)
+        self.assertEqual(fields["brand"], "Toyota")
+        self.assertNotIn("full_name", recognized)
 
     def test_openai_provider_is_first_when_configured(self):
         service = DocumentExtractionService()
