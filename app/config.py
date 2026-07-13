@@ -36,8 +36,9 @@ class Settings(BaseSettings):
     ai_provider: str = "openai"
     llm_mode: str = "faq_only"
     llm_faq_assist_enabled: bool = False
-    use_dialog_v2: bool = False
+    use_dialog_v2: bool = True
     use_dialog_v2_phone_allowlist: str | None = None
+    # Empty allowlist + use_dialog_v2=True => dialog v2 for all WhatsApp senders.
     openai_model: str = "gpt-4o-mini"
     gemini_model: str = "gemini-2.5-flash"
     document_extraction_enabled: bool = True

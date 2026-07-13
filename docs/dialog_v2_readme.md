@@ -1,6 +1,16 @@
 # dialog_v2
 
-`dialog_v2` is the new rewrite path for the WhatsApp bot dialog core. It runs alongside the legacy `DialogueEngine` and is enabled with the `USE_DIALOG_V2` feature flag.
+`dialog_v2` is the new rewrite path for the WhatsApp bot dialog core. It runs alongside the legacy `DialogueEngine`.
+
+Enable with:
+
+```env
+USE_DIALOG_V2=true
+USE_DIALOG_V2_PHONE_ALLOWLIST=
+```
+
+- Empty `USE_DIALOG_V2_PHONE_ALLOWLIST` => dialog v2 for **all** senders.
+- Comma-separated phones (without `+`) => limited rollout, e.g. `77001112233,77002223344`.
 
 ## Flow map
 
