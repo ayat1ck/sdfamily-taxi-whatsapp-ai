@@ -91,6 +91,26 @@ class DialogV2Tests(unittest.TestCase):
         )
         self.assertEqual(result.document_type, "id_card")
 
+    def test_kz_driver_license_with_iin_is_not_id_card(self):
+        resolver = DocumentTypeResolver()
+        result = resolver.resolve(
+            current_flow="registration_document_collection",
+            current_state="registration_document_collection",
+            mime_type="image/jpeg",
+            filename="vu.jpg",
+            extracted_fields={
+                "full_name": "КЕЛДІБАЙ НҰРСҰЛТАН ҚАНАҒАТҰЛЫ",
+                "iin": "971116301032",
+                "birth_date": "1997-11-16",
+                "driver_license_number": "AL 008733",
+                "driver_license_issue_date": "2020-10-10",
+                "driver_license_expires_at": "2030-10-09",
+            },
+            ocr_text="ЖҮРГІЗУШІ КУӘЛІГІ ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ DRIVING LICENCE AL 008733",
+            confidence=0.9,
+        )
+        self.assertEqual(result.document_type, "driver_license")
+
     def test_ocr_text_hooks_resolve_vehicle_doc(self):
         resolver = DocumentTypeResolver()
         result = resolver.resolve(
