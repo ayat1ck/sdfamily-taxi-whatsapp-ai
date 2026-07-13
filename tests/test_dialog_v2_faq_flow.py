@@ -87,6 +87,35 @@ class DialogV2FAQFlowTests(unittest.TestCase):
         self.assertIn("аренды", context.structured_reply.text.lower())
         self.assertNotIn("документы для регистрации", context.structured_reply.text.lower())
 
+    def test_who_are_you_routes_to_faq_not_registration(self):
+        from app.dialog_v2.intent import looks_like_faq
+        from app.dialog_v2.router import Router
+        from app.whatsapp.parser import ParsedWhatsAppMessage
+
+        question = "Кто вы?"
+        self.assertTrue(looks_like_faq(question))
+
+        driver = SimpleNamespace(
+            id=1,
+            phone="+77001112233",
+            whatsapp_phone="+77001112233",
+            full_name=None,
+            state="new",
+            support_context_json={},
+            dialog_mode="bot_active",
+            requires_attention=False,
+        )
+        message = ParsedWhatsAppMessage(sender_phone="+77001112233", message_type="text", text=question)
+        with patch("app.dialog_v2.flows.faq.load_knowledge_base", return_value={"park_info": "kb"}), patch(
+            "app.dialog_v2.flows.faq.resolve_faq_replies",
+            return_value="Мы таксопарк SD Family Taxi. Подключаем водителей, помогаем с регистрацией.",
+        ):
+            context = Router().route(None, driver, None, message)
+
+        self.assertEqual(context.flow, "faq")
+        self.assertIn("SD Family Taxi", context.structured_reply.text)
+        self.assertNotIn("документы для регистрации", context.structured_reply.text.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
