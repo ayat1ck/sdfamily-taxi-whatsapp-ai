@@ -332,8 +332,10 @@ class YandexFleetClient:
         }
         if payload.vin or self.settings.yandex_car_vin:
             vehicle_specifications["vin"] = payload.vin or self.settings.yandex_car_vin
-        if self.settings.yandex_car_body_number:
-            vehicle_specifications["body_number"] = self.settings.yandex_car_body_number
+        # In KZ STS "номер кузова" is usually the same as VIN — fill both from one value.
+        body_number = self.settings.yandex_car_body_number or payload.vin or self.settings.yandex_car_vin
+        if body_number:
+            vehicle_specifications["body_number"] = body_number
 
         vehicle_licenses: dict[str, object] = {
             "licence_plate_number": plate_number,
