@@ -157,7 +157,8 @@ class DialogV2Tests(unittest.TestCase):
         self.assertIn("ФИО: Иванов Иван", text)
         self.assertIn("Город: —", text)
         self.assertIn("Документы:", text)
-        self.assertIn("удостоверение личности: нет", text.lower())
+        self.assertNotIn("удостоверение личности: нет", text.lower())
+        self.assertIn("водительское удостоверение: есть", text.lower())
 
     def test_pdf_first_message_starts_registration(self):
         with self.SessionLocal() as db, patch("app.dialog_v2.flows.registration.DocumentExtractionService.extract") as extract:
@@ -435,7 +436,7 @@ class DialogV2Tests(unittest.TestCase):
             self.assertIn("Получил файл, но не уверен", reply.text)
             self.assertEqual(driver.support_context_json["registration_draft"]["pending_action"], "confirm_document_type")
 
-    def test_unknown_then_answer_two_applies_id_card(self):
+    def test_unknown_then_answer_two_applies_vehicle_doc(self):
         with self.SessionLocal() as db, patch("app.dialog_v2.flows.registration.DocumentExtractionService.extract") as extract:
             extract.return_value = fake_extraction(document_type="unknown", confidence=0.2)
             driver = get_or_create_driver(db, "+77000000008")
@@ -452,10 +453,10 @@ class DialogV2Tests(unittest.TestCase):
             )
             db.commit()
             extract.return_value = fake_extraction(
-                document_type="id_card",
-                full_name="Иванов Иван",
-                iin="070404550345",
-                birth_date="1990-01-01",
+                document_type="vehicle_registration_doc",
+                brand="Toyota",
+                model="Camry",
+                plate_number="123ABC01",
                 confidence=0.93,
             )
             reply = self._send(
@@ -466,8 +467,8 @@ class DialogV2Tests(unittest.TestCase):
                 provider_message_id="msg-8b",
             )
             db.commit()
-            self.assertIn("удостоверение личности", reply.text.lower())
-            self.assertEqual(driver.support_context_json["registration_draft"]["documents"]["id_card"]["received"], True)
+            self.assertIn("техпаспорт", reply.text.lower())
+            self.assertIsNotNone(driver.support_context_json["registration_draft"]["documents"]["vehicle_registration_doc"])
 
     def test_incoming_messages_are_persisted_once(self):
         with self.SessionLocal() as db, patch("app.dialog_v2.flows.registration.DocumentExtractionService.extract") as extract:
@@ -667,8 +668,9 @@ class DialogV2Tests(unittest.TestCase):
             db.commit()
 
             self.assertIn("Проверьте данные", summary_reply.text)
-            self.assertIn("Стаж", missing_reply.text)
+            self.assertIn("стаж", missing_reply.text.lower())
             self.assertNotIn("id_card", missing_reply.text)
+            self.assertNotIn("удостоверения личности", missing_reply.text.lower())
 
     def test_global_confirmation_ready_draft_moves_to_yandex_ready(self):
         with self.SessionLocal() as db:

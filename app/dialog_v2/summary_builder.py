@@ -28,14 +28,11 @@ class SummaryBuilder:
 
     DOCUMENTS_ORDER = (
         "driver_license",
-        "id_card",
         "vehicle_registration_doc",
-        "selfie_with_license",
     )
 
     NEXT_STEP_PROMPTS = {
         "driver_license": "Пришлите фото или PDF водительского удостоверения.",
-        "id_card": "Пришлите фото удостоверения личности.",
         "vehicle_registration_doc": "Пришлите фото или PDF техпаспорта / СТС.",
         "selfie_with_license": "Пришлите селфи с водительским удостоверением.",
         "full_name": "Напишите ФИО полностью.",
@@ -117,6 +114,9 @@ class SummaryBuilder:
         for key in self.DOCUMENTS_ORDER:
             status = "есть" if documents.get(key) else "нет"
             lines.append(f"- {self._doc_label(key)}: {status}")
+        for key in ("selfie_with_license", "id_card"):
+            if documents.get(key):
+                lines.append(f"- {self._doc_label(key)}: есть")
         if draft.get("ready_for_yandex") or draft.get("is_registration_complete"):
             lines.append("")
             lines.append("Статус: анкета готова к отправке в Яндекс.")

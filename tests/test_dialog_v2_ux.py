@@ -72,27 +72,28 @@ class DialogV2UxHelpersTests(unittest.TestCase):
                 "vehicle_registration_doc": None,
                 "selfie_with_license": None,
             },
-            "missing_fields": ["id_card", "vehicle_registration_doc", "city"],
+            "missing_fields": ["vehicle_registration_doc", "city"],
         }
         received, total, missing = builder.document_progress(draft)
         self.assertEqual(received, 1)
-        self.assertEqual(total, 4)
-        self.assertEqual(missing[0], "id_card")
+        self.assertEqual(total, 2)
+        self.assertEqual(missing[0], "vehicle_registration_doc")
         text = builder.build_document_reply(
             "driver_license",
             {"full_name": "Иванов Иван"},
             draft["missing_fields"],
             draft,
         )
-        self.assertIn("Документы: 1 из 4", text)
+        self.assertIn("Документы: 1 из 2", text)
         self.assertIn("Следующий шаг:", text)
-        self.assertIn("удостоверения личности", text.lower())
+        self.assertIn("техпаспорт", text.lower())
+        self.assertNotIn("удостоверения личности", text.lower())
 
     def test_confirm_helpers_and_buttons(self):
         self.assertTrue(is_confirm_choice("confirm"))
         self.assertTrue(is_confirm_choice("Подтверждаю"))
         self.assertEqual(len(CONFIRM_BUTTONS), 3)
-        self.assertEqual(len(DOCUMENT_TYPE_LIST), 4)
+        self.assertEqual(len(DOCUMENT_TYPE_LIST), 3)
 
     def test_yandex_error_includes_manager_phone(self):
         message = format_yandex_error_for_user(
