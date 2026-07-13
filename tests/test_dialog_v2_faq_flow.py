@@ -116,6 +116,37 @@ class DialogV2FAQFlowTests(unittest.TestCase):
         self.assertIn("SD Family Taxi", context.structured_reply.text)
         self.assertNotIn("документы для регистрации", context.structured_reply.text.lower())
 
+    def test_payout_typo_routes_to_support_not_registration(self):
+        from app.dialog_v2.intent import looks_like_faq, looks_like_support_escalation
+        from app.dialog_v2.router import Router
+        from app.whatsapp.parser import ParsedWhatsAppMessage
+
+        question = "Хотел снять денги со счета"
+        self.assertTrue(looks_like_support_escalation(question))
+        self.assertFalse(looks_like_faq(question))
+
+        driver = SimpleNamespace(
+            id=1,
+            phone="+77001112233",
+            whatsapp_phone="+77001112233",
+            full_name=None,
+            state="new",
+            support_context_json={},
+            dialog_mode="bot_active",
+            requires_attention=False,
+        )
+        message = ParsedWhatsAppMessage(sender_phone="+77001112233", message_type="text", text=question)
+        with patch("app.dialog_v2.flows.manager.ManagerHandoffFlow._last_messages", return_value=[]):
+            context = Router().route(None, driver, None, message)
+
+        self.assertEqual(context.flow, "support")
+        self.assertNotIn("регистрац", context.structured_reply.text.lower())
+
+    def test_dry_fog_routes_to_faq(self):
+        from app.dialog_v2.intent import looks_like_faq
+
+        self.assertTrue(looks_like_faq("Сухой туманды колдансак болама"))
+
 
 if __name__ == "__main__":
     unittest.main()

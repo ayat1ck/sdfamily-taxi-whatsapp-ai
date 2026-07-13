@@ -90,7 +90,9 @@
                 </div>
                 {% set media = message_media(message) %}
                 {% if message.text %}
-                  <div>{{ message.text }}</div>
+                  <div>{{ message.text|repair_text }}</div>
+                {% elif not media.available and message.message_type in ["image", "document", "video", "audio", "sticker", "unsupported"] %}
+                  <div class="muted">Медиафайл недоступен для просмотра. У старых сообщений WhatsApp часто не сохраняет media id, либо срок хранения файла истёк.</div>
                 {% elif not media.available %}
                   <div>—</div>
                 {% endif %}
@@ -98,13 +100,13 @@
                   <div class="message-media">
                     {% if media.kind == "image" or (media.mime_type and media.mime_type.startswith("image/")) %}
                       <a href="{{ media.preview_url }}" target="_blank" rel="noopener">
-                        <img src="{{ media.preview_url }}" alt="{{ media.filename or 'Фото' }}" loading="lazy">
+                        <img src="{{ media.preview_url }}" alt="{{ media.filename or 'Фото' }}" loading="lazy" onerror="this.closest('.message-media').innerHTML='<div class=&quot;muted&quot;>Не удалось загрузить превью (файл мог истечь в WhatsApp).</div>'">
                       </a>
                     {% elif media.kind == "video" or (media.mime_type and media.mime_type.startswith("video/")) %}
-                      <video controls preload="metadata" src="{{ media.preview_url }}"></video>
+                      <video controls preload="metadata" src="{{ media.preview_url }}" onerror="this.closest('.message-media').innerHTML='<div class=&quot;muted&quot;>Не удалось загрузить видео (файл мог истечь в WhatsApp).</div>'"></video>
                       <div><a class="button secondary" href="{{ media.preview_url }}" target="_blank" rel="noopener">Открыть видео</a></div>
                     {% elif media.kind == "audio" or (media.mime_type and media.mime_type.startswith("audio/")) %}
-                      <audio controls preload="metadata" src="{{ media.preview_url }}"></audio>
+                      <audio controls preload="metadata" src="{{ media.preview_url }}" onerror="this.closest('.message-media').innerHTML='<div class=&quot;muted&quot;>Голосовое/аудио недоступно (файл мог истечь в WhatsApp).</div>'"></audio>
                     {% else %}
                       <a class="button secondary" href="{{ media.preview_url }}" target="_blank" rel="noopener">
                         Открыть файл{% if media.filename %}: {{ media.filename }}{% endif %}

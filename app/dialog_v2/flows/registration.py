@@ -118,7 +118,20 @@ def _normalize_text(value: str | None) -> str:
 
 def _is_registration_start(text: str) -> bool:
     normalized = _normalize_text(text)
-    return any(token in normalized for token in {"1", "регистрация", "tirkel", "подключ"})
+    return any(
+        token in normalized
+        for token in {
+            "1",
+            "регистрация",
+            "зарегистрир",
+            "зарегать",
+            "зарегаться",
+            "tirkel",
+            "тірке",
+            "тырке",
+            "подключ",
+        }
+    )
 
 
 class RegistrationFlow:
@@ -479,16 +492,22 @@ class RegistrationFlow:
             return self.handle_document(db, driver, application, message)
 
         if driver.state == DialogV2State.NEW:
-            driver.state = DialogV2State.REGISTRATION_DOCUMENT_COLLECTION
             return StructuredReply(
-                text=DOCUMENT_PROMPT,
-                next_flow=DialogV2State.REGISTRATION_DOCUMENT_COLLECTION,
-                flow_state=DialogV2State.REGISTRATION_DOCUMENT_COLLECTION,
-                metadata={"intent": "registration"},
+                text=(
+                    "Здравствуйте! Могу помочь с регистрацией в SD Family Taxi.\n\n"
+                    "Что хотите сделать:\n"
+                    "1. Регистрация — напишите «Регистрация» или отправьте документы\n"
+                    "2. Условия / FAQ — задайте вопрос\n"
+                    "3. Выплаты / Яндекс Про — опишите проблему\n"
+                    "4. Менеджер — напишите «менеджер»"
+                ),
+                next_flow=DialogV2State.NEW,
+                flow_state=DialogV2State.NEW,
+                metadata={"intent": "welcome"},
             )
 
         return StructuredReply(
-            text="Отправьте документы для регистрации.",
+            text="Отправьте документы для регистрации или напишите «менеджер».",
             next_flow=DialogV2State.REGISTRATION_DOCUMENT_COLLECTION,
             flow_state=DialogV2State.REGISTRATION_DOCUMENT_COLLECTION,
             metadata={"intent": "registration"},

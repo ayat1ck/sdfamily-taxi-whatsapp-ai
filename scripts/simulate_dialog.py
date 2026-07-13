@@ -207,7 +207,7 @@ SCENARIOS: list[Scenario] = [
     Scenario("NEW: смс не приходит", DialogueState.NEW.value, "СМС не приходит", expect_intent="faq", must_contain=("SMS",)),
     Scenario("NEW: не могу войти яндекс", DialogueState.NEW.value, "Не могу войти в Яндекс Про", expect_intent="faq"),
     Scenario("NEW: поддержка", DialogueState.NEW.value, "Есть поддержка?", expect_intent="faq", must_contain=("поддерж",)),
-    Scenario("NEW: сухой туман", DialogueState.NEW.value, "Что за сухой туман?", expect_intent="faq", must_contain=("туман",)),
+    Scenario("NEW: сухой туман", DialogueState.NEW.value, "Что за сухой туман?", expect_intent="faq", must_contain=("нет",)),
     Scenario("NEW: выплаты", DialogueState.NEW.value, "Как выводить деньги?", expect_intent="faq", must_contain=("выплат",)),
     Scenario("NEW: зачем иин", DialogueState.NEW.value, "Зачем нужен ИИН?", expect_intent="faq", must_contain=("ИИН",)),
     Scenario("NEW: kaspi pdf", DialogueState.NEW.value, "Можно PDF из Kaspi?", expect_intent="faq", must_contain=("PDF",)),

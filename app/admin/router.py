@@ -25,6 +25,7 @@ from app.admin.auth import (
 )
 from app.admin.message_media import message_media_info, resolve_message_media_id, whatsapp_chat_url
 from app.config import get_settings
+from app.utils.text import repair_mojibake
 from app.admin.service import (
     ChatFilters,
     assign_manager_name,
@@ -65,6 +66,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 templates.env.globals["message_media"] = message_media_info
 templates.env.globals["whatsapp_chat_url"] = whatsapp_chat_url
+templates.env.filters["repair_text"] = repair_mojibake
 media_client = WhatsAppMediaClient()
 
 
