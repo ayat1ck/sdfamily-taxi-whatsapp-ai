@@ -58,6 +58,35 @@ class DialogV2FAQFlowTests(unittest.TestCase):
         self.assertEqual(reply.metadata["faq_source"], "stub")
         self.assertEqual(reply.metadata["faq_matched_key"], CONDITIONS_KEY)
 
+    def test_rental_question_routes_to_faq_not_registration(self):
+        from app.dialog_v2.intent import looks_like_faq
+        from app.dialog_v2.router import Router
+        from app.whatsapp.parser import ParsedWhatsAppMessage
+
+        question = "Есть ли свои машины или аренда?"
+        self.assertTrue(looks_like_faq(question))
+
+        driver = SimpleNamespace(
+            id=1,
+            phone="+77001112233",
+            whatsapp_phone="+77001112233",
+            full_name=None,
+            state="new",
+            support_context_json={},
+            dialog_mode="bot_active",
+            requires_attention=False,
+        )
+        message = ParsedWhatsAppMessage(sender_phone="+77001112233", message_type="text", text=question)
+        with patch("app.dialog_v2.flows.faq.load_knowledge_base", return_value={"car_requirements": "kb"}), patch(
+            "app.dialog_v2.flows.faq.resolve_faq_replies",
+            return_value="Пока что аренды машин у таксопарка нет. Сейчас подключаем только водителей со своими автомобилями.",
+        ):
+            context = Router().route(None, driver, None, message)
+
+        self.assertEqual(context.flow, "faq")
+        self.assertIn("аренды", context.structured_reply.text.lower())
+        self.assertNotIn("документы для регистрации", context.structured_reply.text.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -174,7 +174,8 @@ FAQ_INTENT_ROUTES: tuple[FaqIntentRoute, ...] = (
     FaqIntentRoute(("смс", "код не"), "yandex_pro_sms_issues", "смс не приходит"),
     FaqIntentRoute(("не могу войти", "не входит", "не заходит", "не пускает"), "yandex_pro_login_errors", "не могу войти"),
     FaqIntentRoute(("неактив", "аккаунт не"), "yandex_pro_account_inactive", "аккаунт не активен"),
-    FaqIntentRoute(("без авто", "без машин", "свой машин"), "car_requirements", "можно ли работать без"),
+    FaqIntentRoute(("аренд",), "car_requirements", "можно ли взять машину в аренду"),
+    FaqIntentRoute(("без авто", "без машин", "свой машин", "свои машин", "своего авто", "своим авто"), "car_requirements", "можно ли работать без"),
     FaqIntentRoute(("машин", "авто", "kia", "toyota", "camry", "rio"), "car_requirements", "какие авто"),
     FaqIntentRoute(("после регистрац", "после подключ"), "registered_driver_support", "что делать после регистрации"),
 )
