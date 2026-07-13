@@ -20,13 +20,71 @@ class SummaryBuilder:
         "registration_certificate": "СТС",
         "color": "Цвет",
         "vin": "VIN",
+        "driver_license": "водительское удостоверение",
+        "id_card": "удостоверение личности",
+        "vehicle_registration_doc": "техпаспорт / СТС",
+        "selfie_with_license": "селфи с ВУ",
     }
 
-    def build_document_reply(self, document_type: str, extracted_fields: dict[str, str], missing_fields: list[str]) -> str:
-        lines = [f"Документ получил: {self._doc_label(document_type)}.", "Распознал:"]
+    DOCUMENTS_ORDER = (
+        "driver_license",
+        "id_card",
+        "vehicle_registration_doc",
+        "selfie_with_license",
+    )
+
+    NEXT_STEP_PROMPTS = {
+        "driver_license": "Пришлите фото или PDF водительского удостоверения.",
+        "id_card": "Пришлите фото удостоверения личности.",
+        "vehicle_registration_doc": "Пришлите фото или PDF техпаспорта / СТС.",
+        "selfie_with_license": "Пришлите селфи с водительским удостоверением.",
+        "full_name": "Напишите ФИО полностью.",
+        "iin": "Напишите ИИН (12 цифр).",
+        "birth_date": "Напишите дату рождения в формате ДД.ММ.ГГГГ.",
+        "city": "Напишите город.",
+        "address": "Напишите адрес.",
+        "driver_license_number": "Напишите номер водительского удостоверения.",
+        "driver_license_issue_date": "Напишите дату выдачи ВУ.",
+        "driver_license_expires_at": "Напишите срок действия ВУ.",
+        "driving_experience_since": "Напишите дату начала стажа.",
+        "brand": "Напишите марку автомобиля, например Toyota.",
+        "model": "Напишите модель автомобиля, например Camry.",
+        "year": "Напишите год выпуска автомобиля.",
+        "plate_number": "Напишите госномер автомобиля.",
+        "color": "Напишите цвет автомобиля.",
+        "registration_certificate": "Напишите номер СТС.",
+        "phone": "Напишите контактный телефон.",
+    }
+
+    def document_progress(self, draft: dict) -> tuple[int, int, list[str]]:
+        documents = draft.get("documents") or {}
+        received = [key for key in self.DOCUMENTS_ORDER if documents.get(key)]
+        missing = [key for key in self.DOCUMENTS_ORDER if not documents.get(key)]
+        return len(received), len(self.DOCUMENTS_ORDER), missing
+
+    def next_step_text(self, draft: dict, missing_fields: list[str] | None = None) -> str:
+        _, _, missing_docs = self.document_progress(draft)
+        if missing_docs:
+            first_doc = missing_docs[0]
+            return self.NEXT_STEP_PROMPTS.get(first_doc, f"Пришлите: {self._doc_label(first_doc)}.")
+        fields = missing_fields if missing_fields is not None else list(draft.get("missing_fields") or [])
+        actionable = [field for field in fields if field not in self.DOCUMENTS_ORDER]
+        if actionable:
+            field = actionable[0]
+            return self.NEXT_STEP_PROMPTS.get(field, f"Укажите: {self.LABELS.get(field, field)}.")
+        return "Проверьте данные и нажмите «Подтверждаю»."
+
+    def build_document_reply(self, document_type: str, extracted_fields: dict[str, str], missing_fields: list[str], draft: dict | None = None) -> str:
+        draft = draft or {"documents": {}, "missing_fields": missing_fields}
+        received, total, _ = self.document_progress(draft)
+        lines = [
+            f"Документ получил: {self._doc_label(document_type)}.",
+            f"Документы: {received} из {total}.",
+            "Распознал:",
+        ]
         lines.extend(self._render_fields(extracted_fields))
-        lines.append("Ещё нужно:")
-        lines.extend(self._render_missing(missing_fields))
+        lines.append("")
+        lines.append(f"Следующий шаг: {self.next_step_text(draft, missing_fields)}")
         return "\n".join(lines)
 
     def build_final_summary(self, draft: dict) -> str:
@@ -34,6 +92,7 @@ class SummaryBuilder:
         vehicle = draft.get("vehicle", {})
         documents = draft.get("documents", {})
         dash = "—"
+        received, total, _ = self.document_progress(draft)
         lines = [
             "Проверьте данные:",
             f"ФИО: {driver.get('full_name') or dash}",
@@ -52,28 +111,39 @@ class SummaryBuilder:
                 f"Госномер: {vehicle.get('plate_number') or dash}",
                 f"СТС: {vehicle.get('registration_certificate') or dash}",
                 f"Цвет: {vehicle.get('color') or dash}",
-                "Документы:",
+                f"Документы: {received} из {total}",
             ]
         )
-        for key in ("driver_license", "vehicle_registration_doc"):
+        for key in self.DOCUMENTS_ORDER:
             status = "есть" if documents.get(key) else "нет"
             lines.append(f"- {self._doc_label(key)}: {status}")
-        for key in ("id_card", "selfie_with_license"):
-            if documents.get(key):
-                lines.append(f"- {self._doc_label(key)}: есть")
         if draft.get("ready_for_yandex") or draft.get("is_registration_complete"):
             lines.append("")
             lines.append("Статус: анкета готова к отправке в Яндекс.")
         lines.append("")
-        lines.append('Если всё верно, напишите "Подтверждаю".')
-        lines.append("Если нужно исправить - напишите, что изменить.")
+        lines.append("Если всё верно — нажмите «Подтверждаю».")
+        lines.append("Если нужно исправить — нажмите «Исправить».")
         return "\n".join(lines)
 
-    def build_missing_text(self, missing_fields: list[str]) -> str:
+    def build_missing_text(self, missing_fields: list[str], draft: dict | None = None) -> str:
         if not missing_fields:
-            return "Ничего не пропущено."
-        lines = ["Ещё нужно:"]
-        lines.extend(self._render_missing(missing_fields))
+            return "Ничего не пропущено. Можно подтверждать анкету."
+        draft = draft or {"documents": {}, "missing_fields": missing_fields}
+        received, total, _ = self.document_progress(draft)
+        next_step = self.next_step_text(draft, missing_fields)
+        lines = [
+            f"Документы: {received} из {total}.",
+            f"Следующий шаг: {next_step}",
+        ]
+        # Show other missing items beyond the immediate next step.
+        _, _, missing_docs = self.document_progress(draft)
+        actionable = [field for field in missing_fields if field not in self.DOCUMENTS_ORDER]
+        primary = missing_docs[0] if missing_docs else (actionable[0] if actionable else None)
+        remaining = [field for field in missing_fields if field != primary][:5]
+        if remaining:
+            lines.append("")
+            lines.append("Потом ещё понадобится:")
+            lines.extend(self._render_missing(remaining))
         return "\n".join(lines)
 
     def _render_fields(self, fields: dict[str, str]) -> list[str]:
@@ -87,10 +157,9 @@ class SummaryBuilder:
         return [f"- {self.LABELS.get(field, field)}" for field in missing_fields]
 
     def _doc_label(self, document_type: str) -> str:
-        return {
-            "driver_license": "ВУ",
-            "id_card": "удостоверение личности",
-            "vehicle_registration_doc": "техпаспорт / СТС",
-            "selfie_with_license": "селфи с ВУ",
-            "unknown": "неизвестный документ",
-        }.get(document_type, document_type)
+        return self.LABELS.get(
+            document_type,
+            {
+                "unknown": "неизвестный документ",
+            }.get(document_type, document_type),
+        )

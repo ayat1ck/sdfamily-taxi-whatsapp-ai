@@ -19,6 +19,7 @@ from app.messages.models import Message
 from app.whatsapp.parser import ParsedWhatsAppMessage
 
 import app.audit.models  # noqa: F401
+import app.ai_traces.models  # noqa: F401
 import app.conversation_events.models  # noqa: F401
 import app.documents.models  # noqa: F401
 import app.integration_jobs.models  # noqa: F401
@@ -164,9 +165,11 @@ class DialogV2Tests(unittest.TestCase):
 
             application = db.scalar(select(Application).where(Application.driver_id == driver.id))
             self.assertIsNotNone(application)
-            self.assertEqual(driver.state, "registration_confirmation")
-            self.assertEqual(reply.next_flow, "registration_confirmation")
+            self.assertEqual(driver.state, "registration_missing_fields")
+            self.assertEqual(reply.next_flow, "registration_missing_fields")
             self.assertIn("Документ получил: водительское удостоверение", reply.text)
+            self.assertIn("Документы:", reply.text)
+            self.assertIn("Следующий шаг:", reply.text)
             self.assertIn("ФИО: Иванов Иван", reply.text)
             self.assertNotIn("номер ВУ", reply.text)
 
@@ -193,7 +196,7 @@ class DialogV2Tests(unittest.TestCase):
             )
             db.commit()
 
-            self.assertEqual(driver.state, "registration_confirmation")
+            self.assertEqual(driver.state, "registration_missing_fields")
             self.assertIn("Документ получил: удостоверение личности", reply.text)
             self.assertIn("ИИН: 070404550345", reply.text)
 
@@ -276,8 +279,13 @@ class DialogV2Tests(unittest.TestCase):
             db.commit()
 
             self.assertIn("Город", reply.text)
-            self.assertIn("Адрес", reply.text)
-            self.assertNotIn("ИИН", reply.text)
+            self.assertEqual(reply.type, "buttons")
+            self.assertTrue(any(
+                (btn.get("reply") or {}).get("id") == "confirm"
+                if isinstance(btn, dict)
+                else btn == "Подтверждаю"
+                for btn in reply.buttons
+            ))
 
     def test_after_all_data_shows_summary(self):
         with self.SessionLocal() as db:
@@ -329,6 +337,7 @@ class DialogV2Tests(unittest.TestCase):
             db.commit()
 
             self.assertEqual(reply.next_flow, "registration_confirmation")
+            self.assertEqual(reply.type, "buttons")
             self.assertIn("Проверьте данные", reply.text)
             self.assertIn("Если всё верно", reply.text)
 
@@ -472,10 +481,12 @@ class DialogV2Tests(unittest.TestCase):
                 provider_message_id="msg-10",
             )
             db.commit()
-            self.assertEqual(reply.next_flow, "existing_driver")
-            self.assertIn("Выплаты", reply.text)
+            self.assertEqual(reply.next_flow or reply.flow, "existing_driver")
+            self.assertEqual(reply.type, "list")
+            titles = [item["title"] if isinstance(item, dict) else item for item in reply.list_items]
+            self.assertTrue(any("Выплаты" in title for title in titles))
 
-    def test_profile_update_routes_to_manager(self):
+    def test_profile_update_routes_to_menu(self):
         with self.SessionLocal() as db:
             driver = get_or_create_driver(db, "+77000000011")
             db.commit()
@@ -487,8 +498,9 @@ class DialogV2Tests(unittest.TestCase):
                 provider_message_id="msg-11",
             )
             db.commit()
-            self.assertEqual(reply.next_flow, "manager")
-            self.assertTrue(reply.requires_manager)
+            self.assertEqual(reply.next_flow or reply.flow, "profile_update")
+            self.assertEqual(reply.type, "list")
+            self.assertIn("Что нужно изменить?", reply.text)
 
     def test_manager_flow_for_money_goes_to_manager(self):
         with self.SessionLocal() as db:
@@ -502,7 +514,7 @@ class DialogV2Tests(unittest.TestCase):
                 provider_message_id="msg-12",
             )
             db.commit()
-            self.assertEqual(reply.next_flow, "manager")
+            self.assertEqual(reply.flow or reply.next_flow, "manager")
             self.assertTrue(reply.requires_manager)
 
     def test_faq_flow_routes_questions(self):
@@ -532,7 +544,7 @@ class DialogV2Tests(unittest.TestCase):
                 provider_message_id="msg-14",
             )
             db.commit()
-            self.assertEqual(reply.next_flow, "manager")
+            self.assertEqual(reply.flow or reply.next_flow, "manager")
             self.assertTrue(reply.requires_manager)
 
     def test_pdf_first_message_routes_to_registration(self):
@@ -559,7 +571,7 @@ class DialogV2Tests(unittest.TestCase):
             )
             db.commit()
             self.assertIn("Документ получил: водительское удостоверение", reply.text)
-            self.assertEqual(reply.next_flow, "registration_confirmation")
+            self.assertEqual(reply.next_flow, "registration_missing_fields")
 
     def _ready_registration_draft(self):
         return {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.dialog_v2.context import DialogContext
 from app.dialog_v2.flows.existing_driver import ExistingDriverFlow
 from app.dialog_v2.flows.faq import FAQFlow
@@ -16,6 +18,9 @@ from app.dialog_v2.intent import (
 )
 from app.whatsapp.parser import ParsedWhatsAppMessage
 
+PROFILE_MENU_CHOICES = {"1", "2", "3", "4", "5", "6", "7", "8", "9"}
+EXISTING_MENU_CHOICES = {"1", "2", "3", "4", "5", "6"}
+
 
 class Router:
     def __init__(self) -> None:
@@ -30,12 +35,32 @@ class Router:
     def _pending_menu(self, db, driver, application, message: ParsedWhatsAppMessage):
         context = dict(driver.support_context_json or {})
         pending_menu = context.get("pending_menu")
+        text = (message.text or "").strip()
         if pending_menu == "existing_driver_main":
+            if text in EXISTING_MENU_CHOICES:
+                return self.existing_driver.handle(db, driver, application, message)
+            if (
+                looks_like_profile_update(message.text)
+                or looks_like_faq(message.text)
+                or looks_like_support_escalation(message.text)
+                or looks_like_existing_driver(message.text)
+            ):
+                context.pop("pending_menu", None)
+                driver.support_context_json = context
+                flag_modified(driver, "support_context_json")
+                return None
             return self.existing_driver.handle(db, driver, application, message)
         if pending_menu == "profile_update_menu":
-            return self.profile_update.handle(db, driver, application, message)
+            if text in PROFILE_MENU_CHOICES:
+                return self.profile_update.handle(db, driver, application, message)
+            context.pop("pending_menu", None)
+            driver.support_context_json = context
+            flag_modified(driver, "support_context_json")
+            return None
         if pending_menu == "confirm_document_type":
             return self.registration.handle_text(db, driver, application, message)
+        if pending_menu == "registration_edit_fields":
+            return self.global_intents.handle(db, driver, application, message, registration_flow=self.registration)
         return None
 
     def route(self, db, driver, application, message: ParsedWhatsAppMessage) -> DialogContext:

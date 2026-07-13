@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+import re
+
+from app.config import get_settings
+
+
+def manager_phone() -> str:
+    return get_settings().public_site_manager_phone
+
+
+def render_user_message(message: str) -> str:
+    if "{manager_phone}" in message:
+        return message.format(manager_phone=manager_phone())
+    return message
+
+
 USER_ERROR_MESSAGES: dict[str, str] = {
     "missing_last_name": "Не указана фамилия.",
     "missing_first_name": "Не указано имя.",
@@ -43,7 +58,14 @@ USER_ERROR_MESSAGES: dict[str, str] = {
     "car_brand_not_in_catalog": "Марка автомобиля не найдена в справочнике парка.",
     "car_model_not_in_catalog": "Модель автомобиля не найдена в справочнике парка. Укажите модель из документов, например Camry или S-Class.",
     "car_brand_model_not_in_catalog": "Марка и модель автомобиля не найдены в справочнике парка.",
-    "duplicate_phone": "Этот номер телефона уже зарегистрирован в парке. Если вы уже подключались раньше, напишите менеджеру — поможем восстановить доступ.",
+    "duplicate_phone": (
+        "Этот номер телефона уже зарегистрирован в парке. "
+        "Если вы уже подключались раньше, свяжитесь с менеджером: {manager_phone} — поможем восстановить доступ."
+    ),
+    "duplicate_driver_license": (
+        "Этот номер водительского удостоверения уже зарегистрирован в парке. "
+        "Если вы уже подключались раньше, свяжитесь с менеджером: {manager_phone} — поможем восстановить доступ."
+    ),
     "invalid_driver_license": "Номер водительского удостоверения не принят системой парка. Проверьте серию и номер, как в документе.",
     "invalid_car_brand": "Марка автомобиля не принята системой парка. Укажите марку как в Яндекс Про или документах, например LADA, Toyota или Hyundai.",
     "invalid_car_model": "Модель автомобиля не принята системой парка. Укажите модель из документов без лишних цифр и кодов кузова.",
@@ -62,7 +84,7 @@ def _normalize_error_code(raw: str) -> str:
 def format_validation_error_code(code: str) -> str:
     normalized = _normalize_error_code(code)
     if normalized in USER_ERROR_MESSAGES:
-        return USER_ERROR_MESSAGES[normalized]
+        return render_user_message(USER_ERROR_MESSAGES[normalized])
     if normalized.startswith("invalid:car_model_not_in_catalog"):
         return USER_ERROR_MESSAGES["car_model_not_in_catalog"]
     if normalized.startswith("invalid:car_brand_not_in_catalog"):
@@ -83,9 +105,25 @@ def format_validation_errors_for_user(errors: list[str]) -> str:
     return "\n".join(f"• {message}" for message in unique)
 
 
+def _extract_yandex_api_error_code(raw_error: str) -> str | None:
+    match = re.search(r"code=([\w_]+)", raw_error, re.IGNORECASE)
+    return match.group(1).lower() if match else None
+
+
+def _user_error_message(code: str) -> str:
+    return render_user_message(USER_ERROR_MESSAGES[code])
+
+
 def format_yandex_error_for_user(raw_error: str | None) -> str:
     if not raw_error:
-        return "При отправке заявки возникла техническая ошибка. Менеджер проверит заявку."
+        return (
+            "При отправке заявки возникла техническая ошибка. "
+            f"Менеджер проверит заявку: {manager_phone()}."
+        )
+
+    api_code = _extract_yandex_api_error_code(raw_error)
+    if api_code and api_code in USER_ERROR_MESSAGES:
+        return _user_error_message(api_code)
 
     lower = raw_error.lower()
     if "yandex payload validation failed:" in lower:
@@ -96,10 +134,10 @@ def format_yandex_error_for_user(raw_error: str | None) -> str:
 
     for marker, message in USER_ERROR_MESSAGES.items():
         if marker.replace("_", " ") in lower or marker in lower:
-            return message
+            return render_user_message(message)
 
     if "duplicate_phone" in lower or "phone already exists" in lower:
-        return USER_ERROR_MESSAGES["duplicate_phone"]
+        return _user_error_message("duplicate_phone")
     if "invalid_car_brand" in lower or "brand" in lower and "does not exist" in lower:
         return USER_ERROR_MESSAGES["invalid_car_brand"]
     if "invalid_car_model" in lower or "model" in lower and "does not exist" in lower:
@@ -109,7 +147,15 @@ def format_yandex_error_for_user(raw_error: str | None) -> str:
 
     return (
         "При отправке заявки возникла ошибка на стороне парка. "
-        "Проверьте данные или напишите менеджеру, если проблема повторяется."
+        f"Проверьте данные или свяжитесь с менеджером: {manager_phone()}, если проблема повторяется."
+    )
+
+
+def build_confirm_retry_text() -> str:
+    phone = manager_phone()
+    return (
+        "Можете нажать «Подтверждаю» после исправления данных "
+        f"или связаться с менеджером: {phone}."
     )
 
 
@@ -118,5 +164,5 @@ def build_yandex_error_reply(raw_error: str | None) -> str:
     return (
         "Не удалось автоматически отправить заявку. Данные сохранены.\n\n"
         f"{details}\n\n"
-        "Исправьте данные и напишите «Подтверждаю» для повторной отправки."
+        f"{build_confirm_retry_text()}"
     )

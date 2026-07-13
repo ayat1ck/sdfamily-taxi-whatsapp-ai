@@ -12,6 +12,16 @@ from app.dialog_v2.missing_fields import MissingFieldsCalculator
 from app.dialog_v2.response import StructuredReply
 from app.dialog_v2.states import DialogV2State
 from app.dialog_v2.summary_builder import SummaryBuilder
+from app.dialog_v2.ui import (
+    CONFIRM_BUTTONS,
+    DOCUMENT_TYPE_LIST,
+    REGISTRATION_EDIT_LIST,
+    buttons_reply,
+    is_confirm_choice,
+    is_edit_choice,
+    is_manager_choice,
+    list_reply,
+)
 from app.dialog_v2.yandex_auto_submit import DialogV2YandexAutoSubmit
 from app.documents.extraction import DocumentExtractionService, normalize_extracted_fields
 from app.documents.service import upsert_document
@@ -21,21 +31,15 @@ from app.utils.validators import normalize_text_token
 from app.whatsapp.media import WhatsAppMediaClient
 
 
-DOCUMENT_OPTIONS_REPLY = (
-    "Получил файл, но не уверен, что это за документ.\n"
-    "Это:\n"
-    "1. Водительское удостоверение\n"
-    "2. Удостоверение личности\n"
-    "3. Техпаспорт / СТС\n"
-    "4. Селфи с ВУ"
-)
+DOCUMENT_OPTIONS_REPLY = "Получил файл, но не уверен, что это за документ.\nВыберите тип:"
 
 DOCUMENT_PROMPT = (
     "Для регистрации отправьте документы в любом порядке:\n"
     "1. водительское удостоверение\n"
     "2. удостоверение личности\n"
     "3. техпаспорт / СТС\n"
-    "4. селфи с ВУ"
+    "4. селфи с ВУ\n\n"
+    "Фото должно быть чётким, весь документ в кадре."
 )
 
 
@@ -238,42 +242,77 @@ class RegistrationFlow:
         self.bus.emit(db, driver, "draft_updated", {"missing_fields": missing_fields, "updated_fields": merge_result.updated_fields})
         return resolved.document_type, normalized_fields, missing_fields
 
-    def _unknown_document_reply(self, draft: dict, message) -> StructuredReply:
+    def _unknown_document_reply(self, driver, draft: dict, message) -> StructuredReply:
         draft["pending_action"] = "confirm_document_type"
         draft["last_document"] = {"file_name": message.filename, "mime_type": message.mime_type, "media_id": message.media_id}
-        return StructuredReply(
-            text=DOCUMENT_OPTIONS_REPLY,
+        _store_draft(driver, draft)
+        context = deepcopy(driver.support_context_json or {})
+        context["pending_menu"] = "confirm_document_type"
+        driver.support_context_json = context
+        flag_modified(driver, "support_context_json")
+        return list_reply(
+            DOCUMENT_OPTIONS_REPLY,
+            DOCUMENT_TYPE_LIST,
             next_flow=DialogV2State.REGISTRATION_DOCUMENT_COLLECTION,
             flow_state=DialogV2State.REGISTRATION_DOCUMENT_COLLECTION,
             metadata={"intent": "document_confirmation", "pending_action": "confirm_document_type"},
         )
 
-    def _document_reply(self, document_type: str, extracted_fields: dict[str, str], missing_fields: list[str]) -> str:
-        return self.summary.build_document_reply(document_type, extracted_fields, missing_fields)
+    def _document_reply(self, document_type: str, extracted_fields: dict[str, str], missing_fields: list[str], draft: dict) -> str:
+        return self.summary.build_document_reply(document_type, extracted_fields, missing_fields, draft)
 
     def _final_summary(self, draft: dict) -> str:
         return self.summary.build_final_summary(draft)
 
-    def _post_document_reply(self, document_type: str, extracted_fields: dict[str, str], missing_fields: list[str], draft: dict) -> StructuredReply:
-        text = self._document_reply(document_type, extracted_fields, missing_fields)
-        if missing_fields:
-            driver_state = DialogV2State.REGISTRATION_MISSING_FIELDS
-        else:
-            driver_state = DialogV2State.REGISTRATION_CONFIRMATION
-            text = f"{text}\n\n{self._final_summary(draft)}"
-        return StructuredReply(
-            text=text,
-            next_flow=driver_state,
-            flow_state=driver_state,
+    def _confirmation_reply(self, draft: dict, *, prefix: str | None = None) -> StructuredReply:
+        text = self._final_summary(draft)
+        if prefix:
+            text = f"{prefix}\n\n{text}"
+        return buttons_reply(
+            text,
+            CONFIRM_BUTTONS,
+            next_flow=DialogV2State.REGISTRATION_CONFIRMATION,
+            flow_state=DialogV2State.REGISTRATION_CONFIRMATION,
             metadata={
-                "intent": "document",
-                "document_type": document_type,
-                "extracted_fields": extracted_fields,
-                "missing_fields": missing_fields,
-                "is_registration_complete": not missing_fields,
-                "ready_for_yandex": not missing_fields,
+                "intent": "summary",
+                "draft": draft,
+                "is_registration_complete": True,
+                "ready_for_yandex": True,
             },
         )
+
+    def _edit_menu_reply(self, driver, draft: dict) -> StructuredReply:
+        draft["pending_action"] = "choose_edit_field"
+        _store_draft(driver, draft)
+        context = deepcopy(driver.support_context_json or {})
+        context["pending_menu"] = "registration_edit_fields"
+        driver.support_context_json = context
+        flag_modified(driver, "support_context_json")
+        return list_reply(
+            "Что нужно исправить?",
+            REGISTRATION_EDIT_LIST,
+            next_flow=DialogV2State.REGISTRATION_CONFIRMATION,
+            flow_state=DialogV2State.REGISTRATION_CONFIRMATION,
+            metadata={"intent": "edit_menu", "pending_action": "choose_edit_field"},
+        )
+
+    def _post_document_reply(self, document_type: str, extracted_fields: dict[str, str], missing_fields: list[str], draft: dict) -> StructuredReply:
+        text = self._document_reply(document_type, extracted_fields, missing_fields, draft)
+        if missing_fields:
+            return StructuredReply(
+                text=text,
+                next_flow=DialogV2State.REGISTRATION_MISSING_FIELDS,
+                flow_state=DialogV2State.REGISTRATION_MISSING_FIELDS,
+                metadata={
+                    "intent": "document",
+                    "document_type": document_type,
+                    "extracted_fields": extracted_fields,
+                    "missing_fields": missing_fields,
+                    "is_registration_complete": False,
+                    "ready_for_yandex": False,
+                },
+            )
+        return self._confirmation_reply(draft, prefix=text)
 
     def start(self, db, driver, application) -> StructuredReply:
         draft = _ensure_registration_context(driver)
@@ -323,7 +362,7 @@ class RegistrationFlow:
             )
             if resolved.document_type == "unknown":
                 self._save_document(db, driver, message, "unknown", status="pending_confirmation")
-                return self._unknown_document_reply(draft, message)
+                return self._unknown_document_reply(driver, draft, message)
             resolved_type, extracted_fields, missing_fields = self._apply_extraction(
                 db,
                 driver,
@@ -359,6 +398,20 @@ class RegistrationFlow:
         if driver.state == DialogV2State.NEW and _is_registration_start(text):
             return self.start(db, driver, application)
 
+        # Resume an existing draft even if state was left as NEW.
+        if driver.state == DialogV2State.NEW and draft:
+            has_progress = bool(draft.get("documents")) or any(
+                value for value in (draft.get("driver") or {}).values() if value
+            )
+            if has_progress:
+                missing_now = self.missing.calculate(draft)
+                driver.state = (
+                    DialogV2State.REGISTRATION_MISSING_FIELDS
+                    if missing_now
+                    else DialogV2State.REGISTRATION_CONFIRMATION
+                )
+                _store_draft(driver, draft)
+
         normalized = _normalize_text(text)
         if draft.get("pending_action") == "confirm_document_type" and normalized in {"1", "2", "3", "4"}:
             mapping = {
@@ -367,9 +420,26 @@ class RegistrationFlow:
                 "3": "vehicle_registration_doc",
                 "4": "selfie_with_license",
             }
+            context = deepcopy(driver.support_context_json or {})
+            context.pop("pending_menu", None)
+            driver.support_context_json = context
+            flag_modified(driver, "support_context_json")
             return self._confirm_document_type(db, driver, application, message, draft, mapping[normalized])
 
-        if normalized in {"подтверждаю", "да", "ок", "ok"}:
+        if is_manager_choice(text):
+            from app.dialog_v2.flows.manager import ManagerHandoffFlow
+
+            return ManagerHandoffFlow().handle(db, driver, application, message, reason="human_requested")
+
+        if is_edit_choice(text) and driver.state in {
+            DialogV2State.REGISTRATION_CONFIRMATION,
+            DialogV2State.REGISTRATION_MISSING_FIELDS,
+            DialogV2State.READY_TO_SEND_YANDEX,
+            "yandex_error",
+        }:
+            return self._edit_menu_reply(driver, draft)
+
+        if is_confirm_choice(text):
             return self.yandex_auto_submit.submit(db, driver, application, draft)
 
         if driver.state in {
@@ -379,15 +449,18 @@ class RegistrationFlow:
             DialogV2State.READY_TO_SEND_YANDEX,
         }:
             current_missing = self.missing.calculate(draft)
-            if "city" in current_missing and len(current_missing) == 1 and text:
-                draft.setdefault("driver", {})["city"] = text
+            if "city" in current_missing and text and not is_edit_choice(text) and not is_confirm_choice(text):
+                # Accept free-text city only when that is the next actionable field.
+                next_step = self.summary.next_step_text(draft, current_missing)
+                if "город" in next_step.lower() or len([f for f in current_missing if f not in SummaryBuilder.DOCUMENTS_ORDER]) == 1:
+                    draft.setdefault("driver", {})["city"] = text
             self.missing.calculate(draft)
             _store_draft(driver, draft)
             missing = draft["missing_fields"]
             if missing:
                 driver.state = DialogV2State.REGISTRATION_MISSING_FIELDS
-                reply = StructuredReply(
-                    text=self.summary.build_missing_text(missing),
+                return StructuredReply(
+                    text=self.summary.build_missing_text(missing, draft),
                     next_flow=DialogV2State.REGISTRATION_MISSING_FIELDS,
                     flow_state=DialogV2State.REGISTRATION_MISSING_FIELDS,
                     metadata={
@@ -397,20 +470,9 @@ class RegistrationFlow:
                         "ready_for_yandex": False,
                     },
                 )
-                return reply
             driver.state = DialogV2State.REGISTRATION_CONFIRMATION
             self.bus.emit(db, driver, "summary_shown", {"draft": draft})
-            return StructuredReply(
-                text=self._final_summary(draft),
-                next_flow=DialogV2State.REGISTRATION_CONFIRMATION,
-                flow_state=DialogV2State.REGISTRATION_CONFIRMATION,
-                metadata={
-                    "intent": "summary",
-                    "draft": draft,
-                    "is_registration_complete": True,
-                    "ready_for_yandex": True,
-                },
-            )
+            return self._confirmation_reply(draft)
 
         if message.message_type in {"image", "document"}:
             return self.handle_document(db, driver, application, message)

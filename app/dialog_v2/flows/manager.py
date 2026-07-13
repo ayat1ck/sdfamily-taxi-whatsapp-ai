@@ -34,6 +34,18 @@ class ManagerHandoffFlow:
         base = (settings.admin_base_url or settings.app_host or "").rstrip("/")
         return f"{base}/admin/chats/{driver.id}"
 
+    def _handoff_text(self, reason: str | None = None) -> str:
+        phone = get_settings().public_site_manager_phone
+        reason_hint = ""
+        if reason and reason not in {"human_requested", "manager_requested", "support"}:
+            reason_hint = " Можете сразу одним сообщением уточнить детали."
+        return (
+            "Передал ваш запрос менеджеру.\n\n"
+            "Обычно отвечают в рабочее время в течение 15–60 минут.\n"
+            f"Если нужно срочно — напишите или позвоните: {phone}.{reason_hint}\n\n"
+            "Пока ждёте, можно просто описать проблему здесь — менеджер увидит переписку."
+        )
+
     def handle(self, db, driver, application, message, reason: str | None = None) -> StructuredReply:
         context = dict(driver.support_context_json or {})
         payload_reason = reason or (message.text or "").strip() or "manager_requested"
@@ -52,12 +64,13 @@ class ManagerHandoffFlow:
         context["dialog_mode"] = "bot_active"
         context["manager_ticket"] = ticket
         context["manager_alert"] = alert
+        context.pop("pending_menu", None)
         driver.support_context_json = context
         driver.dialog_mode = "bot_active"
         driver.requires_attention = True
 
         reply = StructuredReply(
-            text="Понял, передал менеджеру.",
+            text=self._handoff_text(payload_reason),
             requires_manager=True,
             flow="manager",
             state="manager",

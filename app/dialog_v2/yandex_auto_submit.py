@@ -11,30 +11,25 @@ from app.dialog_v2.event_bus import EventBus
 from app.dialog_v2.response import StructuredReply
 from app.dialog_v2.states import DialogV2State
 from app.integrations.yandex.client import YandexPartialSubmissionError
+from app.integrations.yandex.messages import build_confirm_retry_text, format_yandex_error_for_user
 from app.integrations.yandex.service import YandexSubmissionService
+from app.dialog_v2.ui import CONFIRM_BUTTONS, buttons_reply
 from app.utils.text import repair_mojibake
 from app.vehicles.service import get_or_create_vehicle
 
 
 SUCCESS_TEXT = (
-    "\u0413\u043e\u0442\u043e\u0432\u043e. \u0410\u043d\u043a\u0435\u0442\u0430 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 "
-    "\u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0430 \u0432 \u042f\u043d\u0434\u0435\u043a\u0441. "
-    "\u0414\u0430\u043b\u044c\u0448\u0435 \u043c\u044b \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u043c \u0441\u0442\u0430\u0442\u0443\u0441 "
-    "\u0438 \u043f\u043e\u0434\u0441\u043a\u0430\u0436\u0435\u043c \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0448\u0430\u0433."
+    "Готово! Анкета отправлена в Яндекс.\n\n"
+    "Что дальше:\n"
+    "1. Откройте Яндекс Про\n"
+    "2. Войдите по своему номеру телефона\n"
+    "3. Найдите наш парк в списке\n"
+    "4. Если парка нет или аккаунт неактивен — напишите сюда «менеджер»\n\n"
+    "Мы проверим статус и поможем, если что-то не подтянется."
 )
 
 FAILURE_PREFIX = (
-    "\u0410\u043d\u043a\u0435\u0442\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430, "
-    "\u043d\u043e \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c "
-    "\u0432 \u042f\u043d\u0434\u0435\u043a\u0441 \u043d\u0435 \u043f\u043e\u043b\u0443\u0447\u0438\u043b\u043e\u0441\u044c."
-)
-
-CONFIRM_RETRY_TEXT = (
-    "\u0418\u0441\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0438 "
-    "\u043d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 \"\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u044e\" "
-    "\u0434\u043b\u044f \u043f\u043e\u0432\u0442\u043e\u0440\u043d\u043e\u0439 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0438 "
-    "\u0438\u043b\u0438 \"\u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\", \u0435\u0441\u043b\u0438 \u043d\u0443\u0436\u043d\u0430 "
-    "\u043f\u043e\u043c\u043e\u0449\u044c."
+    "Анкета сохранена, но автоматически отправить в Яндекс не получилось."
 )
 
 YANDEX_NOT_CONFIGURED_TEXT = (
@@ -183,9 +178,10 @@ class DialogV2YandexAutoSubmit:
 
     def _failure_reply(self, driver, application, exc: Exception) -> StructuredReply:
         driver.state = "yandex_error"
-        details = f"Yandex error: {str(exc)}"
-        return StructuredReply(
-            text=f"{FAILURE_PREFIX}\n\n{details}\n\n{CONFIRM_RETRY_TEXT}",
+        details = format_yandex_error_for_user(str(exc))
+        return buttons_reply(
+            f"{FAILURE_PREFIX}\n\n{details}\n\n{build_confirm_retry_text()}",
+            CONFIRM_BUTTONS,
             next_flow="yandex_error",
             flow_state="yandex_error",
             metadata={

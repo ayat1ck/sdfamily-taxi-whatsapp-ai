@@ -13,6 +13,7 @@ from app.drivers.service import get_or_create_driver
 from app.whatsapp.parser import ParsedWhatsAppMessage
 
 import app.audit.models  # noqa: F401
+import app.ai_traces.models  # noqa: F401
 import app.conversation_events.models  # noqa: F401
 import app.documents.models  # noqa: F401
 import app.integration_jobs.models  # noqa: F401
@@ -93,8 +94,12 @@ class DialogV2StatefulTests(unittest.TestCase):
             db.commit()
             self.assertIsNotNone(reply)
             self.assertEqual(reply.flow, "profile_update")
-            self.assertIn("ФИО", reply.text)
-            self.assertIn("Менеджер", reply.text)
+            self.assertEqual(reply.type, "list")
+            titles = " ".join(
+                (item.get("title") if isinstance(item, dict) else str(item)) for item in reply.list_items
+            )
+            self.assertIn("ФИО", titles)
+            self.assertIn("Менеджер", titles)
             self.assertEqual(driver.support_context_json["manager_ticket"]["reason"], "profile_update")
             self.assertEqual(driver.support_context_json["manager_ticket"]["status"], "collecting")
 

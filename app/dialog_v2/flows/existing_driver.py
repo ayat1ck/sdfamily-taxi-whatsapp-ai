@@ -4,17 +4,13 @@ from app.dialog_v2.event_bus import EventBus
 from app.dialog_v2.flows.manager import ManagerHandoffFlow
 from app.dialog_v2.flows.profile_update import ProfileUpdateFlow
 from app.dialog_v2.response import StructuredReply
+from app.dialog_v2.ui import EXISTING_DRIVER_MENU_LIST, list_reply
 from app.drivers.service import find_driver_by_iin, find_driver_by_phone, find_driver_by_whatsapp_phone
 
 
 MENU_TEXT = (
     "Понял, вы уже подключены. Что нужно?\n"
-    "1. Выплаты\n"
-    "2. Тарифы\n"
-    "3. Вход в Яндекс Про\n"
-    "4. Изменить данные\n"
-    "5. Блокировка/заказы\n"
-    "6. Менеджер"
+    "Выберите пункт меню ниже."
 )
 
 
@@ -40,6 +36,15 @@ class ExistingDriverFlow:
             f"Авто: {vehicle_text}"
         )
 
+    def _menu_reply(self, matched_driver) -> StructuredReply:
+        return list_reply(
+            f"{self._profile_text(matched_driver)}\n\n{MENU_TEXT}",
+            EXISTING_DRIVER_MENU_LIST,
+            flow="existing_driver",
+            state="existing_driver",
+            metadata={"intent": "existing_driver_menu", "driver_id": matched_driver.id},
+        )
+
     def _store_menu(self, driver, matched_driver_id: int) -> None:
         context = self._context(driver)
         context["existing_driver_target_id"] = matched_driver_id
@@ -59,17 +64,14 @@ class ExistingDriverFlow:
         if choice == "3":
             return self.manager_flow.handle(db, matched_driver, application, message, reason="yandex_login_issue")
         if choice == "4":
-            return self.profile_update_flow.handle(db, matched_driver, application, message, reason="profile_update")
+            return self.profile_update_flow.handle(
+                db, matched_driver, application, message, reason="profile_update", show_menu=True
+            )
         if choice == "5":
             return self.manager_flow.handle(db, matched_driver, application, message, reason="blocking_or_orders")
         if choice == "6":
             return self.manager_flow.handle(db, matched_driver, application, message, reason="human_requested")
-        return StructuredReply(
-            text=f"{self._profile_text(matched_driver)}\n\n{MENU_TEXT}",
-            flow="existing_driver",
-            state="existing_driver",
-            metadata={"intent": "existing_driver_menu"},
-        )
+        return self._menu_reply(matched_driver)
 
     def handle(self, db, driver, application, message) -> StructuredReply:
         context = self._context(driver)
@@ -95,12 +97,8 @@ class ExistingDriverFlow:
                 matched = find_driver_by_phone(db, text)
 
         if matched:
-            reply = StructuredReply(
-                text=f"{self._profile_text(matched)}\n\n{MENU_TEXT}",
-                flow="existing_driver",
-                state="existing_driver",
-                metadata={"intent": "existing_driver", "driver_id": matched.id},
-            )
+            reply = self._menu_reply(matched)
+            reply.metadata["intent"] = "existing_driver"
             self._store_menu(driver, matched.id)
             self.bus.emit(db, matched, "existing_driver_found", {"by": "whatsapp_phone"}, reply=reply)
             return reply

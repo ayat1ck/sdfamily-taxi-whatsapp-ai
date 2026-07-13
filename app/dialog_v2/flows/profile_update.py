@@ -3,20 +3,10 @@ from __future__ import annotations
 from app.dialog_v2.event_bus import EventBus
 from app.dialog_v2.flows.manager import ManagerHandoffFlow
 from app.dialog_v2.response import StructuredReply
+from app.dialog_v2.ui import PROFILE_UPDATE_LIST, list_reply
 
 
-PROFILE_UPDATE_MENU = (
-    "Что нужно изменить?\n"
-    "1. ФИО\n"
-    "2. Телефон\n"
-    "3. Город/адрес\n"
-    "4. Автомобиль\n"
-    "5. Госномер\n"
-    "6. СТС/техпаспорт\n"
-    "7. Водительское удостоверение\n"
-    "8. СМЗ/тип сотрудничества\n"
-    "9. Менеджер"
-)
+PROFILE_UPDATE_MENU = "Что нужно изменить?\nВыберите пункт меню ниже."
 
 FIELD_MAP = {
     "1": "full_name",
@@ -49,10 +39,19 @@ class ProfileUpdateFlow:
             "status": "collecting",
         }
 
-    def handle(self, db, driver, application, message, reason: str = "profile_update") -> StructuredReply:
-        text = (message.text or "").strip()
+    def _menu_reply(self, ticket: dict) -> StructuredReply:
+        return list_reply(
+            PROFILE_UPDATE_MENU,
+            PROFILE_UPDATE_LIST,
+            flow="profile_update",
+            state="profile_update",
+            metadata={"intent": "profile_update", "ticket": ticket},
+        )
+
+    def handle(self, db, driver, application, message, reason: str = "profile_update", *, show_menu: bool = False) -> StructuredReply:
+        text = "" if show_menu else (message.text or "").strip()
         context = self._context(driver)
-        selected_field = FIELD_MAP.get(text)
+        selected_field = None if show_menu else FIELD_MAP.get(text)
 
         ticket = dict(context.get("manager_ticket") or {})
         if not ticket or ticket.get("reason") != "profile_update":
@@ -75,7 +74,7 @@ class ProfileUpdateFlow:
                 current_value = driver.driver_license_number
             elif selected_field == "employment_type":
                 current_value = driver.employment_type
-            ticket = self._ticket_payload(selected_field or "manager", current_value)
+            ticket = self._ticket_payload(selected_field or "full_name", current_value)
 
         if selected_field is None and text:
             ticket.setdefault("reason", "profile_update")
@@ -84,6 +83,7 @@ class ProfileUpdateFlow:
         context["profile_update_requested"] = True
         context["profile_update_reason"] = reason
         context["manager_ticket"] = ticket
+        context["pending_menu"] = "profile_update_menu"
         driver.support_context_json = context
         driver.requires_attention = True
 
@@ -91,13 +91,26 @@ class ProfileUpdateFlow:
             self.bus.emit(db, driver, "profile_update_requested", {"reason": reason, "field": "manager"})
             return self.manager_flow.handle(db, driver, application, message, reason="profile_update")
 
-        reply = StructuredReply(
-            text=PROFILE_UPDATE_MENU,
-            flow="profile_update",
-            state="profile_update",
-            metadata={"intent": "profile_update", "ticket": ticket},
-        )
+        if selected_field and selected_field != "manager":
+            ticket["field"] = selected_field
+            context["manager_ticket"] = ticket
+            driver.support_context_json = context
+            reply = StructuredReply(
+                text=(
+                    f"Принял: нужно изменить «{selected_field}».\n"
+                    "Напишите новое значение или отправьте фото документа.\n"
+                    "Менеджер проверит и обновит данные."
+                ),
+                flow="profile_update",
+                state="profile_update",
+                requires_manager=True,
+                metadata={"intent": "profile_update", "ticket": ticket},
+            )
+            self.bus.emit(db, driver, "profile_update_requested", {"reason": reason, "field": selected_field}, reply=reply)
+            self.bus.emit(db, driver, "support_ticket_created", {"kind": "profile_update", "field": selected_field}, reply=reply)
+            return reply
+
+        reply = self._menu_reply(ticket)
         self.bus.emit(db, driver, "profile_update_requested", {"reason": reason, "field": ticket.get("field")}, reply=reply)
         self.bus.emit(db, driver, "support_ticket_created", {"kind": "profile_update", "field": ticket.get("field")}, reply=reply)
-
         return reply

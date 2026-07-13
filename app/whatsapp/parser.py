@@ -44,6 +44,35 @@ def parse_whatsapp_payload(payload: dict) -> list[ParsedWhatsAppMessage]:
                             raw_payload=message,
                         )
                     )
+                elif message_type == "interactive":
+                    interactive = message.get("interactive") or {}
+                    interactive_type = interactive.get("type")
+                    choice_text = None
+                    if interactive_type == "button_reply":
+                        button_reply = interactive.get("button_reply") or {}
+                        choice_text = button_reply.get("id") or button_reply.get("title")
+                    elif interactive_type == "list_reply":
+                        list_reply = interactive.get("list_reply") or {}
+                        choice_text = list_reply.get("id") or list_reply.get("title")
+                    if choice_text:
+                        parsed.append(
+                            ParsedWhatsAppMessage(
+                                sender_phone=sender,
+                                message_type="text",
+                                text=str(choice_text),
+                                provider_message_id=message.get("id"),
+                                raw_payload=message,
+                            )
+                        )
+                    else:
+                        parsed.append(
+                            ParsedWhatsAppMessage(
+                                sender_phone=sender,
+                                message_type="unsupported",
+                                provider_message_id=message.get("id"),
+                                raw_payload=message,
+                            )
+                        )
                 else:
                     parsed.append(
                         ParsedWhatsAppMessage(

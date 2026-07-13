@@ -97,7 +97,7 @@ class DialogV2SerializerTests(unittest.TestCase):
             get_settings_mock.return_value = settings
             parse_mock.return_value = [SimpleNamespace(sender_phone="+77001112233", message_type="text", text="оператор", provider_message_id="wamid-1", raw_payload=payload)]
             handle_mock.return_value = StructuredReply(
-                text="Понял, передал менеджеру.",
+                text="Передал ваш запрос менеджеру.",
                 requires_manager=True,
                 flow="manager",
                 state="manager",

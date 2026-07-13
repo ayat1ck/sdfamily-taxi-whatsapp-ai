@@ -9,6 +9,16 @@ from app.dialog_v2.missing_fields import MissingFieldsCalculator
 from app.dialog_v2.response import StructuredReply
 from app.dialog_v2.states import DialogV2State
 from app.dialog_v2.summary_builder import SummaryBuilder
+from app.dialog_v2.ui import (
+    CONFIRM_BUTTONS,
+    EDIT_ACTION_BY_ID,
+    REGISTRATION_EDIT_LIST,
+    buttons_reply,
+    is_confirm_choice,
+    is_edit_choice,
+    is_manager_choice,
+    list_reply,
+)
 from app.dialog_v2.yandex_auto_submit import DialogV2YandexAutoSubmit
 from app.utils.text import repair_mojibake
 from app.utils.validators import normalize_text_token
@@ -72,12 +82,17 @@ class GlobalIntentRouter:
 
     def handle(self, db, driver, application, message, registration_flow=None) -> StructuredReply | None:
         pending_action = (_draft(driver) or {}).get("pending_action")
+        pending_menu = _context(driver).get("pending_menu")
 
         if pending_action == "confirm_reset_registration" and message.message_type == "text":
             text = _normalized(message.text)
             if self._is_confirmation(text):
                 return self._reset_registration(driver)
             return self._clear_pending(driver, "Ок, не сбрасываю анкету. Продолжаем с текущими данными.")
+
+        if pending_action == "choose_edit_field" or pending_menu == "registration_edit_fields":
+            if message.message_type == "text":
+                return self._handle_edit_field_choice(driver, message.text or "")
 
         if pending_action in DOCUMENT_PENDING_ACTIONS and message.message_type in {"image", "document"} and registration_flow:
             reply = registration_flow.handle_document(db, driver, application, message)
@@ -94,7 +109,7 @@ class GlobalIntentRouter:
         if not text:
             return None
 
-        if self._is_manager(text):
+        if self._is_manager(text) or is_manager_choice(message.text or ""):
             reply = self.manager.handle(db, driver, application, message, reason="human_requested")
             self._decorate(reply, "manager", "manager_handoff", driver)
             return reply
@@ -111,6 +126,9 @@ class GlobalIntentRouter:
         if self._is_delete_last_photo(text):
             return self._delete_last_document(driver)
 
+        if is_edit_choice(message.text or "") and driver.state in REGISTRATION_STATES | {"yandex_error"}:
+            return self._show_edit_menu(driver)
+
         if self._is_confirmation(text):
             draft = _draft(driver)
             if draft:
@@ -120,18 +138,11 @@ class GlobalIntentRouter:
                     reply = self.yandex_auto_submit.submit(db, driver, application, draft)
                     reply.metadata.update(self._metadata("confirmation", "submit_to_yandex", driver))
                     return reply
-                    driver.state = DialogV2State.READY_TO_SEND_YANDEX
-                    set_application_status(db, application, "ready_to_send_yandex")
-                    return StructuredReply(
-                        text="Принято. Анкета готова к отправке в Яндекс.",
-                        flow="registration",
-                        state=DialogV2State.READY_TO_SEND_YANDEX,
-                        metadata=self._metadata("confirmation", "ready_to_send_yandex", driver),
-                    )
 
-        correction_action = self._correction_action(text)
-        if correction_action:
-            return self._start_correction(driver, correction_action)
+        if driver.state in REGISTRATION_STATES | {"yandex_error"}:
+            correction_action = self._correction_action(text)
+            if correction_action:
+                return self._start_correction(driver, correction_action)
 
         if driver.state in REGISTRATION_STATES and _draft(driver):
             draft = _draft(driver) or {}
@@ -156,7 +167,32 @@ class GlobalIntentRouter:
         return "удалить" in text and any(token in text for token in ("последнее фото", "последний файл", "последний документ", "фото"))
 
     def _is_confirmation(self, text: str) -> bool:
-        return text in {"подтверждаю", "все верно", "всё верно", "дұрыс", "ok", "ок"}
+        return is_confirm_choice(text)
+
+    def _show_edit_menu(self, driver) -> StructuredReply:
+        draft = _draft(driver) or {}
+        draft["pending_action"] = "choose_edit_field"
+        _save_draft(driver, draft)
+        context = _context(driver)
+        context["pending_menu"] = "registration_edit_fields"
+        _save_context(driver, context)
+        return list_reply(
+            "Что нужно исправить?",
+            REGISTRATION_EDIT_LIST,
+            flow="global",
+            state=driver.state,
+            metadata=self._metadata("edit_menu", "choose_edit_field", driver),
+        )
+
+    def _handle_edit_field_choice(self, driver, raw_text: str) -> StructuredReply:
+        choice = (raw_text or "").strip()
+        action = EDIT_ACTION_BY_ID.get(choice)
+        if not action:
+            return self._show_edit_menu(driver)
+        context = _context(driver)
+        context.pop("pending_menu", None)
+        _save_context(driver, context)
+        return self._start_correction(driver, action)
 
     def _correction_action(self, text: str) -> str | None:
         if not any(token in text for token in ("изменить", "поменять", "исправить", "заменить", "не тот", "неправильно", "другой", "новое", "новый", "новая")):
@@ -213,12 +249,20 @@ class GlobalIntentRouter:
         draft["pending_action"] = None
         missing = self.missing.calculate(draft)
         _save_draft(driver, draft)
-        text = f"Обновил: {label}.\n\n"
-        text += self.summary.build_final_summary(draft) if not missing else self.summary.build_missing_text(missing)
-        return StructuredReply(
-            text=text,
+        prefix = f"Обновил: {label}."
+        if missing:
+            text = f"{prefix}\n\n{self.summary.build_missing_text(missing, draft)}"
+            return StructuredReply(
+                text=text,
+                flow="global",
+                state=driver.state,
+                metadata=self._metadata("correction_applied", action, driver),
+            )
+        return buttons_reply(
+            f"{prefix}\n\n{self.summary.build_final_summary(draft)}",
+            CONFIRM_BUTTONS,
             flow="global",
-            state=DialogV2State.REGISTRATION_CONFIRMATION if not missing else driver.state,
+            state=DialogV2State.REGISTRATION_CONFIRMATION,
             metadata=self._metadata("correction_applied", action, driver),
         )
 
@@ -228,7 +272,20 @@ class GlobalIntentRouter:
             return StructuredReply(text="Пока нет сохранённой анкеты.", flow="global", state=driver.state, metadata=self._metadata("summary", "empty", driver))
         self.missing.calculate(draft)
         _save_draft(driver, draft)
-        return StructuredReply(text=self.summary.build_final_summary(draft), flow="global", state=driver.state, metadata=self._metadata("summary", "show_summary", driver))
+        if draft.get("ready_for_yandex"):
+            return buttons_reply(
+                self.summary.build_final_summary(draft),
+                CONFIRM_BUTTONS,
+                flow="global",
+                state=driver.state,
+                metadata=self._metadata("summary", "show_summary", driver),
+            )
+        return StructuredReply(
+            text=self.summary.build_final_summary(draft),
+            flow="global",
+            state=driver.state,
+            metadata=self._metadata("summary", "show_summary", driver),
+        )
 
     def _missing_reply(self, driver) -> StructuredReply:
         draft = _draft(driver)
@@ -236,7 +293,12 @@ class GlobalIntentRouter:
             return StructuredReply(text="Пока нет сохранённой анкеты.", flow="global", state=driver.state, metadata=self._metadata("missing_fields", "empty", driver))
         missing = self.missing.calculate(draft)
         _save_draft(driver, draft)
-        return StructuredReply(text=self.summary.build_missing_text(missing), flow="global", state=driver.state, metadata=self._metadata("missing_fields", "show_missing", driver))
+        return StructuredReply(
+            text=self.summary.build_missing_text(missing, draft),
+            flow="global",
+            state=driver.state,
+            metadata=self._metadata("missing_fields", "show_missing", driver),
+        )
 
     def _delete_last_document(self, driver) -> StructuredReply:
         draft = _draft(driver)
@@ -261,8 +323,12 @@ class GlobalIntentRouter:
         context = _context(driver)
         context.pop("pending_menu", None)
         _save_context(driver, context)
-        return StructuredReply(
-            text='Сбросить текущую анкету и начать заново? Если да, напишите "Подтверждаю".',
+        return buttons_reply(
+            "Сбросить текущую анкету и начать заново?",
+            [
+                {"type": "reply", "reply": {"id": "confirm", "title": "Подтверждаю"}},
+                {"type": "reply", "reply": {"id": "cancel_reset", "title": "Отмена"}},
+            ],
             flow="global",
             state=driver.state,
             metadata=self._metadata("reset", "confirm_reset_registration", driver),
