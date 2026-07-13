@@ -179,6 +179,7 @@ class DialogueEngine:
             message_type=incoming.message_type,
             text=incoming.text,
             provider_message_id=incoming.provider_message_id,
+            media_url=incoming.media_id,
             mime_type=incoming.mime_type,
             delivery_status="received",
             raw_payload=incoming.raw_payload,

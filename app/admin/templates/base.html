@@ -277,6 +277,26 @@
     }
     .message-author { font-weight: 700; color: var(--text); }
     .message-type { opacity: 0.8; }
+    .message-media {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .message-media img,
+    .message-media video {
+      display: block;
+      max-width: min(100%, 360px);
+      max-height: 320px;
+      width: auto;
+      height: auto;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #000;
+      object-fit: contain;
+    }
+    .message-media audio {
+      width: min(100%, 360px);
+    }
 
     .section-title {
       margin: 0 0 12px;

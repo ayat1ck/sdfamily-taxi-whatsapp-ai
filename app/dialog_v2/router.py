@@ -68,7 +68,7 @@ class Router:
         if global_reply is not None:
             return DialogContext(flow=global_reply.flow or "global", stage=global_reply.state or driver.state, intent=global_reply.metadata.get("intent", "global"), structured_reply=global_reply)
 
-        if message.message_type in {"image", "document"}:
+        if message.message_type in {"image", "document", "video"}:
             reply = self.registration.handle_document(db, driver, application, message)
             return DialogContext(flow="registration", stage=driver.state, intent=reply.metadata.get("intent", "registration"), structured_reply=reply)
 

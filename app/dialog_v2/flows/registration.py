@@ -141,6 +141,7 @@ class RegistrationFlow:
             message_type=message.message_type,
             text=message.text,
             provider_message_id=message.provider_message_id,
+            media_url=message.media_id,
             mime_type=message.mime_type,
             raw_payload=message.raw_payload,
             delivery_status="received",

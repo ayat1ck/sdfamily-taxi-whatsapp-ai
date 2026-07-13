@@ -121,6 +121,7 @@ async def receive_webhook(request: Request, db: Session = Depends(get_db)) -> di
                 message_type=parsed.message_type,
                 text=parsed.text,
                 provider_message_id=parsed.provider_message_id,
+                media_url=parsed.media_id,
                 mime_type=parsed.mime_type,
                 delivery_status="received",
                 raw_payload=parsed.raw_payload,

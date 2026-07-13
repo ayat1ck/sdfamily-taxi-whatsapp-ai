@@ -84,7 +84,30 @@
                   <span><span class="message-author">{{ message_label }}</span> <span class="message-type">· {{ message.message_type }}</span></span>
                   <span>{{ message.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
                 </div>
-                <div>{{ message.text or "—" }}</div>
+                {% set media = message_media(message) %}
+                {% if message.text %}
+                  <div>{{ message.text }}</div>
+                {% elif not media.available %}
+                  <div>—</div>
+                {% endif %}
+                {% if media.available %}
+                  <div class="message-media">
+                    {% if media.kind == "image" or (media.mime_type and media.mime_type.startswith("image/")) %}
+                      <a href="{{ media.preview_url }}" target="_blank" rel="noopener">
+                        <img src="{{ media.preview_url }}" alt="{{ media.filename or 'Фото' }}" loading="lazy">
+                      </a>
+                    {% elif media.kind == "video" or (media.mime_type and media.mime_type.startswith("video/")) %}
+                      <video controls preload="metadata" src="{{ media.preview_url }}"></video>
+                      <div><a class="button secondary" href="{{ media.preview_url }}" target="_blank" rel="noopener">Открыть видео</a></div>
+                    {% elif media.kind == "audio" or (media.mime_type and media.mime_type.startswith("audio/")) %}
+                      <audio controls preload="metadata" src="{{ media.preview_url }}"></audio>
+                    {% else %}
+                      <a class="button secondary" href="{{ media.preview_url }}" target="_blank" rel="noopener">
+                        Открыть файл{% if media.filename %}: {{ media.filename }}{% endif %}
+                      </a>
+                    {% endif %}
+                  </div>
+                {% endif %}
                 {% if message.delivery_status or message.provider_message_id %}
                   <div class="muted" style="margin-top:6px;">{{ message.delivery_status or "" }} {{ message.provider_message_id or "" }}</div>
                 {% endif %}

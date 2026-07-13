@@ -31,7 +31,7 @@ def parse_whatsapp_payload(payload: dict) -> list[ParsedWhatsAppMessage]:
                             raw_payload=message,
                         )
                     )
-                elif message_type in {"image", "document"}:
+                elif message_type in {"image", "document", "video", "audio", "sticker"}:
                     media_payload = message.get(message_type, {})
                     parsed.append(
                         ParsedWhatsAppMessage(

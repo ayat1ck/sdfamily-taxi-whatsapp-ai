@@ -23,6 +23,7 @@ from app.admin.auth import (
     verify_csrf,
     verify_password,
 )
+from app.admin.message_media import message_media_info, resolve_message_media_id
 from app.config import get_settings
 from app.admin.service import (
     ChatFilters,
@@ -57,10 +58,12 @@ from app.documents.models import Document
 from app.drivers.models import Driver
 from app.integration_jobs.models import IntegrationJob
 from app.integrations.yandex.service import YandexSubmissionService
+from app.messages.models import Message
 from app.whatsapp.media import WhatsAppMediaClient
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+templates.env.globals["message_media"] = message_media_info
 media_client = WhatsAppMediaClient()
 
 
@@ -559,6 +562,33 @@ def api_document_view(
         headers = {"Content-Disposition": f'inline; filename="{filename}"'}
         return Response(content=content, media_type=media_type, headers=headers)
     raise HTTPException(status_code=404, detail="Document content is not available")
+
+
+@router.get("/api/messages/{message_id}/media")
+def api_message_media(
+    message_id: int,
+    _admin=Depends(require_admin_api),
+    db: Session = Depends(get_db),
+) -> Response:
+    message = db.get(Message, message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    info = message_media_info(message)
+    if message.media_url and str(message.media_url).startswith(("http://", "https://")):
+        return RedirectResponse(message.media_url, status_code=307)
+    if message.media_url and str(message.media_url).startswith("/"):
+        return RedirectResponse(message.media_url, status_code=307)
+    media_id = resolve_message_media_id(message)
+    if not media_id:
+        raise HTTPException(status_code=404, detail="Message media is not available")
+    try:
+        content, detected_mime_type = media_client.fetch_media(media_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch WhatsApp media: {exc}") from exc
+    media_type = info.mime_type or detected_mime_type or "application/octet-stream"
+    filename = info.filename or f"message_{message.id}"
+    headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+    return Response(content=content, media_type=media_type, headers=headers)
 
 
 @router.get("/api/events")
