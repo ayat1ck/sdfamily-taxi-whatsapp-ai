@@ -57,6 +57,8 @@ class Router:
             driver.support_context_json = context
             flag_modified(driver, "support_context_json")
             return None
+        if pending_menu == "manager_triage":
+            return self.manager.handle_triage_choice(db, driver, application, message)
         if pending_menu == "confirm_document_type":
             return self.registration.handle_text(db, driver, application, message)
         if pending_menu == "registration_edit_fields":
@@ -77,8 +79,8 @@ class Router:
             return DialogContext(flow=pending_reply.flow or pending_reply.next_flow or "pending_menu", stage=pending_reply.state or pending_reply.flow_state or driver.state, intent=pending_reply.metadata.get("intent", "pending_menu"), structured_reply=pending_reply)
 
         if self.manager.should_handoff(driver, message):
-            reply = self.manager.handle(db, driver, application, message)
-            return DialogContext(flow="manager", stage="manual", intent="manager", structured_reply=reply)
+            reply = self.manager.offer_triage(driver, reason=(message.text or "").strip() or "human_requested")
+            return DialogContext(flow="manager", stage="manager_triage", intent="manager_triage", structured_reply=reply)
 
         if looks_like_existing_driver(message.text):
             reply = self.existing_driver.handle(db, driver, application, message)

@@ -43,7 +43,7 @@ class SupportFlow:
     def handle(self, db, driver, application, message) -> StructuredReply:
         text = normalize_text_token(repair_mojibake(message.text or ""))
         if any(token in text for token in MANAGER_TOPICS):
-            reply = self.manager.handle(db, driver, application, message, reason=(message.text or "").strip() or "support")
+            reply = self.manager.handle(db, driver, application, message, reason=(message.text or "").strip() or "support", skip_triage=True)
             reply.metadata["intent"] = "support"
             return reply
         return self.faq.handle(db, driver, application, message)

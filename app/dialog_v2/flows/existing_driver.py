@@ -58,19 +58,19 @@ class ExistingDriverFlow:
         self._store_menu(driver, matched_driver.id)
 
         if choice == "1":
-            return self.manager_flow.handle(db, matched_driver, application, message, reason="payout_issue")
+            return self.manager_flow.handle(db, matched_driver, application, message, reason="payout_issue", skip_triage=True)
         if choice == "2":
-            return self.manager_flow.handle(db, matched_driver, application, message, reason="tariff_issue")
+            return self.manager_flow.handle(db, matched_driver, application, message, reason="tariff_issue", skip_triage=True)
         if choice == "3":
-            return self.manager_flow.handle(db, matched_driver, application, message, reason="yandex_login_issue")
+            return self.manager_flow.handle(db, matched_driver, application, message, reason="yandex_login_issue", skip_triage=True)
         if choice == "4":
             return self.profile_update_flow.handle(
                 db, matched_driver, application, message, reason="profile_update", show_menu=True
             )
         if choice == "5":
-            return self.manager_flow.handle(db, matched_driver, application, message, reason="blocking_or_orders")
+            return self.manager_flow.handle(db, matched_driver, application, message, reason="blocking_or_orders", skip_triage=True)
         if choice == "6":
-            return self.manager_flow.handle(db, matched_driver, application, message, reason="human_requested")
+            return self.manager_flow.handle(db, matched_driver, application, message, reason="human_requested", skip_triage=True)
         return self._menu_reply(matched_driver)
 
     def handle(self, db, driver, application, message) -> StructuredReply:

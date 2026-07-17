@@ -111,7 +111,9 @@ class GlobalIntentRouter:
 
         if self._is_manager(text) or is_manager_choice(message.text or ""):
             reply = self.manager.handle(db, driver, application, message, reason="human_requested")
-            self._decorate(reply, "manager", "manager_handoff", driver)
+            intent = reply.metadata.get("intent") or "manager"
+            action = "manager_triage" if intent == "manager_triage" else "manager_handoff"
+            self._decorate(reply, intent, action, driver)
             return reply
 
         if self._is_cancel(text):

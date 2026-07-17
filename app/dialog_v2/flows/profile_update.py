@@ -89,7 +89,7 @@ class ProfileUpdateFlow:
 
         if selected_field == "manager":
             self.bus.emit(db, driver, "profile_update_requested", {"reason": reason, "field": "manager"})
-            return self.manager_flow.handle(db, driver, application, message, reason="profile_update")
+            return self.manager_flow.handle(db, driver, application, message, reason="profile_update", skip_triage=True)
 
         if selected_field and selected_field != "manager":
             ticket["field"] = selected_field

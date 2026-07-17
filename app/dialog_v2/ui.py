@@ -69,6 +69,12 @@ CONFIRM_BUTTONS = [
     reply_button("manager", "Менеджер"),
 ]
 
+MANAGER_TRIAGE_BUTTONS = [
+    reply_button("mgr_register", "Регистрация"),
+    reply_button("mgr_help", "Уже водитель"),
+    reply_button("mgr_human", "Менеджеру"),
+]
+
 DOCUMENT_TYPE_LIST = [
     list_row("1", "ВУ", "Водительское удостоверение"),
     list_row("2", "Техпаспорт", "Техпаспорт / СТС авто"),
@@ -134,3 +140,19 @@ def is_edit_choice(text: str) -> bool:
 def is_manager_choice(text: str) -> bool:
     normalized = (text or "").strip().lower()
     return normalized in {"manager", "менеджер", "оператор"}
+
+
+def is_manager_triage_choice(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    return normalized in {
+        "mgr_register",
+        "mgr_help",
+        "mgr_human",
+        "1",
+        "2",
+        "3",
+        "регистрация",
+        "уже водитель",
+        "помощь",
+        "менеджеру",
+    }
