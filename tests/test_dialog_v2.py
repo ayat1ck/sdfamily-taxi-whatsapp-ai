@@ -565,6 +565,19 @@ class DialogV2Tests(unittest.TestCase):
                 provider_message_id="msg-14",
             )
             db.commit()
+            # First the bot triages the request instead of paging a human immediately.
+            self.assertEqual(reply.flow or reply.next_flow, "manager")
+            self.assertEqual(reply.metadata.get("intent"), "manager_triage")
+            self.assertEqual((driver.support_context_json or {}).get("pending_menu"), "manager_triage")
+
+            reply = self._send(
+                db,
+                driver,
+                message_type="text",
+                text="mgr_human",
+                provider_message_id="msg-14b",
+            )
+            db.commit()
             self.assertEqual(reply.flow or reply.next_flow, "manager")
             self.assertTrue(reply.requires_manager)
 
@@ -648,6 +661,12 @@ class DialogV2Tests(unittest.TestCase):
             db.commit()
 
             reply = self._send(db, driver, message_type="text", text="оператор", provider_message_id="msg-17")
+            db.commit()
+
+            self.assertEqual(reply.flow, "manager")
+            self.assertEqual(reply.metadata.get("intent"), "manager_triage")
+
+            reply = self._send(db, driver, message_type="text", text="mgr_human", provider_message_id="msg-17b")
             db.commit()
 
             self.assertEqual(reply.flow, "manager")
