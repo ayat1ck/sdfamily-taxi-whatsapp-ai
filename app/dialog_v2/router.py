@@ -152,6 +152,8 @@ class Router:
             return None
         if pending_menu == "manager_triage":
             return self.manager.handle_triage_choice(db, driver, application, message)
+        if pending_menu == "employment_type":
+            return self.registration.handle_employment_choice(db, driver, application, message)
         if pending_menu == "fallback_menu":
             return self._fallback_menu_choice(db, driver, application, message)
         if pending_menu == "confirm_document_type":

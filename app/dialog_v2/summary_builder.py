@@ -2,6 +2,9 @@ from __future__ import annotations
 
 
 class SummaryBuilder:
+    # Split-name parts are kept in the draft for Yandex, but not shown to the driver.
+    HIDDEN_REPLY_FIELDS = frozenset({"last_name", "first_name", "middle_name"})
+
     LABELS = {
         "full_name": "ФИО",
         "iin": "ИИН",
@@ -9,6 +12,7 @@ class SummaryBuilder:
         "phone": "Телефон",
         "city": "Город",
         "address": "Адрес",
+        "employment_type": "Условие работы",
         "driving_experience_since": "Стаж",
         "driver_license_number": "ВУ",
         "driver_license_issue_date": "Дата выдачи ВУ",
@@ -40,6 +44,7 @@ class SummaryBuilder:
         "birth_date": "Напишите дату рождения в формате ДД.ММ.ГГГГ.",
         "city": "Напишите город.",
         "address": "Напишите адрес.",
+        "employment_type": "Выберите условие работы: СМЗ или парковый водитель.",
         "driver_license_number": "Напишите номер водительского удостоверения.",
         "driver_license_issue_date": "Напишите дату выдачи ВУ.",
         "driver_license_expires_at": "Напишите срок действия ВУ.",
@@ -97,6 +102,7 @@ class SummaryBuilder:
             f"Дата рождения: {driver.get('birth_date') or dash}",
             f"Телефон: {driver.get('phone') or dash}",
             f"Город: {driver.get('city') or dash}",
+            f"Условие работы: {self._employment_label(driver.get('employment_type')) or dash}",
         ]
         if driver.get("address"):
             lines.append(f"Адрес: {driver.get('address')}")
@@ -147,9 +153,10 @@ class SummaryBuilder:
         return "\n".join(lines)
 
     def _render_fields(self, fields: dict[str, str]) -> list[str]:
-        if not fields:
+        visible = [(key, value) for key, value in fields.items() if key not in self.HIDDEN_REPLY_FIELDS]
+        if not visible:
             return ["- ничего уверенного не распознал"]
-        return [f"- {self.LABELS.get(key, key)}: {value}" for key, value in fields.items()]
+        return [f"- {self.LABELS.get(key, key)}: {value}" for key, value in visible]
 
     def _render_missing(self, missing_fields: list[str]) -> list[str]:
         if not missing_fields:
@@ -163,3 +170,13 @@ class SummaryBuilder:
                 "unknown": "неизвестный документ",
             }.get(document_type, document_type),
         )
+
+    def _employment_label(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        normalized = str(value).strip().lower()
+        if normalized in {"самозанятый", "смз", "emp_smz"}:
+            return "СМЗ"
+        if normalized in {"штатный", "парковый", "парковый водитель", "emp_park"}:
+            return "парковый водитель"
+        return str(value)

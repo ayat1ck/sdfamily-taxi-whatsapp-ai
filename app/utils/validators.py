@@ -757,12 +757,19 @@ def normalize_employment_type(value: str) -> str:
         "с м з": "самозанятый",
         "самозан": "самозанятый",
         "самозанятый": "самозанятый",
+        "emp_smz": "самозанятый",
+        "emp_park": "штатный",
+        "парковый": "штатный",
+        "парковый водитель": "штатный",
+        "парк": "штатный",
         "shtatnyi": "штатный",
         "shtatniy": "штатный",
         "shtatnyy": "штатный",
         "shtatny": "штатный",
         "staff": "штатный",
         "employee": "штатный",
+        "park employee": "штатный",
+        "park_employee": "штатный",
         "самозанятый": "самозанятый",
         "самозанятый водитель": "самозанятый",
         "samozanyatyi": "самозанятый",
@@ -776,12 +783,27 @@ def normalize_employment_type(value: str) -> str:
     return mapping.get(normalized, value.strip())
 
 
+# Default passenger tariffs enabled for newly registered cars when none are set.
+DEFAULT_YANDEX_CAR_CATEGORIES = (
+    "econom",
+    "comfort",
+    "comfort_plus",
+    "business",
+    "express",
+    "intercity",
+)
+
 SERVICE_CLASS_ALIASES = {
     "econom": "econom",
     "economy": "econom",
     "ekonom": "econom",
     "comfort": "comfort",
     "komfort": "comfort",
+    "comfort plus": "comfort_plus",
+    "comfort_plus": "comfort_plus",
+    "komfort plus": "comfort_plus",
+    "business": "business",
+    "biznes": "business",
     "express": "express",
     "ekspress": "express",
     "intercity": "intercity",

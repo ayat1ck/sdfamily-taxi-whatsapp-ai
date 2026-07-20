@@ -15,6 +15,7 @@ class MissingFieldsCalculator:
         "driver_license_issue_date",
         "driver_license_expires_at",
         "driving_experience_since",
+        "employment_type",
     )
     VEHICLE_FIELDS = (
         "brand",

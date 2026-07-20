@@ -618,6 +618,7 @@ class DialogV2Tests(unittest.TestCase):
                 "driver_license_issue_date": "2023-05-12",
                 "driver_license_expires_at": "2033-05-11",
                 "city": "Астана",
+                "employment_type": "самозанятый",
             },
             "vehicle": {
                 "brand": "Lada",

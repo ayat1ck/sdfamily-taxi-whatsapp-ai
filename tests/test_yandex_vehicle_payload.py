@@ -80,3 +80,34 @@ def test_explicit_body_number_setting_overrides_vin() -> None:
     specs = vehicle["vehicle_specifications"]
     assert specs["vin"] == "XTA217030E0458846"
     assert specs["body_number"] == "BODYONLY123"
+
+
+def test_default_categories_include_all_passenger_tariffs() -> None:
+    client = YandexFleetClient()
+    with patch.object(
+        client,
+        "settings",
+        _settings(yandex_car_category="econom,comfort,comfort_plus,business,express,intercity"),
+    ), patch.object(client, "_normalize_vehicle_color", side_effect=lambda value: value):
+        vehicle = client._build_vehicle_payload(_payload(service_class=None))
+
+    assert vehicle["park_profile"]["categories"] == [
+        "econom",
+        "comfort",
+        "comfort_plus",
+        "business",
+        "express",
+        "intercity",
+    ]
+
+
+def test_payload_service_class_overrides_default_categories() -> None:
+    client = YandexFleetClient()
+    with patch.object(
+        client,
+        "settings",
+        _settings(yandex_car_category="econom,comfort"),
+    ), patch.object(client, "_normalize_vehicle_color", side_effect=lambda value: value):
+        vehicle = client._build_vehicle_payload(_payload(service_class="econom"))
+
+    assert vehicle["park_profile"]["categories"] == ["econom"]

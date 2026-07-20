@@ -355,7 +355,7 @@ class YandexFleetClient:
         }
         categories = split_service_class_values(payload.service_class or "")
         if not categories and self.settings.yandex_car_category:
-            categories = [self.settings.yandex_car_category]
+            categories = split_service_class_values(self.settings.yandex_car_category)
         if categories:
             park_profile["categories"] = categories
 
@@ -467,12 +467,18 @@ class YandexFleetClient:
         normalized = (value or "").strip().lower()
         mapping = {
             "штатный": "park_employee",
+            "парковый": "park_employee",
+            "парковый водитель": "park_employee",
+            "emp_park": "park_employee",
             "shtatnyi": "park_employee",
             "shtatniy": "park_employee",
             "shtatnyy": "park_employee",
             "staff": "park_employee",
             "employee": "park_employee",
+            "park_employee": "park_employee",
             "самозанятый": "selfemployed",
+            "смз": "selfemployed",
+            "emp_smz": "selfemployed",
             "samozanyatyi": "selfemployed",
             "samozanyatiy": "selfemployed",
             "self employed": "selfemployed",

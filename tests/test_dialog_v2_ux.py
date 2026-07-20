@@ -89,6 +89,30 @@ class DialogV2UxHelpersTests(unittest.TestCase):
         self.assertIn("техпаспорт", text.lower())
         self.assertNotIn("удостоверения личности", text.lower())
 
+    def test_document_reply_hides_split_name_parts(self):
+        builder = SummaryBuilder()
+        draft = {
+            "documents": {"driver_license": {"received": True}, "vehicle_registration_doc": None},
+            "missing_fields": ["vehicle_registration_doc"],
+        }
+        text = builder.build_document_reply(
+            "driver_license",
+            {
+                "full_name": "БЕКСУЛТАНОВ МИРАС ҚҰРМАНҒАЗЫҰЛЫ",
+                "last_name": "БЕКСУЛТАНОВ",
+                "first_name": "МИРАС",
+                "middle_name": "ҚҰРМАНҒАЗЫҰЛЫ",
+                "iin": "970429300638",
+            },
+            draft["missing_fields"],
+            draft,
+        )
+        self.assertIn("ФИО: БЕКСУЛТАНОВ МИРАС ҚҰРМАНҒАЗЫҰЛЫ", text)
+        self.assertIn("ИИН: 970429300638", text)
+        self.assertNotIn("last_name", text)
+        self.assertNotIn("first_name", text)
+        self.assertNotIn("middle_name", text)
+
     def test_confirm_helpers_and_buttons(self):
         self.assertTrue(is_confirm_choice("confirm"))
         self.assertTrue(is_confirm_choice("Подтверждаю"))

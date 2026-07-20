@@ -15,10 +15,12 @@ from app.dialog_v2.summary_builder import SummaryBuilder
 from app.dialog_v2.ui import (
     CONFIRM_BUTTONS,
     DOCUMENT_TYPE_LIST,
+    EMPLOYMENT_TYPE_BUTTONS,
     REGISTRATION_EDIT_LIST,
     buttons_reply,
     is_confirm_choice,
     is_edit_choice,
+    is_employment_type_choice,
     is_manager_choice,
     list_reply,
 )
@@ -27,11 +29,17 @@ from app.documents.extraction import DocumentExtractionService, normalize_extrac
 from app.documents.service import upsert_document
 from app.messages.service import create_message
 from app.utils.text import repair_mojibake
-from app.utils.validators import normalize_text_token
+from app.utils.validators import normalize_employment_type, normalize_text_token
 from app.whatsapp.media import WhatsAppMediaClient
 
 
 DOCUMENT_OPTIONS_REPLY = "Получил файл, но не уверен, что это за документ.\nВыберите тип:"
+
+EMPLOYMENT_PROMPT = (
+    "Выберите условие работы:\n"
+    "• СМЗ — самозанятый\n"
+    "• Парковый — водитель парка"
+)
 
 DOCUMENT_PROMPT = (
     "Для регистрации отправьте документы в любом порядке:\n"
@@ -309,9 +317,11 @@ class RegistrationFlow:
             metadata={"intent": "edit_menu", "pending_action": "choose_edit_field"},
         )
 
-    def _post_document_reply(self, document_type: str, extracted_fields: dict[str, str], missing_fields: list[str], draft: dict) -> StructuredReply:
+    def _post_document_reply(self, document_type: str, extracted_fields: dict[str, str], missing_fields: list[str], draft: dict, driver=None) -> StructuredReply:
         text = self._document_reply(document_type, extracted_fields, missing_fields, draft)
         if missing_fields:
+            if driver is not None and self._next_field_is_employment(draft, missing_fields):
+                return self._employment_menu_reply(driver, draft, prefix=text)
             return StructuredReply(
                 text=text,
                 next_flow=DialogV2State.REGISTRATION_MISSING_FIELDS,
@@ -326,6 +336,76 @@ class RegistrationFlow:
                 },
             )
         return self._confirmation_reply(draft, prefix=text)
+
+    def _next_field_is_employment(self, draft: dict, missing_fields: list[str] | None = None) -> bool:
+        missing = missing_fields if missing_fields is not None else list(draft.get("missing_fields") or [])
+        actionable = [field for field in missing if field not in SummaryBuilder.DOCUMENTS_ORDER]
+        return bool(actionable) and actionable[0] == "employment_type"
+
+    def _employment_menu_reply(self, driver, draft: dict, *, prefix: str | None = None) -> StructuredReply:
+        draft["pending_action"] = "choose_employment_type"
+        _store_draft(driver, draft)
+        context = deepcopy(driver.support_context_json or {})
+        context["pending_menu"] = "employment_type"
+        driver.support_context_json = context
+        flag_modified(driver, "support_context_json")
+        text = EMPLOYMENT_PROMPT
+        if prefix:
+            text = f"{prefix}\n\n{text}"
+        return buttons_reply(
+            text,
+            EMPLOYMENT_TYPE_BUTTONS,
+            next_flow=DialogV2State.REGISTRATION_MISSING_FIELDS,
+            flow_state=DialogV2State.REGISTRATION_MISSING_FIELDS,
+            metadata={"intent": "employment_type", "pending_action": "choose_employment_type"},
+        )
+
+    def handle_employment_choice(self, db, driver, application, message) -> StructuredReply:
+        text = repair_mojibake((message.text or "").strip())
+        draft = _ensure_registration_context(driver)
+        mapped = {
+            "emp_smz": "самозанятый",
+            "1": "самозанятый",
+            "смз": "самозанятый",
+            "самозанятый": "самозанятый",
+            "emp_park": "штатный",
+            "2": "штатный",
+            "парковый": "штатный",
+            "парковый водитель": "штатный",
+            "штатный": "штатный",
+        }
+        normalized = _normalize_text(text)
+        # Bare 1/2 only when the employment menu is pending.
+        if normalized in {"1", "2"} and draft.get("pending_action") != "choose_employment_type":
+            return self._employment_menu_reply(driver, draft)
+        employment = mapped.get(normalized) or normalize_employment_type(text)
+        if employment not in {"самозанятый", "штатный"}:
+            return self._employment_menu_reply(driver, draft)
+
+        draft.setdefault("driver", {})["employment_type"] = employment
+        draft["pending_action"] = None
+        context = deepcopy(driver.support_context_json or {})
+        context.pop("pending_menu", None)
+        driver.support_context_json = context
+        flag_modified(driver, "support_context_json")
+        missing = self.missing.calculate(draft)
+        _store_draft(driver, draft)
+        if missing:
+            driver.state = DialogV2State.REGISTRATION_MISSING_FIELDS
+            return StructuredReply(
+                text=self.summary.build_missing_text(missing, draft),
+                next_flow=DialogV2State.REGISTRATION_MISSING_FIELDS,
+                flow_state=DialogV2State.REGISTRATION_MISSING_FIELDS,
+                metadata={
+                    "intent": "employment_type",
+                    "employment_type": employment,
+                    "missing_fields": missing,
+                    "is_registration_complete": False,
+                    "ready_for_yandex": False,
+                },
+            )
+        driver.state = DialogV2State.REGISTRATION_CONFIRMATION
+        return self._confirmation_reply(draft, prefix=f"Условие работы: {self.summary._employment_label(employment)}.")
 
     def start(self, db, driver, application) -> StructuredReply:
         draft = _ensure_registration_context(driver)
@@ -387,7 +467,7 @@ class RegistrationFlow:
                 extraction=extraction,
             )
             driver.state = DialogV2State.REGISTRATION_MISSING_FIELDS if missing_fields else DialogV2State.REGISTRATION_CONFIRMATION
-            reply = self._post_document_reply(resolved_type, extracted_fields, missing_fields, draft)
+            reply = self._post_document_reply(resolved_type, extracted_fields, missing_fields, draft, driver=driver)
             self.bus.emit(db, driver, "summary_shown" if not missing_fields else "draft_updated", {"missing_fields": missing_fields})
             return reply
 
@@ -401,7 +481,7 @@ class RegistrationFlow:
         draft["pending_action"] = None
         resolved_type, extracted_fields, missing_fields = self._apply_extraction(db, driver, message, draft, selected_type)
         driver.state = DialogV2State.REGISTRATION_MISSING_FIELDS if missing_fields else DialogV2State.REGISTRATION_CONFIRMATION
-        return self._post_document_reply(resolved_type, extracted_fields, missing_fields, draft)
+        return self._post_document_reply(resolved_type, extracted_fields, missing_fields, draft, driver=driver)
 
     def handle_text(self, db, driver, application, message) -> StructuredReply:
         text = repair_mojibake((message.text or "").strip())
@@ -445,6 +525,11 @@ class RegistrationFlow:
 
             return ManagerHandoffFlow().handle(db, driver, application, message, reason="human_requested")
 
+        if draft.get("pending_action") == "choose_employment_type" or is_employment_type_choice(text):
+            current_missing = self.missing.calculate(draft)
+            if "employment_type" in current_missing or draft.get("pending_action") == "choose_employment_type":
+                return self.handle_employment_choice(db, driver, application, message)
+
         if is_edit_choice(text) and driver.state in {
             DialogV2State.REGISTRATION_CONFIRMATION,
             DialogV2State.REGISTRATION_MISSING_FIELDS,
@@ -473,6 +558,8 @@ class RegistrationFlow:
             missing = draft["missing_fields"]
             if missing:
                 driver.state = DialogV2State.REGISTRATION_MISSING_FIELDS
+                if self._next_field_is_employment(draft, missing):
+                    return self._employment_menu_reply(driver, draft)
                 return StructuredReply(
                     text=self.summary.build_missing_text(missing, draft),
                     next_flow=DialogV2State.REGISTRATION_MISSING_FIELDS,

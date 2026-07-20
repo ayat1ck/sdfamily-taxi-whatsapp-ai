@@ -75,6 +75,11 @@ MANAGER_TRIAGE_BUTTONS = [
     reply_button("mgr_human", "Менеджеру"),
 ]
 
+EMPLOYMENT_TYPE_BUTTONS = [
+    reply_button("emp_smz", "СМЗ"),
+    reply_button("emp_park", "Парковый"),
+]
+
 DOCUMENT_TYPE_LIST = [
     list_row("1", "ВУ", "Водительское удостоверение"),
     list_row("2", "Техпаспорт", "Техпаспорт / СТС авто"),
@@ -155,4 +160,17 @@ def is_manager_triage_choice(text: str) -> bool:
         "уже водитель",
         "помощь",
         "менеджеру",
+    }
+
+
+def is_employment_type_choice(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    return normalized in {
+        "emp_smz",
+        "emp_park",
+        "смз",
+        "самозанятый",
+        "парковый",
+        "парковый водитель",
+        "штатный",
     }

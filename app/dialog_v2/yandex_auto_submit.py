@@ -145,6 +145,14 @@ class DialogV2YandexAutoSubmit:
             if value:
                 setattr(vehicle, field, self._clean(value))
 
+        # Always enable the park's default tariff set unless the vehicle already has classes.
+        if not vehicle.service_class:
+            from app.utils.validators import normalize_service_class
+
+            default_categories = get_settings().yandex_car_category
+            if default_categories:
+                vehicle.service_class = normalize_service_class(default_categories)
+
         self._store_synced_draft(driver, draft)
         db.add(driver)
         db.add(vehicle)
