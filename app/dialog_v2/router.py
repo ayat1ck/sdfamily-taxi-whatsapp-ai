@@ -24,7 +24,7 @@ from app.dialog_v2.ui import MANAGER_TRIAGE_BUTTONS, buttons_reply
 from app.messages.service import create_message
 from app.whatsapp.parser import ParsedWhatsAppMessage
 
-PROFILE_MENU_CHOICES = {"1", "2", "3", "4", "5", "6", "7", "8", "9"}
+PROFILE_MENU_CHOICES = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
 EXISTING_MENU_CHOICES = {"1", "2", "3", "4", "5", "6"}
 
 # Message types the bot cannot extract content from.
@@ -142,6 +142,8 @@ class Router:
                 driver.support_context_json = context
                 flag_modified(driver, "support_context_json")
                 return None
+            return self.existing_driver.handle(db, driver, application, message)
+        if pending_menu == "existing_driver_lookup":
             return self.existing_driver.handle(db, driver, application, message)
         if pending_menu == "profile_update_menu":
             if text in PROFILE_MENU_CHOICES:

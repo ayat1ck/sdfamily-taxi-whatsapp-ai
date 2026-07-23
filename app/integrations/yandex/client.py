@@ -153,6 +153,25 @@ class YandexFleetClient:
             "yandex_vehicle_id": vehicle_id,
         }
 
+    def update_vehicle(self, vehicle_id: str, payload: YandexDriverPayload) -> dict[str, str]:
+        """Update an existing park vehicle (plate, STS, color, tariffs, brand/model, ...)."""
+        if not vehicle_id:
+            raise ValueError("Missing Yandex vehicle id for update")
+        self._validate_config()
+        headers = self._build_headers()
+        with httpx.Client(base_url=self.settings.yandex_api_base_url, timeout=self.settings.yandex_api_timeout_seconds) as client:
+            response = client.put(
+                "/v2/parks/vehicles/car",
+                headers=headers,
+                params={"vehicle_id": vehicle_id},
+                json=self._build_vehicle_payload(payload),
+            )
+            self._raise_for_status(response)
+        return {
+            "status": "updated_in_yandex",
+            "yandex_vehicle_id": vehicle_id,
+        }
+
     def build_submission_preview(self, payload: YandexDriverPayload) -> dict[str, object]:
         self._validate_config()
         return {

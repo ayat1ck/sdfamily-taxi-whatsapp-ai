@@ -110,6 +110,42 @@ class YandexSubmissionService:
         db.flush()
         return driver
 
+    def update_vehicle_in_yandex(self, db: Session, driver: Driver, application: Application) -> dict[str, str]:
+        """Push current local vehicle fields to an existing Yandex car."""
+        if not application.yandex_vehicle_id:
+            raise ValueError("missing_yandex_vehicle_id")
+        payload = map_driver_to_yandex(driver)
+        result = self.client.update_vehicle(application.yandex_vehicle_id, payload)
+        application.yandex_status = result["status"]
+        application.yandex_error = None
+        application.updated_at = datetime.utcnow()
+        db.add(application)
+        db.flush()
+        return result
+
+    def add_vehicle_and_bind(self, db: Session, driver: Driver, application: Application) -> dict[str, str]:
+        """Create a new car in the park and bind it to the existing driver profile."""
+        if not application.yandex_driver_id:
+            raise ValueError("missing_yandex_driver_id")
+        payload = map_driver_to_yandex(driver)
+        required = {
+            "car_brand": payload.car_brand,
+            "car_model": payload.car_model,
+            "car_year": payload.car_year,
+            "plate_number": payload.plate_number,
+        }
+        vehicle_errors = [f"missing:{key}" for key, value in required.items() if not value]
+        if vehicle_errors:
+            raise ValueError(self._format_validation_failure(vehicle_errors))
+        result = self.client.submit_vehicle_and_bind(payload, application.yandex_driver_id)
+        application.yandex_vehicle_id = result.get("yandex_vehicle_id") or application.yandex_vehicle_id
+        application.yandex_status = result["status"]
+        application.yandex_error = None
+        application.sent_to_yandex_at = datetime.utcnow()
+        db.add(application)
+        db.flush()
+        return result
+
     def validate_payload(self, payload) -> dict[str, list[str]]:
         errors: list[str] = []
         warnings: list[str] = []
