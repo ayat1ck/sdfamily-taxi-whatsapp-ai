@@ -146,10 +146,10 @@ class Router:
         if pending_menu == "profile_update_menu":
             if text in PROFILE_MENU_CHOICES:
                 return self.profile_update.handle(db, driver, application, message)
-            context.pop("pending_menu", None)
-            driver.support_context_json = context
-            flag_modified(driver, "support_context_json")
-            return None
+            # Free text while menu is open: keep collecting via profile flow instead of dropping to fallback.
+            return self.profile_update.handle(db, driver, application, message)
+        if pending_menu == "profile_update_value":
+            return self.profile_update.handle(db, driver, application, message)
         if pending_menu == "manager_triage":
             return self.manager.handle_triage_choice(db, driver, application, message)
         if pending_menu == "employment_type":
@@ -176,6 +176,13 @@ class Router:
         if global_reply is not None:
             self.fallback.reset_misses(driver)
             return DialogContext(flow=global_reply.flow or "global", stage=global_reply.state or driver.state, intent=global_reply.metadata.get("intent", "global"), structured_reply=global_reply)
+
+        # Profile-update value collection must win over document/registration routing.
+        pending_menu = (driver.support_context_json or {}).get("pending_menu")
+        if pending_menu == "profile_update_value":
+            self.fallback.reset_misses(driver)
+            reply = self.profile_update.handle(db, driver, application, message)
+            return DialogContext(flow="profile_update", stage=reply.state or "waiting_value", intent="profile_update", structured_reply=reply)
 
         if message.message_type in {"image", "document"}:
             self.fallback.reset_misses(driver)
